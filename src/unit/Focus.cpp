@@ -33,6 +33,17 @@
 // every world tick — when it returns null, we `Set(0)` which fires
 // the event. Cost is one hash-table lookup per tick while focus is
 // set; zero when no focus is active.
+//
+// Unit events for `focus` / `focustarget`: `Unit::TokenObserver` watches
+// the focus unit's descriptor fields so `UNIT_HEALTH` / `UNIT_AURA` / …
+// fire with `arg1 == "focus"` (see FocusFieldCb). `focustarget` gets the
+// same treatment via a second observer — but its GUID is the focus unit's
+// *current target*, which changes with no event to signal it (vanilla's
+// `UNIT_FIELD_TARGET`, field 10, has no event-table slot). So the WorldTick
+// watcher re-reads the focus's target each tick and re-points the
+// focustarget observer only when that identity changes; the focustarget
+// *events* still fire event-driven through the observer — only the
+// re-pointing is tick-gated (≤1 tick lag after the focus swaps targets).
 
 #include "Focus.h"
 
@@ -73,6 +84,23 @@ int __fastcall FocusFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
     return 1;
 }
 
+// GUID currently watched as `focustarget` (the focus unit's target), or 0.
+// Re-pointed by `OnWorldTick`; distinct from `g_focusGUID`.
+uint64_t g_focusTargetGUID = 0;
+
+// Same as `FocusFieldCb` but fires the `"focustarget"` token.
+int __fastcall FocusTargetFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
+                                  uint32_t guidLo, uint32_t guidHi,
+                                  const uint32_t * /*oldValue*/, void * /*userArg*/) {
+    if (guidLo != static_cast<uint32_t>(g_focusTargetGUID) ||
+        guidHi != static_cast<uint32_t>(g_focusTargetGUID >> 32))
+        return 1;
+    using Fire_t = void(__cdecl *)(int eventId, const char *fmt, ...);
+    reinterpret_cast<Fire_t>(static_cast<uintptr_t>(Offsets::FUN_FIRE_EVENT))(
+        static_cast<int>(fieldOffset >> 2), "%s", "focustarget");
+    return 1;
+}
+
 using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
 using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
                                               uint32_t guidLo, uint32_t guidHi,
@@ -92,15 +120,39 @@ uint64_t ResolveTokenGUID(const char *token) {
 // "leaves render distance → focus drops" behavior. Won't refocus
 // when the unit comes back, also matching modern.
 void OnWorldTick() {
-    if (g_focusGUID == 0)
-        return;
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
-    if (resolve(Offsets::OBJ_TYPE_UNIT, "Focus",
-                static_cast<uint32_t>(g_focusGUID),
-                static_cast<uint32_t>(g_focusGUID >> 32),
-                0x172) == nullptr)
-        Set(0);
+    // Resolve the focus object (this is also the despawn check) and, if it's
+    // alive, read its current target — that GUID is `focustarget`. Vanilla
+    // fires no event when a unit re-targets, so this once-per-tick identity
+    // read is the only way to notice the focus switching targets; the
+    // focustarget *events* still fire event-driven via the observer below.
+    uint64_t desiredFocusTarget = 0;
+    if (g_focusGUID != 0) {
+        auto resolve = reinterpret_cast<ResolveByGUID_t>(
+            static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
+        auto *focusObj = static_cast<const uint8_t *>(
+            resolve(Offsets::OBJ_TYPE_UNIT, "Focus",
+                    static_cast<uint32_t>(g_focusGUID),
+                    static_cast<uint32_t>(g_focusGUID >> 32), 0x172));
+        if (focusObj == nullptr) {
+            Set(0); // focus left the object table → drop focus
+        } else {
+            auto *fields = *reinterpret_cast<const uint8_t *const *>(
+                focusObj + Offsets::OFF_CGUNIT_OBJECT_FIELDS);
+            if (fields != nullptr)
+                desiredFocusTarget = *reinterpret_cast<const uint64_t *>(
+                    fields + Offsets::OFF_UNIT_FIELD_TARGET);
+        }
+    }
+
+    // Re-point the focustarget observer only when the target identity
+    // changes (focus swapped targets, focus cleared, or focus has no target).
+    if (desiredFocusTarget != g_focusTargetGUID) {
+        if (g_focusTargetGUID != 0)
+            TokenObserver::Unregister(g_focusTargetGUID, &FocusTargetFieldCb);
+        g_focusTargetGUID = desiredFocusTarget;
+        if (g_focusTargetGUID != 0)
+            TokenObserver::Register(g_focusTargetGUID, &FocusTargetFieldCb);
+    }
 }
 
 // `FocusUnit(unit)` — sets focus to whatever GUID `unit` currently
@@ -145,6 +197,12 @@ void Set(uint64_t guid) {
     // old unit already despawned (nodes died with it).
     if (g_focusGUID != 0)
         TokenObserver::Unregister(g_focusGUID, &FocusFieldCb);
+    // Focus changed → the old focustarget is stale; drop its observer now.
+    // WorldTick re-resolves and re-points to the new focus's target next tick.
+    if (g_focusTargetGUID != 0) {
+        TokenObserver::Unregister(g_focusTargetGUID, &FocusTargetFieldCb);
+        g_focusTargetGUID = 0;
+    }
     g_focusGUID = guid;
     if (guid != 0)
         TokenObserver::Register(guid, &FocusFieldCb);
