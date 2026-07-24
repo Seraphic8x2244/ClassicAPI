@@ -664,6 +664,25 @@ enum Offsets {
     // The live (new) value is NOT passed — read it from the object (the
     // engine's bag callback reads the invMgr GUID array).
 
+    // ---- Unit-event token observers (Unit::TokenObserver) ---------------
+    // The engine makes target/party/raid/pet/mouseover units fire per-token
+    // unit events (UNIT_HEALTH, UNIT_MANA, UNIT_AURA, …) by watching bank-UNIT
+    // descriptor fields: FUN_0051bbb0 loops event index i in
+    // [0, EVENT_NAME_UNIT_MAX); for each whose static name slot is non-null it
+    // registers a bank-3 observer on field i*4 (per-index size below) with
+    // callback FUN_0051bd50 → the broadcast FUN_00515e50(guid, i), which fires
+    // event i once per token referencing the guid. The FIELD INDEX IS THE EVENT
+    // ID (health field +0x40 → event 16 = UNIT_HEALTH). Unit::TokenObserver
+    // replicates that exact loop with a caller's own callback to make synthetic
+    // tokens (focus, nameplateN) first-class; the registrar always appends a
+    // fresh node (FUN_00467f00, no dedup), so ours coexists with the engine's —
+    // a unit that is also the target fires both "target" and our token. The
+    // broadcast always fires with format "%s" + the token (DAT_0082e280).
+    //   Per-index watched size (FUN_0051bbb0's switch): i∈{0,2,4,10}=8,
+    //   0x29=0xD8 (UNIT_FIELD_AURA), 0x6B=0x30, 0xA7/0xAE=0x1C, else 4.
+    VAR_EVENT_NAME_TABLE_STATIC = 0x00BE1198, // char*[] boot name array; slot i (base+i*4) non-null ⇒ real event i
+    EVENT_NAME_UNIT_MAX = 0xB6,               // FUN_0051bbb0's loop bound
+
     // The engine's inventory observer setup — registers the bag-slot
     // GUID-field observers above, once per enter-world (sole caller is the
     // enter-world initializer FUN_004908C0, latched by DAT_00B4B424).
@@ -679,6 +698,7 @@ enum Offsets {
     OFF_DESC_PLAYER_EQUIP_FIRST = 0x4A8,
     DESC_PLAYER_EQUIP_SLOTS = 19,
     DESC_OBSERVER_BANK_PLAYER = 4,
+    DESC_OBSERVER_BANK_UNIT = 3, // CGUnit descriptor bank (FUN_0051bbb0's watch loop)
 
     // ITEM_FIELD_DURABILITY, ITEM-bank-relative: descriptor-absolute
     // +0xA0 (field index 0x28, which counts the 6 OBJECT fields) minus

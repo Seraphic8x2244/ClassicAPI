@@ -40,6 +40,7 @@
 #include "Offsets.h"
 #include "event/Custom.h"
 #include "tick/WorldTick.h"
+#include "unit/TokenObserver.h"
 
 #include <cstdint>
 
@@ -51,6 +52,26 @@ constexpr const char *kEventName = "PLAYER_FOCUS_CHANGED";
 const Event::Custom::AutoReserve _reserve{kEventName};
 
 uint64_t g_focusGUID = 0;
+
+// Descriptor-field observer callback — fires the changed field's unit event
+// with the `"focus"` token, making `arg1 == "focus"` work for `UNIT_HEALTH`,
+// `UNIT_MANA`, `UNIT_AURA`, … exactly like a native token. Registered per
+// focus unit via `Unit::TokenObserver` (mirrors the engine's own watch of
+// target/party/raid units). The event id is the field index (`fieldOffset >>
+// 2`); the engine fires every unit event with format "%s" + the token, so we
+// match that. Guarded on the live focus GUID so an in-flight field change that
+// races an unregister can't fire a stale token.
+int __fastcall FocusFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
+                            uint32_t guidLo, uint32_t guidHi,
+                            const uint32_t * /*oldValue*/, void * /*userArg*/) {
+    if (guidLo != static_cast<uint32_t>(g_focusGUID) ||
+        guidHi != static_cast<uint32_t>(g_focusGUID >> 32))
+        return 1;
+    using Fire_t = void(__cdecl *)(int eventId, const char *fmt, ...);
+    reinterpret_cast<Fire_t>(static_cast<uintptr_t>(Offsets::FUN_FIRE_EVENT))(
+        static_cast<int>(fieldOffset >> 2), "%s", "focus");
+    return 1;
+}
 
 using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
 using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
@@ -118,7 +139,15 @@ uint64_t Get() { return g_focusGUID; }
 void Set(uint64_t guid) {
     if (guid == g_focusGUID)
         return; // no-op: same target → no event fire (matches 3.3.5)
+    // Stop watching the old focus, start watching the new one, so unit events
+    // (UNIT_HEALTH, …) fire with "focus" for whatever is focused — even a unit
+    // the engine isn't otherwise watching. Unregister is a safe no-op if the
+    // old unit already despawned (nodes died with it).
+    if (g_focusGUID != 0)
+        TokenObserver::Unregister(g_focusGUID, &FocusFieldCb);
     g_focusGUID = guid;
+    if (guid != 0)
+        TokenObserver::Register(guid, &FocusFieldCb);
     const int slot = Event::Custom::Lookup(kEventName);
     if (slot >= 0)
         Event::Custom::Fire(slot, "");

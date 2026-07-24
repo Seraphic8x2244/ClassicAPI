@@ -3432,6 +3432,17 @@ so addons get the engine semantics they expect.
 Returns `nil` cleanly when no focus is set; doesn't raise the
 "Unknown unit name" error.
 
+**Unit events fire for `"focus"`.** `UNIT_HEALTH`, `UNIT_MANA`,
+`UNIT_AURA`, `UNIT_LEVEL`, `UNIT_MODEL_CHANGED`, … fire with
+`arg1 == "focus"` whenever the focused unit's corresponding descriptor
+field changes — even when it isn't your target, so a focus frame keeps
+updating while you fight something else. Backed by `Unit::TokenObserver`,
+which registers the engine's own unit-event descriptor-field observers
+for the focus unit (the exact watch the engine gives target/party/raid).
+A unit that is simultaneously your target and focus fires both
+`"target"` and `"focus"`. (Vanilla `OnEvent` handlers read the `arg1`
+global, not a function parameter.)
+
 [`UnitTokenFromGUID`](#unittokenfromguidguid) scans `"focus"` right
 after `"target"` (matching retail order), so a focused unit's GUID
 reverse-resolves to `"focus"` only if it isn't already addressable
@@ -8305,6 +8316,15 @@ own walker either, so they don't compose.
 
 Out-of-range indices return `nil` cleanly without raising "Unknown
 unit name" — `UnitExists("nameplate99")` just returns `false`.
+
+**Unit events fire for `"nameplateN"`.** Like party/raid tokens,
+`UNIT_HEALTH` / `UNIT_AURA` / `UNIT_LEVEL` / … fire with
+`arg1 == "nameplateN"` when a nameplated unit's descriptor field changes
+(vanilla only watched its own target/party/raid units). Backed by
+`Unit::TokenObserver` — observers are registered per plate on
+`NAME_PLATE_UNIT_ADDED` and torn down on `_REMOVED`; the changed GUID is
+resolved to its *current* index at fire time, since indices shift as
+plates vanish. Note the per-plate observer cost in very large scenes.
 
 **Implementation note.** We hook `FUN_TOKEN_TO_GUID` (the central
 token→GUID resolver) so the entire `Script_Unit*` surface gains the

@@ -41,6 +41,7 @@
 #include "event/Custom.h"
 #include "nameplate/Walk.h"
 #include "tick/WorldTick.h"
+#include "unit/TokenObserver.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -112,6 +113,32 @@ void FireWithString(const char *eventName, const char *value) {
 const char *FormatNamePlateToken(char *buf, size_t bufSize, int oneBasedIndex) {
     std::snprintf(buf, bufSize, "nameplate%d", oneBasedIndex);
     return buf;
+}
+
+// Descriptor-field observer callback — makes unit events (UNIT_HEALTH,
+// UNIT_AURA, …) fire with the `"nameplateN"` token, so a nameplated unit is a
+// first-class unit-event source exactly like a party member. Registered per
+// nameplate GUID via `Unit::TokenObserver` on UNIT_ADDED, unregistered on
+// UNIT_REMOVED. Unlike focus (a fixed token), the index is volatile — plates
+// shift as others vanish — so we reverse-look-up the changed GUID's *current*
+// slot at fire time. The event id is the field index (`fieldOffset >> 2`); the
+// engine fires every unit event as "%s" + token, so we match. A GUID no longer
+// in the ordered list (removal raced this field change) simply drops the fire.
+int __fastcall NamePlateFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
+                                uint32_t guidLo, uint32_t guidHi,
+                                const uint32_t * /*oldValue*/, void * /*userArg*/) {
+    const uint64_t guid =
+        (static_cast<uint64_t>(guidHi) << 32) | static_cast<uint64_t>(guidLo);
+    auto it = std::find(g_orderedGUIDs.begin(), g_orderedGUIDs.end(), guid);
+    if (it == g_orderedGUIDs.end())
+        return 1;
+    const int oneBased = static_cast<int>(it - g_orderedGUIDs.begin()) + 1;
+    char tokenBuf[24];
+    FormatNamePlateToken(tokenBuf, sizeof tokenBuf, oneBased);
+    using Fire_t = void(__cdecl *)(int eventId, const char *fmt, ...);
+    reinterpret_cast<Fire_t>(static_cast<uintptr_t>(Offsets::FUN_FIRE_EVENT))(
+        static_cast<int>(fieldOffset >> 2), "%s", tokenBuf);
+    return 1;
 }
 
 // Fire `eventName` with the nameplate `Frame` set as `_G.arg1`.
@@ -186,6 +213,10 @@ void OnWorldTick() {
             FireWithFrame(kEventCreated, const_cast<void *>(kv.second));
         if (g_lastTickPlates.find(kv.first) == g_lastTickPlates.end()) {
             g_orderedGUIDs.push_back(kv.first);
+            // Watch this unit's fields so UNIT_HEALTH/UNIT_AURA/… fire with
+            // its "nameplateN" token (the engine only watches its own
+            // target/party/raid tokens, not nameplates).
+            Unit::TokenObserver::Register(kv.first, &NamePlateFieldCb);
             char tokenBuf[24];
             FireWithString(kEventUnitAdded,
                 FormatNamePlateToken(tokenBuf, sizeof tokenBuf,
@@ -209,6 +240,7 @@ void OnWorldTick() {
             char tokenBuf[24];
             FireWithString(kEventUnitRemoved,
                 FormatNamePlateToken(tokenBuf, sizeof tokenBuf, oneBased));
+            Unit::TokenObserver::Unregister(kv.first, &NamePlateFieldCb);
             g_orderedGUIDs.erase(it);
         }
     }
@@ -235,6 +267,12 @@ static const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 void PrepareForReload() {
     g_seenPlates.clear();
     g_lastTickPlates.clear();
+    // Objects survive a /reload, so their observer nodes do too. The first
+    // post-reload tick re-fires ADDED and re-registers, which would stack a
+    // second observer per field (the registrar never dedups) → double events.
+    // Tear ours down here so re-registration starts clean.
+    for (uint64_t guid : g_orderedGUIDs)
+        Unit::TokenObserver::Unregister(guid, &NamePlateFieldCb);
     g_orderedGUIDs.clear();
 }
 
