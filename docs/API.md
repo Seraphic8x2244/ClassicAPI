@@ -169,6 +169,7 @@ build instructions.
   - [`OnTooltipSetItem` script](#ontooltipsetitem-script)
   - [`GameTooltip:SetItemByGUID(itemGUID)`](#gametooltipsetitembyguiditemguid)
   - [`GameTooltip:SetEquipmentSet(name)`](#gametooltipsetequipmentsetname)
+  - [`GameTooltip:SetTotem(slot)`](#gametooltipsettotemslot)
   - [`GameTooltip:GetItem()`](#gametooltipgetitem)
   - [`GameTooltip:GetSpell()`](#gametooltipgetspell)
   - [`GameTooltip:HasItem()` / `GameTooltip:HasSpell()`](#gametooltiphasitem--gametooltiphasspell)
@@ -4249,6 +4250,41 @@ it we couldn't recover the name for missing items. Sets saved
 before the itemID field was added load fine but render their
 missing slots with the count summary `%d missing` instead of named
 lines; re-saving a set repopulates itemIDs.
+
+### `GameTooltip:SetTotem(slot)`
+
+Fills the tooltip with the shaman totem currently active in `slot`
+(`1` Fire, `2` Earth, `3` Water, `4` Air). A TBC (2.4.0) tooltip method
+backported to 1.12; mirrors retail's `Script_GameTooltip_SetTotem`.
+
+```lua
+GameTooltip:SetOwner(TotemButton, "ANCHOR_BOTTOMRIGHT")
+GameTooltip:SetTotem(1)   -- Fire slot; shows itself, no :Show() needed
+```
+
+```
+Searing Totem              (name, yellow)
+45 Sec                     (time remaining, white)
+```
+
+Two lines, matching retail exactly: the totem name (`NORMAL_FONT_COLOR`)
+and the time remaining (white). Built natively with the engine's own
+per-tooltip clear and raw add-line — the same path `SetSpellByID` and
+`SetHyperlinkCompareItem` use — and **shows itself** at the end, so no
+trailing `:Show()` is required (retail's `TotemFrame.xml` OnEnter calls
+`SetOwner` then `SetTotem` with no show, and the C method shows). Set the
+owner/anchor before the call.
+
+Silent no-op when the slot has no active totem, so a totem-button
+`OnEnter` can call it unconditionally.
+
+**Localization.** The time line mirrors retail's `SecondsToTimeAbbrev`
+(raw seconds under a minute, minutes rounded up above) and formats
+through the FrameXML GlobalStrings `SPELL_TIME_REMAINING_SEC` /
+`SPELL_TIME_REMAINING_MIN` (English `%d Sec` / `%d Min` fallbacks for
+servers stripped of those keys). The totem name comes from the summon
+spell's localized `Spell.dbc` name. Slot data is the same tracker behind
+[`GetTotemInfo`](#gettoteminfoslot).
 
 ## Globals
 
