@@ -37,11 +37,17 @@ void PushNamePlateFrame(void *L, void *nameplate);
 namespace NamePlate::Events {
 
 // Returns the GUID currently bound to `nameplateN` (1-based, matching
-// the modern Lua token form). `0` means no nameplate at that index.
-// Backed by the per-tick UNIT_ADDED / UNIT_REMOVED diff in
-// `Events.cpp` — order is creation-order (append on ADDED, erase on
-// REMOVED), stable within a frame.
+// the modern Lua token form). `0` means the slot is out of range OR
+// currently free. Backed by the retail-exact slot assignment in
+// `Events.cpp`: a plate keeps its slot for its lifetime and freed slots
+// are reused, so the slot array is SPARSE (gaps read back as 0).
 uint64_t GetGUIDByIndex(int oneBased);
+
+// Highest slot index in use (1-based). Callers that iterate every plate
+// must loop `1..GetSlotCount()` and skip indices where `GetGUIDByIndex`
+// returns 0 — they must NOT stop at the first gap, since the array is
+// sparse.
+int GetSlotCount();
 
 // Clears the per-tick diff state (seen pointers, last tick's
 // snapshot, ordered GUID list) so the post-`/reload` tick refires

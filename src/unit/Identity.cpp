@@ -289,16 +289,14 @@ const char *TokenFromGUID(uint64_t target, char *buf, size_t bufSize) {
         if (GuidForToken(buf) == target) return buf;
     }
 
-    // Visible nameplates. The ordered list (see
-    // `NamePlate::Events::g_orderedGUIDs`) is dense — `GetGUIDByIndex`
-    // returns 0 once we step past the populated count, terminating
-    // the loop. Skips the token-resolver hook + SStrCmpI cost per
-    // index by comparing GUIDs directly.
-    for (int i = 1; ; ++i) {
-        const uint64_t plateGuid = NamePlate::Events::GetGUIDByIndex(i);
-        if (plateGuid == 0)
-            break;
-        if (plateGuid == target) {
+    // Visible nameplates. The slot array is SPARSE (retail-exact slot
+    // assignment — freed middle slots stay as gaps until reused), so we
+    // scan `1..GetSlotCount()` and skip empties rather than stopping at
+    // the first 0. Compares GUIDs directly, skipping the token-resolver
+    // hook + SStrCmpI cost per index.
+    const int plateCount = NamePlate::Events::GetSlotCount();
+    for (int i = 1; i <= plateCount; ++i) {
+        if (NamePlate::Events::GetGUIDByIndex(i) == target) {
             std::snprintf(buf, bufSize, "nameplate%d", i);
             return buf;
         }

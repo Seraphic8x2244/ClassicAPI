@@ -30,11 +30,16 @@
 //   (dispatcher leaves `_G.arg<N>` alone when no codes are parsed),
 //   restore.
 // - `NAME_PLATE_UNIT_ADDED` / `_REMOVED` — `arg1` is the
-//   `"nameplateN"` unit token (formatted from the plate's index in
-//   `g_orderedGUIDs` at fire time). The token resolves to the unit
-//   via the `nameplateN`-aware token resolver in `unit/TokenExtensions.cpp`
-//   — addons can pass it straight to `UnitName`, `UnitGUID`, etc.,
-//   or to `GetNamePlateForUnit` for the frame.
+//   `"nameplateN"` unit token (`N` = the plate's assigned slot). The token
+//   resolves to the unit via the `nameplateN`-aware token resolver in
+//   `unit/TokenExtensions.cpp` — addons can pass it straight to `UnitName`,
+//   `UnitGUID`, etc., or to `GetNamePlateForUnit` for the frame.
+//
+// Slot assignment (retail-exact): a plate keeps its slot for its whole
+// lifetime, so surviving plates are NEVER renumbered when another is removed
+// — a removal frees the slot and the next new plate reuses the lowest free
+// one. `g_slots` is therefore a sparse array (freed middle slots read back as
+// the empty GUID 0 until reused), not a compacting list.
 
 #include "Game.h"
 #include "Offsets.h"
@@ -85,13 +90,27 @@ std::unordered_map<uint64_t, const void *> g_currentTickPlates;
 // then tops out as pool reuse covers all subsequent shows.
 std::unordered_set<const void *> g_seenPlates;
 
-// Ordered list of currently-visible nameplate GUIDs, in
-// creation-order. Append on UNIT_ADDED, erase on UNIT_REMOVED. Backs
-// the `nameplateN` unit-token resolver in `unit/TokenExtensions.cpp`. Order
-// matches modern WoW semantics: stable for the lifetime of each
-// plate, gaps when middle plates vanish (until the next REMOVED
-// shifts later entries down).
-std::vector<uint64_t> g_orderedGUIDs;
+// Nameplate token slots: slot `i` (0-based) holds the GUID assigned to
+// `nameplate(i+1)`, or 0 when free. Retail-exact slot assignment — a plate
+// keeps its slot for its whole lifetime (survivors are never renumbered),
+// UNIT_REMOVED frees the slot (sets 0), and a new plate reuses the lowest
+// free slot. Sparse: freed middle slots stay as gaps until reused. Backs the
+// `nameplateN` unit-token resolver in `unit/TokenExtensions.cpp`.
+std::vector<uint64_t> g_slots;
+
+// Assign `guid` the lowest free slot, reusing a vacated one when present and
+// growing the array only when every slot is occupied. Returns the 0-based
+// slot. Never shifts an existing entry.
+int AssignSlot(uint64_t guid) {
+    for (size_t i = 0; i < g_slots.size(); ++i) {
+        if (g_slots[i] == 0) {
+            g_slots[i] = guid;
+            return static_cast<int>(i);
+        }
+    }
+    g_slots.push_back(guid);
+    return static_cast<int>(g_slots.size() - 1);
+}
 
 // Fire `eventName` with a pre-formatted string as `arg1`. The engine
 // dispatcher's `%s` format code pushes the C string into `_G.arg1`
@@ -119,20 +138,20 @@ const char *FormatNamePlateToken(char *buf, size_t bufSize, int oneBasedIndex) {
 // UNIT_AURA, …) fire with the `"nameplateN"` token, so a nameplated unit is a
 // first-class unit-event source exactly like a party member. Registered per
 // nameplate GUID via `Unit::TokenObserver` on UNIT_ADDED, unregistered on
-// UNIT_REMOVED. Unlike focus (a fixed token), the index is volatile — plates
-// shift as others vanish — so we reverse-look-up the changed GUID's *current*
-// slot at fire time. The event id is the field index (`fieldOffset >> 2`); the
-// engine fires every unit event as "%s" + token, so we match. A GUID no longer
-// in the ordered list (removal raced this field change) simply drops the fire.
+// UNIT_REMOVED. We reverse-look-up the changed GUID's slot at fire time
+// (cheap; the array is small) so the token reflects its current assignment.
+// The event id is the field index (`fieldOffset >> 2`); the engine fires every
+// unit event as "%s" + token, so we match. A GUID no longer in any slot
+// (removal raced this field change) simply drops the fire.
 int __fastcall NamePlateFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
                                 uint32_t guidLo, uint32_t guidHi,
                                 const uint32_t * /*oldValue*/, void * /*userArg*/) {
     const uint64_t guid =
         (static_cast<uint64_t>(guidHi) << 32) | static_cast<uint64_t>(guidLo);
-    auto it = std::find(g_orderedGUIDs.begin(), g_orderedGUIDs.end(), guid);
-    if (it == g_orderedGUIDs.end())
+    auto it = std::find(g_slots.begin(), g_slots.end(), guid);
+    if (it == g_slots.end())
         return 1;
-    const int oneBased = static_cast<int>(it - g_orderedGUIDs.begin()) + 1;
+    const int oneBased = static_cast<int>(it - g_slots.begin()) + 1;
     char tokenBuf[24];
     FormatNamePlateToken(tokenBuf, sizeof tokenBuf, oneBased);
     using Fire_t = void(__cdecl *)(int eventId, const char *fmt, ...);
@@ -205,43 +224,42 @@ void OnWorldTick() {
 
     // Fire CREATED (with the Frame as arg1) for never-before-seen
     // frame pointers; ADDED (with `"nameplateN"` token as arg1) for
-    // GUIDs not in last tick's snapshot. New entries are appended to
-    // the ordered list *before* firing so the token resolves to the
-    // newly-added plate during the event handler.
+    // GUIDs not in last tick's snapshot. The slot is assigned *before*
+    // firing so the token resolves to the newly-added plate during the
+    // event handler.
     for (const auto &kv : g_currentTickPlates) {
         if (g_seenPlates.insert(kv.second).second)
             FireWithFrame(kEventCreated, const_cast<void *>(kv.second));
         if (g_lastTickPlates.find(kv.first) == g_lastTickPlates.end()) {
-            g_orderedGUIDs.push_back(kv.first);
+            const int slot = AssignSlot(kv.first);
             // Watch this unit's fields so UNIT_HEALTH/UNIT_AURA/… fire with
             // its "nameplateN" token (the engine only watches its own
             // target/party/raid tokens, not nameplates).
             Unit::TokenObserver::Register(kv.first, &NamePlateFieldCb);
             char tokenBuf[24];
             FireWithString(kEventUnitAdded,
-                FormatNamePlateToken(tokenBuf, sizeof tokenBuf,
-                                     static_cast<int>(g_orderedGUIDs.size())));
+                FormatNamePlateToken(tokenBuf, sizeof tokenBuf, slot + 1));
         }
     }
 
-    // Fire REMOVED for GUIDs in last tick's snapshot but not current.
-    // We compute the token from the position *before* erasing so the
-    // event payload reflects the slot the unit just vacated; the
-    // handler can still resolve the token to the unit via
-    // `g_orderedGUIDs[slot]` during dispatch. Later plates shift down
-    // when we erase — matches modern semantics.
+    // Fire REMOVED for GUIDs in last tick's snapshot but not current. The
+    // slot is *freed* (set 0), not erased, so surviving plates keep their
+    // index (retail-exact — no shift); the next ADD reuses it. Token is
+    // computed before freeing so the payload names the slot just vacated.
+    // Trailing empties are trimmed so the array tracks the high-water mark.
     for (const auto &kv : g_lastTickPlates) {
         if (g_currentTickPlates.find(kv.first) == g_currentTickPlates.end()) {
-            auto it = std::find(g_orderedGUIDs.begin(), g_orderedGUIDs.end(),
-                                kv.first);
-            if (it == g_orderedGUIDs.end())
+            auto it = std::find(g_slots.begin(), g_slots.end(), kv.first);
+            if (it == g_slots.end())
                 continue;
-            const int oneBased = static_cast<int>(it - g_orderedGUIDs.begin()) + 1;
+            const int oneBased = static_cast<int>(it - g_slots.begin()) + 1;
             char tokenBuf[24];
             FireWithString(kEventUnitRemoved,
                 FormatNamePlateToken(tokenBuf, sizeof tokenBuf, oneBased));
             Unit::TokenObserver::Unregister(kv.first, &NamePlateFieldCb);
-            g_orderedGUIDs.erase(it);
+            *it = 0; // free the slot (no shift of survivors)
+            while (!g_slots.empty() && g_slots.back() == 0)
+                g_slots.pop_back();
         }
     }
 
@@ -262,30 +280,35 @@ static const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 // suppress every refire, and the freshly-built wrapper would lack
 // the addon's `.nameplate` field.
 //
-// `g_orderedGUIDs` is also cleared so the post-reload token indices
-// start at `nameplate1` again, matching the order plates re-fire in.
+// `g_slots` is also cleared so post-reload token slots start fresh.
 void PrepareForReload() {
     g_seenPlates.clear();
     g_lastTickPlates.clear();
     // Objects survive a /reload, so their observer nodes do too. The first
     // post-reload tick re-fires ADDED and re-registers, which would stack a
     // second observer per field (the registrar never dedups) → double events.
-    // Tear ours down here so re-registration starts clean.
-    for (uint64_t guid : g_orderedGUIDs)
-        Unit::TokenObserver::Unregister(guid, &NamePlateFieldCb);
-    g_orderedGUIDs.clear();
+    // Tear ours down here so re-registration starts clean (skip free slots).
+    for (uint64_t guid : g_slots)
+        if (guid != 0)
+            Unit::TokenObserver::Unregister(guid, &NamePlateFieldCb);
+    g_slots.clear();
 }
 
 // Exposed via `nameplate/Walk.h` so the `nameplateN` token resolver
 // in `unit/TokenExtensions.cpp` can map an index to a GUID without seeing
-// the internal vector.
+// the internal array. Returns 0 for an out-of-range OR currently-free slot.
 uint64_t GetGUIDByIndex(int oneBased) {
     if (oneBased <= 0)
         return 0;
     const size_t idx = static_cast<size_t>(oneBased - 1);
-    if (idx >= g_orderedGUIDs.size())
+    if (idx >= g_slots.size())
         return 0;
-    return g_orderedGUIDs[idx];
+    return g_slots[idx]; // 0 when the slot is free
 }
+
+// Number of slots (1-based max index). Because the slot array is SPARSE,
+// callers that iterate all plates must scan `1..GetSlotCount()` and skip the
+// slots where `GetGUIDByIndex` returns 0 — they can't stop at the first gap.
+int GetSlotCount() { return static_cast<int>(g_slots.size()); }
 
 } // namespace NamePlate::Events

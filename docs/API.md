@@ -8302,11 +8302,14 @@ for i = 1, 40 do
 end
 ```
 
-Ordering is **creation-order** — each new plate appends to the end of
-the list and stays at its index until the unit goes out of range or
-the plate is removed, at which point later indices shift down.
-Stable for the lifetime of a single plate; no mid-frame reordering.
-Same semantics as modern WoW.
+Indices are **assigned slots**, matching modern WoW exactly: a plate keeps
+its slot for its entire lifetime, so surviving plates are **never
+renumbered** when another plate is removed. A removed plate frees its slot,
+and the next new plate reuses the lowest free slot. So a middle plate
+vanishing leaves the others' `nameplateN` tokens unchanged (that slot simply
+becomes vacant until a new plate reuses it) — `UnitExists("nameplateN")`
+returns `false` for a currently-free slot. Stable for the lifetime of a
+single plate; no reordering, ever.
 
 Token chains work too — `"nameplate1target"`, `"nameplate1targettarget"`,
 etc. — by mirroring the engine's own `targettarget`-style suffix
