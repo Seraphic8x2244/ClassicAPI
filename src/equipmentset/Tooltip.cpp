@@ -40,11 +40,12 @@
 // `C_EquipmentSet.GetItemIDs` + `C_EquipmentSet.GetItemLocations`
 // themselves.
 //
-// Tooltip filling is done by calling back through Lua (`self:AddLine`
-// etc.) rather than hitting the engine's tooltip-line internals
-// directly. The Lua dispatch goes through the engine's own frame-
-// method registry, so any addon-installed hook on AddLine (DBM,
-// pfUI's tooltip skin, etc.) still runs.
+// Tooltip lines are built with the engine's own primitives — the
+// per-tooltip clear (FUN_GAMETOOLTIP_CLEAR) and the raw add-line
+// (FUN_GAMETOOLTIP_ADD_LINE), the same native path SetTotem and
+// SetHyperlinkCompareItem use; no Lua method dispatch. It shows itself
+// at the end (Script_Show), matching retail: PaperDollFrame.lua sets the
+// anchor then calls SetEquipmentSet with no trailing :Show().
 
 #include "Game.h"
 #include "Offsets.h"
@@ -58,57 +59,41 @@ namespace EquipmentSet::Tooltip {
 
 namespace {
 
-// Calls `self:Method()` with no Lua args. Stack at entry must have
-// the tooltip at index 1 (the standard `frame:method()` self slot).
-// Leaves the stack unchanged.
-void CallSelfNoArgs(void *L, const char *methodName) {
-    Game::Lua::PushValue(L, 1);
-    Game::Lua::PushString(L, methodName);
-    Game::Lua::GetTable(L, -2); // method = self[methodName]
-    Game::Lua::Insert(L, -2);   // [method, self]
-    Game::Lua::Call(L, 1, 0);
+using AddLine_t = void(__thiscall *)(void *self, const char *left, const char *right,
+                                     const void *leftColor, const void *rightColor, int wrap);
+using ClearTooltip_t = void(__fastcall *)(void *self);
+using ShowScript_t = int(__fastcall *)(void *L); // engine's Script_Show
+
+// Packs r,g,b (0..1) into the 0xAARRGGBB value FUN_GAMETOOLTIP_ADD_LINE's
+// color arg wants — its little-endian bytes are the {b,g,r,a} the engine's
+// line-color setter reads. Alpha is always opaque.
+uint32_t Pack(double r, double g, double b) {
+    auto ch = [](double v) {
+        const int i = static_cast<int>(v * 255.0 + 0.5);
+        return static_cast<uint32_t>(i < 0 ? 0 : (i > 255 ? 255 : i));
+    };
+    return 0xFF000000u | (ch(r) << 16) | (ch(g) << 8) | ch(b);
 }
 
-// Calls `self:AddLine(text, r, g, b)`. Same self-on-stack precondition.
-void AddLine(void *L, const char *text, double r, double g, double b) {
-    Game::Lua::PushValue(L, 1);
-    Game::Lua::PushString(L, "AddLine");
-    Game::Lua::GetTable(L, -2);
-    Game::Lua::Insert(L, -2);
-    Game::Lua::PushString(L, text);
-    Game::Lua::PushNumber(L, r);
-    Game::Lua::PushNumber(L, g);
-    Game::Lua::PushNumber(L, b);
-    Game::Lua::Call(L, 5, 0);
+// Left-aligned colored line via the engine's raw add-line. The packed
+// color is a local so its address stays valid across the call.
+void AddColoredLine(void *self, const char *text, double r, double g, double b) {
+    const uint32_t color = Pack(r, g, b);
+    reinterpret_cast<AddLine_t>(Offsets::FUN_GAMETOOLTIP_ADD_LINE)(
+        self, text, nullptr, &color, nullptr, 0);
 }
 
-// Calls `self:SetText(text, r, g, b)`. Same precondition. Used for
-// the header line — `SetText` is the standard vanilla entry for
-// "first line of a fresh tooltip" and handles internal redraw state
-// `AddLine` skips when it's the first content after a clear.
-void SetText(void *L, const char *text, double r, double g, double b) {
-    Game::Lua::PushValue(L, 1);
-    Game::Lua::PushString(L, "SetText");
-    Game::Lua::GetTable(L, -2);
-    Game::Lua::Insert(L, -2);
-    Game::Lua::PushString(L, text);
-    Game::Lua::PushNumber(L, r);
-    Game::Lua::PushNumber(L, g);
-    Game::Lua::PushNumber(L, b);
-    Game::Lua::Call(L, 5, 0); // self + text + r + g + b
-}
-
-// Format-and-add one localized count line. Calls
-// `Game::Lua::PushLocalizedFormatInt` to resolve the format string
-// (Blizzard's FrameXML globals like `ITEMS_EQUIPPED` first, with the
-// C `fallback` for stripped-down servers), then dispatches `AddLine`.
-void AddLocalizedLineInt(void *L, const char *globalName, const char *fallback, int n,
-                         double r, double g, double b) {
+// Adds one localized "N unit" line: `string.format(_G[globalName] or
+// fallback, n)` (the project's GlobalString localize-or-fallback helper,
+// with the C `fallback` for servers stripped of the standard strings),
+// then the native colored add-line.
+void AddLocalizedLineInt(void *L, void *self, const char *globalName,
+                         const char *fallback, int n, double r, double g, double b) {
     const int savedTop = Game::Lua::GetTop(L);
     Game::Lua::PushLocalizedFormatInt(L, globalName, fallback, n);
     const char *text = Game::Lua::ToString(L, -1);
     if (text != nullptr)
-        AddLine(L, text, r, g, b);
+        AddColoredLine(self, text, r, g, b);
     Game::Lua::SetTop(L, savedTop);
 }
 
@@ -185,39 +170,36 @@ int __fastcall Script_GameTooltipSetEquipmentSet(void *L) {
     if (s == nullptr)
         return 0;
 
+    void *self = Game::Lua::ResolveObject(L, 1);
+    if (self == nullptr)
+        return 0;
+
     const Tally t = TallySet(*s);
     const int totalSlots = t.equipped + t.inInventory + t.missing;
 
-    // Trim the Lua stack to just the tooltip self-arg so our internal
-    // method-call sequences don't accumulate the original args past
-    // their useful lifetime. `setName` was a `const char *` lifted out
-    // by ToString — Lua's strings are pinned by reference count, so
-    // dropping the string from the stack doesn't invalidate the
-    // pointer for the lifetime of this call.
-    Game::Lua::SetTop(L, 1);
-
-    // Header — set name, white. Doubles as the "ClearLines" boundary;
-    // SetText replaces line 1 and clears subsequent lines in vanilla.
-    SetText(L, s->name.c_str(), 1.0, 1.0, 1.0);
+    // Header — set name, white. Clear first so it lands as line 0
+    // (the clear resets the line count the add-line body indexes from).
+    reinterpret_cast<ClearTooltip_t>(Offsets::FUN_GAMETOOLTIP_CLEAR)(self);
+    AddColoredLine(self, s->name.c_str(), 1.0, 1.0, 1.0);
 
     // Body lines — try Blizzard's localized FORMAT_* globals first.
     // Same key names retail FrameXML uses (`ITEMS_VARIABLE_QUANTITY`,
     // `ITEMS_EQUIPPED`, ...); addons that need their own wording can
     // override by reassigning `_G[name]` at runtime. The fallbacks
     // only fire on servers stripped of the standard GlobalStrings.
-    AddLocalizedLineInt(L, "ITEMS_VARIABLE_QUANTITY", "%d items",
+    AddLocalizedLineInt(L, self, "ITEMS_VARIABLE_QUANTITY", "%d items",
                         totalSlots, 1.0, 1.0, 1.0);
 
     if (t.equipped > 0) {
-        AddLocalizedLineInt(L, "ITEMS_EQUIPPED", "%d equipped",
+        AddLocalizedLineInt(L, self, "ITEMS_EQUIPPED", "%d equipped",
                             t.equipped, 0.0, 1.0, 0.0); // green
     }
     if (t.inInventory > 0) {
-        AddLocalizedLineInt(L, "ITEMS_IN_INVENTORY", "%d in inventory",
+        AddLocalizedLineInt(L, self, "ITEMS_IN_INVENTORY", "%d in inventory",
                             t.inInventory, 1.0, 1.0, 1.0);
     }
     if (t.ignored > 0) {
-        AddLocalizedLineInt(L, "ITEM_SLOTS_IGNORED", "%d slots ignored",
+        AddLocalizedLineInt(L, self, "ITEM_SLOTS_IGNORED", "%d slots ignored",
                             t.ignored, 0.5, 0.5, 0.5); // gray
     }
     // Missing slots: list each by name using the itemID we stored at
@@ -255,18 +237,20 @@ int __fastcall Script_GameTooltipSetEquipmentSet(void *L) {
         Game::Lua::Call(L, 2, 1);
         const char *line = Game::Lua::ToString(L, -1);
         if (line != nullptr)
-            AddLine(L, line, 1.0, 0.0, 0.0); // red
+            AddColoredLine(self, line, 1.0, 0.0, 0.0); // red
         Game::Lua::SetTop(L, savedTop);
     }
     if (unnamedMissing > 0) {
         // Pre-itemID-format files or items the cache has no record of.
         // No Blizzard format global maps cleanly here; addons can
         // override with `_G.CLASSICAPI_EQUIPMENTSET_MISSING`.
-        AddLocalizedLineInt(L, "CLASSICAPI_EQUIPMENTSET_MISSING",
+        AddLocalizedLineInt(L, self, "CLASSICAPI_EQUIPMENTSET_MISSING",
                             "%d missing", unnamedMissing, 1.0, 0.0, 0.0);
     }
 
-    CallSelfNoArgs(L, "Show");
+    // Show ourselves — self is still at Lua stack index 1 (Script_Show
+    // reads it there). Retail's SetEquipmentSet shows internally too.
+    reinterpret_cast<ShowScript_t>(Offsets::FUN_SCRIPT_FRAME_SHOW)(L);
     return 0;
 }
 
