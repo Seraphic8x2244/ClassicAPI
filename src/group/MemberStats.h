@@ -52,4 +52,16 @@ struct Stats {
 // Pure — no Lua, no throw; safe from any context.
 Stats Lookup(uint64_t guid);
 
+// Pointer to an out-of-range groupmate's 48-slot aura spell-ID array (buffs
+// 0..31, debuffs 32..47), or nullptr if `guid` isn't a rostered member — or is
+// an *offline* party member (the engine surfaces no auras for those). Mirrors
+// the engine's own out-of-range fallback in Script_UnitBuff/Script_UnitDebuff
+// exactly: the party stats block at +OFF_GROUP_MEMBER_STATS_AURAS gated on the
+// online flag, else the raid slot at +OFF_RAID_SLOT_AURAS. Spell IDs only —
+// SMSG_PARTY_MEMBER_STATS carries no caster/duration/stacks, and truncates IDs
+// to u16 (custom IDs > 65535 are wrong; same as the built-in UnitBuff). The
+// pointer is into live engine memory — read it immediately, don't cache it.
+// Pure — no Lua, no throw; safe from any context.
+const uint16_t *AuraArray(uint64_t guid);
+
 } // namespace Group::MemberStats

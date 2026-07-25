@@ -80,4 +80,33 @@ Stats Lookup(uint64_t guid) {
     return s;
 }
 
+const uint16_t *AuraArray(uint64_t guid) {
+    if (guid == 0)
+        return nullptr;
+
+    // Party stats block first — auras at +0x1a, but only for an online member
+    // (the engine's Script_UnitBuff bails on the party path when the online bit
+    // is clear).
+    auto statsFn = reinterpret_cast<Lookup_t>(
+        static_cast<uintptr_t>(Offsets::FUN_GROUP_MEMBER_STATS_LOOKUP));
+    if (const uint8_t *e = statsFn(&guid)) {
+        if ((e[Offsets::OFF_GROUP_MEMBER_STATUS_FLAGS] &
+             Offsets::GROUP_MEMBER_STATUS_ONLINE) == 0)
+            return nullptr;
+        return reinterpret_cast<const uint16_t *>(
+            e + Offsets::OFF_GROUP_MEMBER_STATS_AURAS);
+    }
+
+    // Raid slot — auras at +0x64, no online gate (mirrors the engine's raid
+    // branch, which reads the array unconditionally).
+    auto slotFn = reinterpret_cast<Lookup_t>(
+        static_cast<uintptr_t>(Offsets::FUN_GROUP_MEMBER_SLOT_LOOKUP));
+    if (const uint8_t *e = slotFn(&guid)) {
+        return reinterpret_cast<const uint16_t *>(
+            e + Offsets::OFF_RAID_SLOT_AURAS);
+    }
+
+    return nullptr;
+}
+
 } // namespace Group::MemberStats

@@ -12521,12 +12521,18 @@ Backport of the modern `C_UnitAuras` namespace. Returns
 `local d = C_UnitAuras.GetAuraDataByIndex(unit, 1); if d.dispelName ==
 "Magic" then ...` works unchanged.
 
-Reads everything off the unit's `m_objectFields` descriptor — same
+Reads primarily off the unit's `m_objectFields` descriptor — same
 data source `UnitBuff` / `UnitDebuff` use. The descriptor has 48 aura
 slots total: 32 helpful (buffs) at indices 0..31, 16 harmful
 (debuffs) at indices 32..47. Functions in this namespace take a
 1-based Lua index that translates onto whichever range the filter
 selects.
+
+When a party/raid member has **no live unit object at all** (a
+different map, far out of range), there is no descriptor to read — but
+the server still transmits that member's current aura spell IDs, and
+these functions surface them, exactly as the built-in `UnitBuff` /
+`UnitDebuff` do. See [Out-of-range group members](#out-of-range-group-members).
 
 ### `AuraData` table shape
 
@@ -12612,6 +12618,35 @@ Implications:
   co-hook the sites.
 - Entries are evicted once their timed aura elapses, so the cache stays
   bounded; infinite-duration auras persist until overwritten under load.
+
+### Out-of-range group members
+
+The descriptor and the `Aura::Source` cache both require the member's
+CGUnit to exist on the client. When a party/raid member is on a
+**different map** (or otherwise far enough out of range that the engine
+drops their object entirely), neither is available — yet the server keeps
+every group member's current auras flowing in `SMSG_PARTY_MEMBER_STATS`
+(`GROUP_UPDATE_FLAG_AURAS` for buffs, `GROUP_UPDATE_FLAG_AURAS_NEGATIVE`
+for debuffs), and the client stashes them in the group-member roster
+structs. Every `C_UnitAuras.*` function falls back to that array when the
+unit has no object — the same source the built-in `UnitBuff` / `UnitDebuff`
+read out of range — so a cross-map `GetUnitAuras("raid7")` returns the
+member's real buffs/debuffs instead of an empty table.
+
+This path is **spell-ID only**, because that is all the packet carries:
+
+- `applications` is always `1` — stack counts aren't transmitted.
+- `expirationTime` / `sourceUnit` / `sourceGUID` are present only if *you*
+  cast the aura (the `Aura::Source` `SMSG_SPELL_GO` entry is merged in when
+  it matches); otherwise the usual defaults.
+- `duration` is the `Spell.dbc` base with level scaling.
+- Spell IDs are truncated to 16 bits on the wire, so a custom aura with a
+  spell ID above 65535 comes through wrong — an inherent limitation of the
+  vanilla packet that `UnitBuff` shares.
+
+Distinct from the in-range descriptor-drop cases (rogue stealth, nearby
+range fluctuation), where the object still exists and the `Aura::Source`
+cache is the fallback — see [Caster & timing](#caster--timing-aurasource).
 
 ### `C_UnitAuras.GetAuraDataByIndex(unit, index [, filter])`
 

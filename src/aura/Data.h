@@ -132,4 +132,45 @@ bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
 void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
                           bool playerOnly, int outerIdx, int &nextKey);
 
+// ── Out-of-range groupmate path ────────────────────────────────────────────
+//
+// When a party/raid member has no live CGUnit at all (different map, far out
+// of range) the token resolves to a GUID but no object, so there is no
+// descriptor to read. The server still transmits that member's current aura
+// spell IDs via SMSG_PARTY_MEMBER_STATS, which the client keeps in the
+// group-member stats structs (`Group::MemberStats::AuraArray`). These functions
+// enumerate that array — exactly what the built-in `UnitBuff`/`UnitDebuff` do
+// out of range — and build the same AuraData table.
+//
+// Spell IDs only come off the wire: `applications` is 1 (stacks aren't sent)
+// and IDs are u16-truncated (custom IDs > 65535 are wrong). Any caster / real
+// expirationTime we observed for the member via SMSG_SPELL_GO is still merged
+// in from the `Aura::Source` cache. `guid` of 0 (not a rostered member) yields
+// no results. These are only meaningful when the unit has NO descriptor —
+// callers use them in the `unit == nullptr` branch, so there is no descriptor
+// to dedup against.
+
+// Pushes AuraData for the `oneBasedIndex`-th group-array aura on `guid`
+// matching `filter`. On a hit pushes the table and returns true; otherwise
+// pushes nothing and returns false (caller pushes nil).
+bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
+                      bool playerOnly = false);
+
+// Pushes AuraData for the group-array aura with `spellID` on `guid`, optionally
+// restricted to one filter range (nullptr = both, helpful first). Returns true
+// on a hit (table pushed), false otherwise (nothing pushed).
+bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
+                            const Filter *filter, bool playerOnly = false);
+
+// As `PushGroupAuraBySpellID` but matched by locale-resolved spell name
+// (case-sensitive exact match), mirroring `FindSlotBySpellName`.
+bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
+                              const Filter *filter, bool playerOnly = false);
+
+// Appends every group-array aura on `guid` matching `filter` into the array
+// table at `outerIdx`, continuing from `nextKey` (updated in place). The
+// bulk-enumeration analog of `PushNthGroupAura`, for `GetUnitAuras`.
+void AppendGroupAuras(void *L, uint64_t guid, Filter filter, bool playerOnly,
+                      int outerIdx, int &nextKey);
+
 } // namespace Aura::Data

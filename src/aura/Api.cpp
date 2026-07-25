@@ -29,6 +29,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "ui/ColorData.h"
+#include "unit/Identity.h"
 
 #include <cstdint>
 #include <cstring>
@@ -45,6 +46,18 @@ const uint8_t *ResolveUnit(const char *token) {
     auto fn = reinterpret_cast<ResolveUnitToken_t>(
         static_cast<uintptr_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN));
     return static_cast<const uint8_t *>(fn(token));
+}
+
+// Resolves a token to its GUID for the out-of-range (no live CGUnit) path.
+// Only valid to call AFTER `ResolveUnit(token)` returned null *without raising*:
+// `ResolveUnit` runs the engine's token→GUID resolver first, so reaching a null
+// return means the token was well-formed (the resolver never raised). This runs
+// the same non-raising resolver and returns 0 for a token that maps to no
+// rostered member — which the group-array push paths treat as "no auras".
+uint64_t GuidForOutOfRange(const char *token) {
+    if (token == nullptr)
+        return 0;
+    return Unit::Identity::GuidForToken(token);
 }
 
 // Parses the filter string. Returns Helpful by default; Harmful if
@@ -91,16 +104,25 @@ const char *ArgOptString(void *L, int idx) {
 int PushAuraByIndex(void *L, const char *unitToken, int index,
                     Data::Filter filter, bool playerOnly = false) {
     const uint8_t *unit = ResolveUnit(unitToken);
-    const int slot = Data::FindNthSlot(unit, index, filter, playerOnly);
-    if (slot >= 0) {
-        Data::Push(L, unit, slot);
-        return 1;
+    if (unit != nullptr) {
+        const int slot = Data::FindNthSlot(unit, index, filter, playerOnly);
+        if (slot >= 0) {
+            Data::Push(L, unit, slot);
+            return 1;
+        }
+        // Descriptor exhausted — an aura the engine dropped from the slot array
+        // (rogue stealth, nearby party range fluctuation) may still be live in
+        // the Aura::Source cache. Surface it after the descriptor entries.
+        if (Data::PushNthCacheFallback(L, unit, index, filter, playerOnly))
+            return 1;
+    } else {
+        // No live CGUnit — an out-of-range / cross-map groupmate. The server
+        // still sends their aura spell IDs via SMSG_PARTY_MEMBER_STATS; read
+        // them the same way the built-in UnitBuff/UnitDebuff do.
+        if (Data::PushNthGroupAura(L, GuidForOutOfRange(unitToken), index,
+                                   filter, playerOnly))
+            return 1;
     }
-    // Descriptor exhausted — an aura the engine dropped from the slot array
-    // (rogue stealth, party range fluctuation) may still be live in the
-    // Aura::Source cache. Surface it after the descriptor entries.
-    if (Data::PushNthCacheFallback(L, unit, index, filter, playerOnly))
-        return 1;
     Game::Lua::PushNil(L);
     return 1;
 }
@@ -152,13 +174,21 @@ int __fastcall Script_GetUnitAuraBySpellID(void *L) {
         f = ParseFilter(filterStr);
         fp = &f;
     }
-    const int slot = Data::FindSlotBySpellID(unit, static_cast<uint32_t>(spellID),
-                                             fp, HasPlayerFilter(filterStr));
-    if (slot < 0) {
-        Game::Lua::PushNil(L);
+    const bool playerOnly = HasPlayerFilter(filterStr);
+    if (unit != nullptr) {
+        const int slot = Data::FindSlotBySpellID(
+            unit, static_cast<uint32_t>(spellID), fp, playerOnly);
+        if (slot >= 0) {
+            Data::Push(L, unit, slot);
+            return 1;
+        }
+    } else if (Data::PushGroupAuraBySpellID(L, GuidForOutOfRange(unitToken),
+                                            static_cast<uint32_t>(spellID), fp,
+                                            playerOnly)) {
+        // Out-of-range groupmate — read from the group-member aura array.
         return 1;
     }
-    Data::Push(L, unit, slot);
+    Game::Lua::PushNil(L);
     return 1;
 }
 
@@ -177,13 +207,19 @@ int __fastcall Script_GetAuraDataBySpellName(void *L) {
         f = ParseFilter(filterStr);
         fp = &f;
     }
-    const int slot = Data::FindSlotBySpellName(unit, spellName, fp,
-                                               HasPlayerFilter(filterStr));
-    if (slot < 0) {
-        Game::Lua::PushNil(L);
+    const bool playerOnly = HasPlayerFilter(filterStr);
+    if (unit != nullptr) {
+        const int slot = Data::FindSlotBySpellName(unit, spellName, fp, playerOnly);
+        if (slot >= 0) {
+            Data::Push(L, unit, slot);
+            return 1;
+        }
+    } else if (Data::PushGroupAuraBySpellName(L, GuidForOutOfRange(unitToken),
+                                              spellName, fp, playerOnly)) {
+        // Out-of-range groupmate — read from the group-member aura array.
         return 1;
     }
-    Data::Push(L, unit, slot);
+    Game::Lua::PushNil(L);
     return 1;
 }
 
@@ -234,8 +270,6 @@ int __fastcall Script_GetUnitAuras(void *L) {
 
     Game::Lua::SetTop(L, 0);
     Game::Lua::NewTable(L);
-    if (unit == nullptr)
-        return 1;
 
     // Range tokens are independent of PLAYER: an explicit HELPFUL/HARMFUL
     // selects that range, neither selects both. So `"PLAYER"` alone returns
@@ -246,10 +280,21 @@ int __fastcall Script_GetUnitAuras(void *L) {
     const bool both = !hasHelpful && !hasHarmful;
 
     int nextKey = 1;
-    if (hasHelpful || both)
-        AppendRangeToArray(L, unit, 1, Data::Filter::Helpful, nextKey, playerOnly);
-    if (hasHarmful || both)
-        AppendRangeToArray(L, unit, 1, Data::Filter::Harmful, nextKey, playerOnly);
+    if (unit != nullptr) {
+        if (hasHelpful || both)
+            AppendRangeToArray(L, unit, 1, Data::Filter::Helpful, nextKey, playerOnly);
+        if (hasHarmful || both)
+            AppendRangeToArray(L, unit, 1, Data::Filter::Harmful, nextKey, playerOnly);
+    } else {
+        // No live CGUnit — out-of-range / cross-map groupmate. Enumerate the
+        // group-member aura array (spell IDs the server still transmits), the
+        // same source the built-in UnitBuff/UnitDebuff read out of range.
+        const uint64_t guid = GuidForOutOfRange(unitToken);
+        if (hasHelpful || both)
+            Data::AppendGroupAuras(L, guid, Data::Filter::Helpful, playerOnly, 1, nextKey);
+        if (hasHarmful || both)
+            Data::AppendGroupAuras(L, guid, Data::Filter::Harmful, playerOnly, 1, nextKey);
+    }
     return 1;
 }
 

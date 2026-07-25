@@ -3818,6 +3818,21 @@ enum Offsets {
     RAID_SLOT_FLAG_ONLINE = 0x1,
     RAID_SLOT_FLAG_DEAD = 0x4,
 
+    // Group-member aura spell-ID arrays — the out-of-range fallback the
+    // engine's Script_UnitBuff (0x00519500) / Script_UnitDebuff (0x005198f0)
+    // read when a groupmate has no live CGUnit. The server transmits a
+    // member's current auras (spell IDs only — no caster/duration/stacks) in
+    // SMSG_PARTY_MEMBER_STATS via GROUP_UPDATE_FLAG_AURAS (buffs, slots 0..31)
+    // + GROUP_UPDATE_FLAG_AURAS_NEGATIVE (debuffs, slots 32..47); the client
+    // keeps them in the two group-member blocks. Both arrays are 48 u16
+    // entries (UNIT_AURA_TOTAL) indexed by the same absolute slot the
+    // descriptor uses. Spell IDs are truncated to u16 on the wire, so custom
+    // IDs > 65535 come through wrong (same limitation as the built-in
+    // UnitBuff/UnitDebuff). Read the party array only when the member's online
+    // flag (OFF_GROUP_MEMBER_STATUS_FLAGS bit 0) is set — the engine does.
+    OFF_GROUP_MEMBER_STATS_AURAS = 0x1a,  // party stats block (FUN_00496400)
+    OFF_RAID_SLOT_AURAS = 0x64,           // raid slot (FUN_00496420)
+
     // Per-slot GUID tables — used to map party/raid token strings
     // ("party1", "raid17") to GUIDs without going through
     // `FUN_RESOLVE_UNIT_TOKEN`, which only resolves to a local CGUnit

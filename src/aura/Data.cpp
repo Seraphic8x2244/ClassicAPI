@@ -17,6 +17,7 @@
 #include "Offsets.h"
 #include "aura/Source.h"
 #include "dbc/Lookup.h"
+#include "group/MemberStats.h"
 #include "guid/Guid.h"
 #include "unit/Identity.h"
 
@@ -419,46 +420,39 @@ static void BuildTable(void *L, uint32_t spellID, int applications,
     // yields nil, so the table doesn't need an explicit entry.
 }
 
-void Push(void *L, const uint8_t *unit, int slot) {
-    const uint32_t spellID = ReadSpellID(unit, slot);
-    const bool isHelpful = slot < Offsets::UNIT_AURA_BUFF_COUNT;
-
-    // Timing fields. Vanilla doesn't broadcast cast time / duration for ANY
-    // unit's auras except the local player's — for everyone else (target,
-    // party, raid, mouseover) `expirationTime` stays 0 unless the
-    // `Aura::Source` cache observed the cast. For the player we read the
-    // engine's `VAR_PLAYER_BUFF_TABLE` (same data `GetPlayerBuffTimeLeft`
-    // returns), which gives a real expiration timestamp.
-    //
-    // `duration` comes from Spell.dbc → SpellDuration.dbc with level scaling
-    // (the *base* value); talent / glyph duration-extension modifiers are
-    // already baked into the expiration timestamp on the caster's side, so
-    // `expirationTime - GetTime()` reflects true remaining time even when the
-    // base `duration` doesn't include the talent boost.
+// Enriches a bare `(guid, spellID)` into a full AuraData table — the shared
+// core behind every push path (descriptor, cache fallback, group-array). No
+// dependence on a live descriptor: the descriptor path passes what it read
+// (stacks, level, is-this-the-player), the others pass their known-or-default
+// values.
+//
+// Timing rules (identical across paths): `duration` is the Spell.dbc →
+// SpellDuration.dbc base scaled by `unitLevel` (0 skips scaling); talent/glyph
+// duration modifiers are baked into the caster-side expiration, so
+// `expirationTime - GetTime()` is the true remaining time even when `duration`
+// omits the boost. `expirationTime` for the local player comes from the engine
+// buff table (gated on `isPlayer`); for everyone else it, the caster, and the
+// applied (caster-modified) duration come from the `Aura::Source` SMSG_SPELL_GO
+// cache when it observed the cast — a miss leaves the modern-truthful defaults
+// (expiration 0, no sourceUnit/GUID).
+static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
+                         bool isHelpful, int applications, int unitLevel,
+                         bool isPlayer) {
     double duration = 0.0;
     double expirationTime = 0.0;
     uint64_t casterGuid = 0;
-    const uint8_t *player = LocalPlayer();
-    if (spellID != 0) {
-        const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
+    if (spellID != 0)
         duration = SpellBaseDurationSeconds(spellID, unitLevel);
-    }
-    if (unit != nullptr && unit == player) {
+    if (isPlayer && spellID != 0) {
         const uint8_t *entry = FindPlayerBuffEntry(spellID);
         if (entry != nullptr)
             expirationTime = PlayerBuffExpirationSeconds(entry);
     }
-    // Caster + non-player expiration from the SMSG_SPELL_GO cache, captured at
-    // cast time (the descriptor has neither). The player-buff table above is
-    // authoritative for the player's own expiration; the cache fills it for
-    // everyone else. Prefer the applied (caster-modified) duration so it stays
-    // consistent with `expirationTime` — otherwise a talented DoT (Improved
-    // Shadow Word: Pain) would show remaining time exceeding the base.
-    if (spellID != 0) {
+    if (spellID != 0 && guid != 0) {
         uint64_t c = 0;
         uint32_t expMs = 0;
         uint32_t durMs = 0;
-        if (Aura::Source::Get(UnitGuid(unit), spellID, &c, &expMs, &durMs)) {
+        if (Aura::Source::Get(guid, spellID, &c, &expMs, &durMs)) {
             if (expirationTime == 0.0 && expMs != 0)
                 expirationTime = static_cast<double>(expMs) * 0.001;
             if (durMs != 0)
@@ -466,9 +460,16 @@ void Push(void *L, const uint8_t *unit, int slot) {
             casterGuid = c;
         }
     }
+    BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
+               casterGuid);
+}
 
-    BuildTable(L, spellID, ReadStacks(unit, slot), isHelpful, duration,
-               expirationTime, casterGuid);
+void Push(void *L, const uint8_t *unit, int slot) {
+    const uint32_t spellID = ReadSpellID(unit, slot);
+    const bool isHelpful = slot < Offsets::UNIT_AURA_BUFF_COUNT;
+    const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
+    PushEnriched(L, UnitGuid(unit), spellID, isHelpful, ReadStacks(unit, slot),
+                 unitLevel, unit != nullptr && unit == LocalPlayer());
 }
 
 namespace {
@@ -479,17 +480,12 @@ namespace {
 // applied (caster-modified) ms when known, else the Spell.dbc base.
 void PushFromCache(void *L, const uint8_t *unit,
                    const Aura::Source::CachedAura &c, bool isHelpful) {
-    double duration = 0.0;
-    if (c.durationMs != 0) {
-        duration = static_cast<double>(c.durationMs) * 0.001;
-    } else {
-        const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
-        duration = SpellBaseDurationSeconds(c.spellId, unitLevel);
-    }
-    const double expirationTime =
-        (c.expirationMs != 0) ? static_cast<double>(c.expirationMs) * 0.001 : 0.0;
-    BuildTable(L, c.spellId, 1, isHelpful, duration, expirationTime,
-               c.casterGuid);
+    // `PushEnriched` re-reads the same cache entry `c` came from (by
+    // guid+spellID) to fill caster / expiration / applied duration, so the
+    // result is identical to reading `c`'s fields directly. Stacks aren't in
+    // SMSG_SPELL_GO, so `applications` is 1.
+    const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
+    PushEnriched(L, UnitGuid(unit), c.spellId, isHelpful, 1, unitLevel, false);
 }
 
 // Reconciles the `Aura::Source` cache against `unit`'s descriptor: when the
@@ -629,6 +625,153 @@ void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         PushFromCache(L, unit, buf[i], filter == Filter::Helpful);
+        Game::Lua::SetTable(L, outerIdx);
+    }
+}
+
+// ── Out-of-range groupmate path ────────────────────────────────────────────
+
+namespace {
+
+// Absolute slot range [start, end) for a filter, matching the descriptor
+// convention (helpful 0..31, harmful 32..47).
+void GroupRange(Filter filter, int &start, int &end) {
+    start = (filter == Filter::Harmful) ? Offsets::UNIT_AURA_BUFF_COUNT : 0;
+    end = (filter == Filter::Harmful) ? Offsets::UNIT_AURA_TOTAL
+                                      : Offsets::UNIT_AURA_BUFF_COUNT;
+}
+
+// Spell ID at group-array slot (0..47), 0 if `arr` null / OOB / empty.
+uint32_t GroupSpellID(const uint16_t *arr, int slot) {
+    if (arr == nullptr || slot < 0 || slot >= Offsets::UNIT_AURA_TOTAL)
+        return 0;
+    return arr[slot];
+}
+
+// Whether the group-array slot holds a surfacable aura for this query. Mirrors
+// the engine's per-slot test in Script_UnitBuff/UnitDebuff — a non-zero spell
+// ID with a real Spell.dbc record that passes the visibility predicate (the
+// server only transmits *applied* auras, so there is no flag nibble to check).
+// `playerOnly` additionally requires the `Aura::Source` cache to attribute the
+// cast to the local player (a miss excludes it — we can't confirm the caster
+// from the group array alone).
+bool GroupSlotEligible(uint64_t guid, const uint16_t *arr, int slot,
+                       bool playerOnly) {
+    const uint32_t id = GroupSpellID(arr, slot);
+    if (id == 0 || !IsVisible(SpellRecord(id)))
+        return false;
+    if (playerOnly) {
+        uint64_t c = 0;
+        uint32_t e = 0;
+        uint32_t d = 0;
+        if (!Aura::Source::Get(guid, id, &c, &e, &d) ||
+            c != Unit::Identity::PlayerGuid())
+            return false;
+    }
+    return true;
+}
+
+// The groupmate's level, for Spell.dbc duration scaling (0 = skip). Cheap
+// roster lookup; only hit on the out-of-range path.
+int GroupMemberLevel(uint64_t guid) {
+    return Group::MemberStats::Lookup(guid).level;
+}
+
+} // namespace
+
+bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
+                      bool playerOnly) {
+    if (guid == 0 || oneBasedIndex < 1)
+        return false;
+    const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+    if (arr == nullptr)
+        return false;
+    int start, end;
+    GroupRange(filter, start, end);
+    int matches = 0;
+    for (int slot = start; slot < end; ++slot) {
+        if (!GroupSlotEligible(guid, arr, slot, playerOnly))
+            continue;
+        if (++matches == oneBasedIndex) {
+            PushEnriched(L, guid, GroupSpellID(arr, slot),
+                         filter == Filter::Helpful, 1, GroupMemberLevel(guid),
+                         false);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
+                            const Filter *filter, bool playerOnly) {
+    if (guid == 0 || spellID == 0)
+        return false;
+    const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+    if (arr == nullptr)
+        return false;
+    const int start = (filter != nullptr && *filter == Filter::Harmful)
+                          ? Offsets::UNIT_AURA_BUFF_COUNT
+                          : 0;
+    const int end = (filter != nullptr && *filter == Filter::Helpful)
+                        ? Offsets::UNIT_AURA_BUFF_COUNT
+                        : Offsets::UNIT_AURA_TOTAL;
+    for (int slot = start; slot < end; ++slot) {
+        if (GroupSpellID(arr, slot) != spellID)
+            continue;
+        if (!GroupSlotEligible(guid, arr, slot, playerOnly))
+            continue;
+        PushEnriched(L, guid, spellID, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
+                     GroupMemberLevel(guid), false);
+        return true;
+    }
+    return false;
+}
+
+bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
+                              const Filter *filter, bool playerOnly) {
+    if (guid == 0 || spellName == nullptr || *spellName == '\0')
+        return false;
+    const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+    if (arr == nullptr)
+        return false;
+    const int start = (filter != nullptr && *filter == Filter::Harmful)
+                          ? Offsets::UNIT_AURA_BUFF_COUNT
+                          : 0;
+    const int end = (filter != nullptr && *filter == Filter::Helpful)
+                        ? Offsets::UNIT_AURA_BUFF_COUNT
+                        : Offsets::UNIT_AURA_TOTAL;
+    for (int slot = start; slot < end; ++slot) {
+        const uint32_t id = GroupSpellID(arr, slot);
+        if (id == 0)
+            continue;
+        const char *name = LocalizedSpellName(SpellRecord(id));
+        if (name == nullptr || std::strcmp(name, spellName) != 0)
+            continue;
+        if (!GroupSlotEligible(guid, arr, slot, playerOnly))
+            continue;
+        PushEnriched(L, guid, id, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
+                     GroupMemberLevel(guid), false);
+        return true;
+    }
+    return false;
+}
+
+void AppendGroupAuras(void *L, uint64_t guid, Filter filter, bool playerOnly,
+                      int outerIdx, int &nextKey) {
+    if (guid == 0)
+        return;
+    const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+    if (arr == nullptr)
+        return;
+    int start, end;
+    GroupRange(filter, start, end);
+    const int level = GroupMemberLevel(guid);
+    for (int slot = start; slot < end; ++slot) {
+        if (!GroupSlotEligible(guid, arr, slot, playerOnly))
+            continue;
+        Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
+        PushEnriched(L, guid, GroupSpellID(arr, slot),
+                     filter == Filter::Helpful, 1, level, false);
         Game::Lua::SetTable(L, outerIdx);
     }
 }
