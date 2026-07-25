@@ -3779,20 +3779,44 @@ enum Offsets {
     GROUP_MEMBER_STATUS_ONLINE = 0x1,
     FUN_GROUP_MEMBER_SLOT_LOOKUP = 0x00496420,
 
-    // Power fields within the two group-member blocks — the out-of-range
-    // fallback the engine's UnitMana/UnitManaMax use when a groupmate has no
-    // live CGUnit (different map / out of range). Stats block (returned by
-    // FUN_GROUP_MEMBER_STATS_LOOKUP): powerType@+9, current@+0xe (u16),
-    // max@+0x10 (u16). Raid slot (FUN_GROUP_MEMBER_SLOT_LOOKUP): powerType
-    // @+0x58, current@+0x60 (u16), max@+0x62 (u16). Values are raw — divide by
-    // the power divisor for display. Verified from Script_UnitMana
-    // (0x00517670) / Script_UnitManaMax (0x005177e0).
+    // Health/power fields within the two group-member blocks — the
+    // out-of-range fallback the engine's UnitHealth/UnitMana (and their Max
+    // variants) use when a groupmate has no live CGUnit (different map / out
+    // of range), sourced from SMSG_PARTY_MEMBER_STATS. The two blocks have
+    // DIFFERENT layouts (all u16):
+    //
+    //   Stats block (FUN_GROUP_MEMBER_STATS_LOOKUP): statusFlags@+8,
+    //     powerType@+9, health@+0xa, maxHealth@+0xc, power@+0xe, maxPower@+0x10,
+    //     level@+0x12, areaId@+0x14. The full record.
+    //   Raid slot (FUN_GROUP_MEMBER_SLOT_LOOKUP): powerType@+0x58,
+    //     health@+0x5c, maxHealth@+0x5e, power@+0x60, maxPower@+0x62. Leaner —
+    //     no level/area/flags.
+    //
+    // Power values are raw (divide by the power divisor for display). Verified
+    // from Script_UnitHealth (0x005174d0) / Script_UnitHealthMax (0x005175b0)
+    // / Script_UnitMana (0x00517670) / Script_UnitManaMax (0x005177e0).
+    OFF_GROUP_MEMBER_STATS_HEALTH = 0xa,
+    OFF_GROUP_MEMBER_STATS_MAX_HEALTH = 0xc,
     OFF_GROUP_MEMBER_STATS_POWER_TYPE = 0x9,
     OFF_GROUP_MEMBER_STATS_POWER = 0xe,
     OFF_GROUP_MEMBER_STATS_MAX_POWER = 0x10,
+    OFF_GROUP_MEMBER_STATS_LEVEL = 0x12,
     OFF_RAID_SLOT_POWER_TYPE = 0x58,
+    OFF_RAID_SLOT_HEALTH = 0x5c,
+    OFF_RAID_SLOT_MAX_HEALTH = 0x5e,
     OFF_RAID_SLOT_POWER = 0x60,
     OFF_RAID_SLOT_MAX_POWER = 0x62,
+    // Remaining raid-member-struct fields, mapped from Script_GetRaidRosterInfo
+    // (0x004bb560). Same struct FUN_GROUP_MEMBER_SLOT_LOOKUP returns; all
+    // object-independent (readable for out-of-range raiders). Name + class are
+    // NOT here — GetRaidRosterInfo reads those from the NameCache by GUID.
+    OFF_RAID_SLOT_SUBGROUP = 0x08,   // u32, 0-based (roster UI shows +1)
+    OFF_RAID_SLOT_RANK = 0x0c,       // u32
+    OFF_RAID_SLOT_FLAGS = 0x18,      // u32
+    OFF_RAID_SLOT_LEVEL = 0x22,      // u16
+    OFF_RAID_SLOT_AREA_ID = 0x24,    // u16 -> AreaTable.dbc
+    RAID_SLOT_FLAG_ONLINE = 0x1,
+    RAID_SLOT_FLAG_DEAD = 0x4,
 
     // Per-slot GUID tables — used to map party/raid token strings
     // ("party1", "raid17") to GUIDs without going through
