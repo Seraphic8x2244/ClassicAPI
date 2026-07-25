@@ -64,6 +64,12 @@ const Event::Custom::AutoReserve _reserve{kEventName};
 
 uint64_t g_focusGUID = 0;
 
+// True while the `"focus"` descriptor-field observers are currently registered
+// on a LIVE focus object. Cleared when the object despawns (the nodes die with
+// it) so `OnWorldTick` re-registers when a groupmate returns to range; guards
+// against double-registering while the object stays resolvable.
+bool g_focusObserved = false;
+
 // Descriptor-field observer callback — fires the changed field's unit event
 // with the `"focus"` token, making `arg1 == "focus"` work for `UNIT_HEALTH`,
 // `UNIT_MANA`, `UNIT_AURA`, … exactly like a native token. Registered per
@@ -114,28 +120,79 @@ uint64_t ResolveTokenGUID(const char *token) {
     return fn(token);
 }
 
-// Per-tick despawn watcher. Probes the engine's object table for
-// `g_focusGUID`; when it disappears (out of range, fully despawned),
-// clear focus and fire PLAYER_FOCUS_CHANGED — matches modern's
-// "leaves render distance → focus drops" behavior. Won't refocus
-// when the unit comes back, also matching modern.
+// Resolve a GUID to its live CGUnit via the object manager, or null if it
+// isn't currently in the client's object table (out of range / despawned /
+// pre-world). Non-throwing — safe from any context.
+const uint8_t *ResolveObject(uint64_t guid) {
+    if (guid == 0)
+        return nullptr;
+    auto resolve = reinterpret_cast<ResolveByGUID_t>(
+        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
+    return static_cast<const uint8_t *>(
+        resolve(Offsets::OBJ_TYPE_UNIT, "Focus", static_cast<uint32_t>(guid),
+                static_cast<uint32_t>(guid >> 32), 0x172));
+}
+
+// True if `guid` is a current party or raid member. Reads the roster GUID
+// storage directly — the 4-slot party GUID array and the 40-slot raid
+// member-pointer array (GUID at `*member + 0`) — which are populated from the
+// group roster independent of the object table, so this answers correctly for
+// a groupmate whose CGUnit has been destroyed by leaving your range. Mirrors
+// 3.3.5's focus-clear gate `FUN_00512a30` (= `FUN_0052d310` party-member OR
+// `FUN_00573200` raid-member).
+bool IsGroupMemberGuid(uint64_t guid) {
+    if (guid == 0)
+        return false;
+    const auto *party = reinterpret_cast<const uint64_t *>(
+        static_cast<uintptr_t>(Offsets::VAR_PARTY_GUIDS));
+    for (int i = 0; i < Offsets::PARTY_MAX_SLOTS; ++i)
+        if (party[i] == guid)
+            return true;
+    const int raidCount = *reinterpret_cast<const int *>(
+        static_cast<uintptr_t>(Offsets::VAR_RAID_MEMBER_COUNT));
+    if (raidCount > 0) {
+        const auto *const *raid = reinterpret_cast<const uint8_t *const *>(
+            static_cast<uintptr_t>(Offsets::VAR_RAID_MEMBER_PTRS));
+        for (int i = 0; i < Offsets::RAID_MAX_SLOTS; ++i) {
+            const uint8_t *m = raid[i];
+            if (m != nullptr && *reinterpret_cast<const uint64_t *>(m) == guid)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Per-tick focus watcher. Resolving `g_focusGUID` from the object table is
+// both the despawn check and (when alive) the `focustarget` read.
+//
+// When the object is gone (out of range, LoS, despawn) we mirror 3.3.5's focus
+// gate: a **party/raid member keeps focus** — their CGUnit is destroyed when
+// they leave your range, but the roster GUID persists, so focus reattaches
+// when they return — while any **other** unit drops focus, exactly as
+// vanilla/3.3.5 do on a real despawn. (Verified against 3.3.5's object-teardown
+// purge `FUN_00524350`, gated by the party-or-raid check `FUN_00512a30`.)
+// Vanilla fires no re-target event, so this once-per-tick read is also how
+// `focustarget` follows the focus switching targets; its events stay
+// observer-driven below.
 void OnWorldTick() {
-    // Resolve the focus object (this is also the despawn check) and, if it's
-    // alive, read its current target — that GUID is `focustarget`. Vanilla
-    // fires no event when a unit re-targets, so this once-per-tick identity
-    // read is the only way to notice the focus switching targets; the
-    // focustarget *events* still fire event-driven via the observer below.
     uint64_t desiredFocusTarget = 0;
     if (g_focusGUID != 0) {
-        auto resolve = reinterpret_cast<ResolveByGUID_t>(
-            static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
-        auto *focusObj = static_cast<const uint8_t *>(
-            resolve(Offsets::OBJ_TYPE_UNIT, "Focus",
-                    static_cast<uint32_t>(g_focusGUID),
-                    static_cast<uint32_t>(g_focusGUID >> 32), 0x172));
+        const uint8_t *focusObj = ResolveObject(g_focusGUID);
         if (focusObj == nullptr) {
-            Set(0); // focus left the object table → drop focus
+            if (IsGroupMemberGuid(g_focusGUID)) {
+                // Groupmate out of range: keep focus. Its observers died with
+                // the object; OnWorldTick re-registers them when it resolves.
+                g_focusObserved = false;
+            } else {
+                Set(0); // non-group unit left the object table → drop focus
+            }
         } else {
+            // (Re)attach the unit-event observers on the live object — covers a
+            // groupmate returning to range, and a focus set while out of range.
+            if (!g_focusObserved) {
+                TokenObserver::Register(g_focusGUID, &FocusFieldCb);
+                g_focusObserved = true;
+            }
             auto *fields = *reinterpret_cast<const uint8_t *const *>(
                 focusObj + Offsets::OFF_CGUNIT_OBJECT_FIELDS);
             if (fields != nullptr)
@@ -199,6 +256,7 @@ const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 void ClearOnLogout() {
     g_focusGUID = 0;
     g_focusTargetGUID = 0;
+    g_focusObserved = false;
 }
 const Game::GlueModuleAutoRegister _clearOnLogout{&ClearOnLogout};
 
@@ -215,6 +273,7 @@ void Set(uint64_t guid) {
     // old unit already despawned (nodes died with it).
     if (g_focusGUID != 0)
         TokenObserver::Unregister(g_focusGUID, &FocusFieldCb);
+    g_focusObserved = false;
     // Focus changed → the old focustarget is stale; drop its observer now.
     // WorldTick re-resolves and re-points to the new focus's target next tick.
     if (g_focusTargetGUID != 0) {
@@ -222,8 +281,14 @@ void Set(uint64_t guid) {
         g_focusTargetGUID = 0;
     }
     g_focusGUID = guid;
-    if (guid != 0)
+    // Register the unit-event observers only against a LIVE object. If the new
+    // focus is currently out of range (e.g. /focus a raid member across the
+    // map), OnWorldTick registers once it resolves — keeping the observers tied
+    // to a real object instance rather than an absent GUID.
+    if (guid != 0 && ResolveObject(guid) != nullptr) {
         TokenObserver::Register(guid, &FocusFieldCb);
+        g_focusObserved = true;
+    }
     const int slot = Event::Custom::Lookup(kEventName);
     if (slot >= 0)
         Event::Custom::Fire(slot, "");
