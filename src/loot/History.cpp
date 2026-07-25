@@ -92,18 +92,7 @@ int MapRollType(int packetType) {
 // have gone). Guaranteed loaded at hook time: the roll handler's wrapper
 // gates on this same lookup succeeding. Returns nullptr if not cached.
 const uint8_t *LookupPlayerRecord(uint64_t guid) {
-    if (guid == 0)
-        return nullptr;
-    using Lookup_t = const uint8_t *(__thiscall *)(void *cache, uint32_t lo,
-                                                   uint32_t hi, void *cookie,
-                                                   void *cb, void *ud, char flag);
-    auto fn = reinterpret_cast<Lookup_t>(
-        static_cast<uintptr_t>(Offsets::FUN_PLAYER_INFO_LOOKUP));
-    uint32_t cookie[2] = {0, 0};
-    return fn(reinterpret_cast<void *>(
-                  static_cast<uintptr_t>(Offsets::VAR_PLAYER_NAME_CACHE)),
-              static_cast<uint32_t>(guid), static_cast<uint32_t>(guid >> 32),
-              cookie, nullptr, nullptr, 0);
+    return Unit::Identity::PlayerInfoRecord(guid);
 }
 
 const char *NameFromRecord(const uint8_t *rec) {

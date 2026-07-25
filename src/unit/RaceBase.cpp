@@ -57,25 +57,30 @@ int __fastcall Script_UnitRaceBase(void *L) {
     // the in-world descriptor exists), so this resolves at addon-load
     // instead of returning nil until the player object spawns. All other
     // tokens go through the unit descriptor.
-    uint8_t raceByte;
+    uint8_t raceByte = 0;
     if (Unit::Identity::IsPlayerToken(token)) {
         raceByte = *reinterpret_cast<const uint8_t *>(Offsets::VAR_PLAYER_RACE_BYTE);
     } else {
         auto resolve = reinterpret_cast<ResolveUnitToken_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN);
         auto *unit = static_cast<const uint8_t *>(resolve(token));
-        if (unit == nullptr) {
-            Game::Lua::PushNil(L);
-            Game::Lua::PushNil(L);
-            return 2;
+        if (unit != nullptr) {
+            auto *desc = *reinterpret_cast<const uint8_t *const *>(
+                unit + Offsets::OFF_UNIT_DESCRIPTOR);
+            if (desc != nullptr)
+                raceByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_RACE_BYTE);
         }
-        auto *desc = *reinterpret_cast<const uint8_t *const *>(
-            unit + Offsets::OFF_UNIT_DESCRIPTOR);
-        if (desc == nullptr) {
-            Game::Lua::PushNil(L);
-            Game::Lua::PushNil(L);
-            return 2;
+        // No live descriptor (out of range / different map) → fall back to the
+        // engine's player-info cache, matching what UnitRace itself does out of
+        // range (race at OFF_PLAYER_INFO_RACE). `token` is already valid here —
+        // resolve() raises on a bad token before this — so GuidForToken won't
+        // raise.
+        if (raceByte == 0) {
+            const uint8_t *rec = Unit::Identity::PlayerInfoRecord(
+                Unit::Identity::GuidForToken(token));
+            if (rec != nullptr)
+                raceByte = static_cast<uint8_t>(*reinterpret_cast<const uint32_t *>(
+                    rec + Offsets::OFF_PLAYER_INFO_RACE));
         }
-        raceByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_RACE_BYTE);
     }
     if (raceByte == 0) {
         Game::Lua::PushNil(L);

@@ -39,6 +39,7 @@
 #include "Offsets.h"
 #include "dbc/Lookup.h"
 #include "guid/Guid.h"
+#include "unit/Identity.h"
 
 #include <cstdint>
 #include <cstring>
@@ -47,20 +48,8 @@ namespace Player::Info {
 
 namespace {
 
-// `FUN_0055F080` — `__thiscall(this=cache, guidLo, guidHi, &cookie,
-// callback, userData, retryFlag) → entryData* or NULL`.
-using LookupOrFetch_t = const uint8_t *(__thiscall *)(
-    void *cache,
-    uint32_t guidLo,
-    uint32_t guidHi,
-    uint64_t *cookie,
-    void *callback,
-    void *userData,
-    int retryFlag);
-
-// Thin shim: parses a GUID string and splits to hi/lo dwords for the
-// engine's `__thiscall` cache lookup, which takes them as separate
-// args. Shared parser lives in `Guid::Parse`.
+// Thin shim: parses a GUID string and splits to hi/lo dwords. Shared parser
+// lives in `Guid::Parse`.
 bool ParseGUID(const char *str, uint32_t &outHi, uint32_t &outLo) {
     uint64_t value = 0;
     if (!Guid::Parse(str, &value))
@@ -82,14 +71,8 @@ int __fastcall Script_GetPlayerInfoByGUID(void *L) {
     if (hi == 0 && lo == 0)
         return 0;
 
-    auto fn = reinterpret_cast<LookupOrFetch_t>(Offsets::FUN_PLAYER_INFO_LOOKUP);
-    auto *cache = reinterpret_cast<void *>(
-        static_cast<uintptr_t>(Offsets::VAR_PLAYER_NAME_CACHE));
-
-    uint64_t cookie = 0;
-    const uint8_t *entry = fn(cache, lo, hi, &cookie,
-                              nullptr /*callback*/, nullptr /*userData*/,
-                              0 /*retryFlag*/);
+    const uint8_t *entry = Unit::Identity::PlayerInfoRecord(
+        (static_cast<uint64_t>(hi) << 32) | lo);
 
     const char *name = nullptr;
     const char *realm = nullptr;

@@ -86,4 +86,13 @@ uint64_t GuidForToken(const char *token);
 // `buf` should be at least 32 bytes.
 const char *TokenFromGUID(uint64_t guid, char *buf, size_t bufSize);
 
+// The engine's cached player-info record for `guid` — the NameCache data block
+// (name @ `OFF_PLAYER_INFO_NAME`, realm, race @ `_RACE`, sex, class @ `_CLASS`),
+// or null if the GUID isn't cached. Object-independent: it resolves players who
+// are out of range / on another map / have left the group, since the cache is
+// populated on sync (SMSG_NAME_QUERY_RESPONSE). The single primitive for "what
+// do we know about this player GUID" — read fields via the `OFF_PLAYER_INFO_*`
+// offsets. Called with a NULL callback, so it only peeks (never fires a query).
+const uint8_t *PlayerInfoRecord(uint64_t guid);
+
 } // namespace Unit::Identity
