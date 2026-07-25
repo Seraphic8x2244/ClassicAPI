@@ -8,9 +8,10 @@
 // WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 
-// Modern power-API polyfill: `UnitPower(unit [, type])`,
-// `UnitPowerMax(unit [, type])`, and an extended `UnitPowerType(unit)`
-// that returns the modern 2-tuple `(powerType, powerToken)`.
+// Modern power-API polyfill: `UnitPower(unit [, type [, unmodified]])`,
+// `UnitPowerMax(unit [, type [, unmodified]])`, `UnitPowerMissing(unit
+// [, type [, unmodified]])`, and an extended `UnitPowerType(unit)` that
+// returns the modern 2-tuple `(powerType, powerToken)`.
 //
 // Shape modeled on 3.3.5's `Script_UnitPower` (`0x0060ED40` in the
 // Frostmourne client) and `Script_UnitPowerMax` (`0x0060EF40`). The
@@ -146,7 +147,7 @@ bool ResolveArgs(void *L, const uint8_t **outDesc, int *outType) {
 // vanilla).
 static int __fastcall Script_UnitPower(void *L) {
     if (!Game::Lua::IsString(L, 1)) {
-        Game::Lua::Error(L, "Usage: UnitPower(\"unit\" [, type])");
+        Game::Lua::Error(L, "Usage: UnitPower(\"unit\" [, type [, unmodified]])");
         return 0;
     }
     const uint8_t *desc;
@@ -157,7 +158,9 @@ static int __fastcall Script_UnitPower(void *L) {
     }
     const uint32_t raw = *reinterpret_cast<const uint32_t *>(
         desc + Offsets::OFF_UNIT_FIELD_POWER1 + type * 4);
-    const uint32_t divisor = PowerDivisor(type);
+    // `unmodified` (arg 3, truthy) returns the raw internal value; otherwise
+    // apply the per-type display divisor. Matches retail's third UnitPower arg.
+    const uint32_t divisor = Game::Lua::ToBoolean(L, 3) ? 1u : PowerDivisor(type);
     Game::Lua::PushNumber(L, static_cast<double>(raw / divisor));
     return 1;
 }
@@ -167,7 +170,7 @@ static int __fastcall Script_UnitPower(void *L) {
 // `UnitPower`.
 static int __fastcall Script_UnitPowerMax(void *L) {
     if (!Game::Lua::IsString(L, 1)) {
-        Game::Lua::Error(L, "Usage: UnitPowerMax(\"unit\" [, type])");
+        Game::Lua::Error(L, "Usage: UnitPowerMax(\"unit\" [, type [, unmodified]])");
         return 0;
     }
     const uint8_t *desc;
@@ -178,7 +181,7 @@ static int __fastcall Script_UnitPowerMax(void *L) {
     }
     const uint32_t raw = *reinterpret_cast<const uint32_t *>(
         desc + Offsets::OFF_UNIT_FIELD_MAXPOWER1 + type * 4);
-    const uint32_t divisor = PowerDivisor(type);
+    const uint32_t divisor = Game::Lua::ToBoolean(L, 3) ? 1u : PowerDivisor(type);
     Game::Lua::PushNumber(L, static_cast<double>(raw / divisor));
     return 1;
 }

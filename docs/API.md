@@ -517,7 +517,7 @@ build instructions.
   - [`UnitInLineOfSight(unit)`](#unitinlineofsightunit)
   - [`ClosestUnitPosition(creatureID)`](#closestunitpositioncreatureid)
   - [`UnitHealthMissing(unit)`](#unithealthmissingunit)
-  - [`UnitPower(unit [, powerType])` / `UnitPowerMax(unit [, powerType])`](#unitpowerunit--powertype--unitpowermaxunit--powertype)
+  - [`UnitPower(unit [, powerType [, unmodified]])` / `UnitPowerMax(unit [, powerType [, unmodified]])`](#unitpowerunit--powertype--unmodified--unitpowermaxunit--powertype--unmodified)
   - [`UnitPowerMissing(unit [, powerType [, unmodified]])`](#unitpowermissingunit--powertype--unmodified)
   - [`UnitPowerType(unit)`](#unitpowertypeunit)
 
@@ -12372,7 +12372,7 @@ vanilla's percentage form for non-grouped units (where `UnitHealthMax` is
 Direct descriptor reads — `desc[+0x40]` (HEALTH), `desc[+0x58]` (MAXHEALTH).
 No engine call, no Lua-stack roundtrip.
 
-### `UnitPower(unit [, powerType])` / `UnitPowerMax(unit [, powerType])`
+### `UnitPower(unit [, powerType [, unmodified]])` / `UnitPowerMax(unit [, powerType [, unmodified]])`
 
 Modern multi-power-type getters. Vanilla 1.12 only ships
 `UnitMana(unit)` / `UnitManaMax(unit)` which return whichever
@@ -12428,6 +12428,10 @@ the divisor table at `0x0086F978`:
 
 So a fresh warrior reads `UnitPower("player", 1)` = `0..100`, not
 `0..1000`. Matches retail Classic.
+
+Pass a truthy `unmodified` (third arg) to bypass the divisor and get the raw
+internal value — `UnitPower("player", 1, true)` returns rage as `0..1000`.
+Same third argument retail's `UnitPower` / `UnitPowerMax` take.
 
 Direct descriptor reads — `desc[+0x44 + type*4]` for current power,
 `desc[+0x5C + type*4]` for max, divided by the table entry for the
