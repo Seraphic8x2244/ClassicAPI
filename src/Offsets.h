@@ -4409,6 +4409,31 @@ enum Offsets {
     VAR_TALENT_DBC_RECORDS = 0x00C0D6E8,
     VAR_TALENT_DBC_COUNT = 0x00C0D6EC,
 
+    // Flat (row-order) DBC arrays used by the talent-tree builder
+    // `FUN_004f2c00` — DISTINCT from the sparse by-ID index above. The builder
+    // walks TalentTab.dbc in row order, filtering each tab by
+    // `FUN_004f2e50(race, class, raceMask@+0x2c, classMask@+0x30)` (a plain
+    // bitmask test; mask 0 = all), then walks Talent.dbc in row order grouping
+    // contiguous TabID runs — so `GetTalentInfo(tab, idx)` ordering IS just
+    // "TalentTab rows for the class in row order" × "Talent.dbc rows for that
+    // TabID in row order". Reading these arrays with the same walk (but an
+    // arbitrary class-mask) reproduces the engine's ordering for any class,
+    // which is how `GetTalentIDByIndex`'s optional classID arg works.
+    //
+    // Each global holds a base POINTER (deref) to the contiguous record array;
+    // the sibling +4 holds the record count. Strides match the by-ID records:
+    // TalentTab 0x3c, Talent 0x54 (TALENT_ENTRY_STRIDE).
+    //   TalentTab record: ID@+0x00, raceMask@+0x2c, classMask@+0x30
+    //   Talent record:    ID@+0x00, TabID@+0x04 (rest per the by-ID layout)
+    VAR_TALENTTAB_DBC_FLAT_RECORDS = 0x00C0D6CC,
+    VAR_TALENTTAB_DBC_FLAT_COUNT = 0x00C0D6D0,
+    TALENTTAB_ENTRY_STRIDE = 0x3c,
+    OFF_TALENTTAB_ID = 0x00,
+    OFF_TALENTTAB_CLASS_MASK = 0x30,
+    VAR_TALENT_DBC_FLAT_RECORDS = 0x00C0D6E0,
+    VAR_TALENT_DBC_FLAT_COUNT = 0x00C0D6E4,
+    OFF_TALENT_DBC_TAB_ID = 0x04,
+
     // Engine's `Script_GetTalentInfo` Lua C function. We call it from
     // `GetTalentSpellID` to derive the player's currentRank without
     // re-implementing the spell-knowledge checks at `0x0060C740` /

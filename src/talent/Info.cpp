@@ -109,8 +109,73 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
     return 1;
 }
 
-// `GetTalentIDByIndex(tabIndex, talentIndex)` — returns the Talent.dbc
-// primary key (the row's ID at `TalentEntry+0x00`) for the talent at
+// Cross-class talent resolution via the DBC flat arrays — mirrors the engine's
+// tree builder `FUN_004f2c00` but filtered to an arbitrary class instead of the
+// local player's. Used by `GetTalentIDByIndex`'s optional `classID` arg so an
+// addon can inspect any class's tree, not just the one it's running on.
+
+// TalentTab.dbc rowID of the `tabIndex`-th (1-based) tab belonging to `classID`,
+// or 0. Tabs are taken in DBC row order and filtered by `classMask` (mask 0 =
+// all classes). Race isn't part of "which class owns a tab" — vanilla tabs are
+// never race-restricted — so we apply only the class half of `FUN_004f2e50`.
+static uint32_t NthClassTalentTabID(int classID, int tabIndex) {
+    const uint32_t classBit = 1u << ((classID - 1) & 0x1F);
+    auto *base = *reinterpret_cast<const uint8_t *const *>(
+        static_cast<uintptr_t>(Offsets::VAR_TALENTTAB_DBC_FLAT_RECORDS));
+    const int count = *reinterpret_cast<const int *>(
+        static_cast<uintptr_t>(Offsets::VAR_TALENTTAB_DBC_FLAT_COUNT));
+    if (base == nullptr)
+        return 0;
+    int match = 0;
+    for (int i = 0; i < count; ++i) {
+        const uint8_t *rec = base + i * Offsets::TALENTTAB_ENTRY_STRIDE;
+        const uint32_t classMask = *reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_TALENTTAB_CLASS_MASK);
+        if (classMask != 0 && (classMask & classBit) == 0)
+            continue;
+        if (++match == tabIndex)
+            return *reinterpret_cast<const uint32_t *>(
+                rec + Offsets::OFF_TALENTTAB_ID);
+    }
+    return 0;
+}
+
+// Talent.dbc record for the `talentIndex`-th (1-based) talent whose TabID is
+// `tabID`, in DBC row order — the same order the builder assigns within a tab.
+// Returns null if there aren't that many.
+static const uint8_t *NthTabTalentRecord(uint32_t tabID, int talentIndex) {
+    auto *base = *reinterpret_cast<const uint8_t *const *>(
+        static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_FLAT_RECORDS));
+    const int count = *reinterpret_cast<const int *>(
+        static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_FLAT_COUNT));
+    if (base == nullptr)
+        return nullptr;
+    int match = 0;
+    for (int i = 0; i < count; ++i) {
+        const uint8_t *rec = base + i * Offsets::TALENT_ENTRY_STRIDE;
+        if (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_TALENT_DBC_TAB_ID) != tabID)
+            continue;
+        if (++match == talentIndex)
+            return rec;
+    }
+    return nullptr;
+}
+
+// The Talent.dbc record for (classID, tabIndex, talentIndex), or null on any
+// out-of-range input. `classID` is 1-based (1..31; vanilla uses 1..11 with 6/10
+// unused).
+static const uint8_t *ResolveTalentRecordForClass(int classID, int tabIndex,
+                                                   int talentIndex) {
+    if (classID < 1 || classID > 31 || tabIndex < 1 || talentIndex < 1)
+        return nullptr;
+    const uint32_t tabID = NthClassTalentTabID(classID, tabIndex);
+    if (tabID == 0)
+        return nullptr;
+    return NthTabTalentRecord(tabID, talentIndex);
+}
+
+// `GetTalentIDByIndex(tabIndex, talentIndex[, classID])` — returns the
+// Talent.dbc primary key (the row's ID at `TalentEntry+0x00`) for the talent at
 // the given (tab, idx). 1.12's `GetTalentInfo` returns
 // `(name, icon, tier, column, currentRank, maxRank, ...)` but NOT the
 // talentID, so addons that want a stable identifier (for SavedVariables
@@ -118,20 +183,43 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
 // encode `(class, tab, tier, column)` and hope the talent tree doesn't
 // shift.
 //
-// Reads from the same per-tab talent arrays at `[VAR_TALENT_TAB_INFO_ARRAY]`
-// that #36 `GetTalentSpellID` walks. talentID at `+0x00` of the
-// `TalentEntry` was verified empirically during the GetTalentSpellID
-// debug pass: `entryFirstDword=174` matched Inner Focus's Talent.dbc
-// row ID (and `166` for the first Discipline talent).
+// Without `classID` (or when it's nil) it reads the player's own tree from the
+// per-tab talent arrays at `[VAR_TALENT_TAB_INFO_ARRAY]` (same source #36
+// `GetTalentSpellID` walks). talentID at `+0x00` of the `TalentEntry` was
+// verified empirically during the GetTalentSpellID debug pass:
+// `entryFirstDword=174` matched Inner Focus's Talent.dbc row ID (and `166` for
+// the first Discipline talent).
+//
+// With an explicit `classID` it resolves against the Talent.dbc / TalentTab.dbc
+// flat arrays instead, so it works for any class — not just the one the addon
+// is running on. The (tab, idx) ordering matches the player-class path exactly:
+// both come from the engine builder's DBC-row-order walk (see
+// `ResolveTalentRecordForClass` and the flat-array note in Offsets.h).
 static int __fastcall Script_GetTalentIDByIndex(void *L) {
     if (!Game::Lua::IsNumber(L, 1) || !Game::Lua::IsNumber(L, 2)) {
-        Game::Lua::Error(L, "Usage: GetTalentIDByIndex(tabIndex, talentIndex)");
+        Game::Lua::Error(L,
+            "Usage: GetTalentIDByIndex(tabIndex, talentIndex[, classID])");
         return 0;
     }
     const int tabIndex = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const int talentIndex = static_cast<int>(Game::Lua::ToNumber(L, 2));
     if (tabIndex < 1 || talentIndex < 1)
         return 0;
+
+    // Explicit classID → cross-class DBC path. Omitted/nil → player's own class
+    // via the engine's runtime tab-info arrays (below).
+    if (Game::Lua::IsNumber(L, 3)) {
+        const int classID = static_cast<int>(Game::Lua::ToNumber(L, 3));
+        const uint8_t *rec =
+            ResolveTalentRecordForClass(classID, tabIndex, talentIndex);
+        if (rec == nullptr)
+            return 0;
+        const uint32_t talentID = *reinterpret_cast<const uint32_t *>(rec);
+        if (talentID == 0)
+            return 0;
+        Game::Lua::PushNumber(L, static_cast<double>(talentID));
+        return 1;
+    }
 
     const int tabCount = *reinterpret_cast<const int *>(
         static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_COUNT));

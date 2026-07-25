@@ -449,7 +449,7 @@ build instructions.
 
 - [Talent](#talent)
   - [`GetTalentSpellID(tabIndex, talentIndex, [rank])`](#gettalentspellidtabindex-talentindex-rank)
-  - [`GetTalentIDByIndex(tabIndex, talentIndex)`](#gettalentidbyindextabindex-talentindex)
+  - [`GetTalentIDByIndex(tabIndex, talentIndex[, classID])`](#gettalentidbyindextabindex-talentindex-classid)
 
 - [Targeting](#targeting)
   - [`GetPlayerFacing()`](#getplayerfacing)
@@ -4020,7 +4020,7 @@ Classic. The anchor string is reachable via vanilla's native
 
 Renders a tooltip for the talent identified by `Talent.dbc` primary
 key — the natural pair to
-[`GetTalentIDByIndex`](#gettalentidbyindextabindex-talentindex).
+[`GetTalentIDByIndex`](#gettalentidbyindextabindex-talentindex-classid).
 Works for any class's talents, not just the player's.
 
 Two-tier resolution:
@@ -11071,15 +11071,16 @@ Equivalent to one of `GetTalentInfo`'s extended returns in modern WoW
 (varies by version; the talent's spellID has been part of the tuple
 since 5.0+).
 
-### `GetTalentIDByIndex(tabIndex, talentIndex)`
+### `GetTalentIDByIndex(tabIndex, talentIndex[, classID])`
 
 Returns the engine's hidden talentID — the primary key of the
 `Talent.dbc` row — for the talent at the given (tab, idx). Returns
 `nil` for out-of-range indices.
 
 ```lua
-GetTalentIDByIndex(1, 9)   -- 174  (Inner Focus, Discipline tier 3)
-GetTalentIDByIndex(1, 1)   -- 166  (first Discipline talent)
+GetTalentIDByIndex(1, 9)      -- 174  (Inner Focus, Discipline tier 3)
+GetTalentIDByIndex(1, 1)      -- 166  (first Discipline talent)
+GetTalentIDByIndex(1, 1, 8)   -- 37   (first Arcane talent — Mage, classID 8)
 ```
 
 1.12's `GetTalentInfo(tab, idx)` returns
@@ -11089,9 +11090,21 @@ key for `GetTalentInfoByID`, talent build sharing strings, etc.); we
 add this getter so addons that key on talentIDs from later expansions
 work unmodified.
 
-Reads `TalentEntry+0x00` from the per-tab talent arrays at
-`[0x00BDCD28]`. Same struct walk as `GetTalentSpellID`, just reads
-a different field.
+The optional `classID` (1-based: Warrior 1, Paladin 2, Hunter 3,
+Rogue 4, Priest 5, Shaman 7, Mage 8, Warlock 9, Druid 11) queries any
+class's talent tree, not just the local player's — useful for
+talent-build tooling and previewing other specs. When omitted or nil,
+it falls back to the player's own class.
+
+- **Without `classID`** — reads `TalentEntry+0x00` from the per-tab
+  talent arrays at `[0x00BDCD28]` (the engine's runtime state for the
+  local player's class). Same struct walk as `GetTalentSpellID`.
+- **With `classID`** — reads the `Talent.dbc` / `TalentTab.dbc` flat
+  arrays directly, replicating the engine's tree builder
+  (`FUN_004f2c00`): tabs in DBC row order filtered by class-mask, then
+  talents in DBC row order within each tab. This is the *same* ordering
+  the runtime arrays are built from, so `GetTalentIDByIndex(t, i)` and
+  `GetTalentIDByIndex(t, i, <player's class>)` return identical values.
 
 Equivalent to the talentID return slot of `GetTalentInfo` in modern
 WoW (5.0+; not exposed at all in 1.12).
