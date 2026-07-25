@@ -407,13 +407,26 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
         // Spell_C_CastSpell at `spellID == VAR_CURRENT_CAST_SPELL`, so the
         // client path (FUN_CAST_START_SET hook) never fires for them — this
         // server packet is the only signal. Dedup against a fresh client stamp
-        // (same spell, started within ~latency) so a normal cast's confirming
-        // packet doesn't restart its bar; otherwise it's a chained recast the
+        // (same spell, started within ~latency): a normal cast's confirming
+        // packet mustn't RESTART its bar; otherwise it's a chained recast the
         // client bailed on — take it, and flag it so the VAR==0 poll (which
         // never saw it) won't clear it.
         if (g_cast.spellID == spellID && now < g_cast.endMs &&
-            now - g_cast.startMs < kCastStartDedupMs)
+            now - g_cast.startMs < kCastStartDedupMs) {
+            // Confirming packet. Keep startMs (no visual restart), but SNAP the
+            // end time to the server's authoritative castTime. The client stamp
+            // came from FUN_006e3340, which folds in the caster's cast-speed /
+            // ranged-haste multiplier (descriptor +0x22c) — right for spells the
+            // server also hastes (Aimed/Multi-Shot), WRONG for ones it doesn't.
+            // Volley is the case that surfaced this: not channeled, not sped by
+            // Quick Shots server-side, so the hasted prediction ended the bar
+            // early and the player was "still casting after the bar finished."
+            // The server's castTime is reality; reconcile to it (preserving any
+            // pushback already accumulated). A no-op when client and server agree.
+            g_cast.endMs =
+                g_cast.startMs + static_cast<int>(castTime) + g_cast.delayMs;
             return;
+        }
         g_cast = TrackedSpell{spellID, now, now + static_cast<int>(castTime), 0};
         g_castFromServer = true;
         g_channel.spellID = 0; // a cast supersedes any channel
