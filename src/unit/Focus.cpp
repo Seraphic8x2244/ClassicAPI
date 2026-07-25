@@ -184,6 +184,24 @@ void RegisterLuaFunctions() {
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
+// Drop focus when the player logs out to the glue screen. The DLL isn't
+// reloaded on a logout→character-select→login, so g_focusGUID would
+// otherwise carry a dead GUID from character A into character B. The
+// WorldTick despawn probe self-heals it within a tick (ObjectByGUID miss
+// → Set(0)), but that fires a spurious PLAYER_FOCUS_CHANGED on B's first
+// tick and can't cover the (astronomically rare) GUID-collision case, so
+// clearing here is both cleaner and exact retail parity. We use the glue
+// hook, NOT FrameScript_Initialize, because it fires on the world→glue
+// return a logout triggers but NOT on /reload — so focus correctly
+// survives /reload (retail behavior) and drops only on logout. No event /
+// observer work: char A's focus observers already died with the object
+// during world teardown, and B starts with focus nil (no event expected).
+void ClearOnLogout() {
+    g_focusGUID = 0;
+    g_focusTargetGUID = 0;
+}
+const Game::GlueModuleAutoRegister _clearOnLogout{&ClearOnLogout};
+
 } // namespace
 
 uint64_t Get() { return g_focusGUID; }

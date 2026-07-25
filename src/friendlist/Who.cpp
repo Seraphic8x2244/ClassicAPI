@@ -282,7 +282,25 @@ void RegisterLuaFunctions() {
                                      &Script_C_FriendList_IsWhoQueryPending);
 }
 
+// Clear transient /who state on every in-game Lua (re)build — login OR
+// /reload. The DLL survives a logout→character-select→login, so a query
+// whose SMSG_WHO response never crossed that boundary would otherwise leave
+// g_inFlight stuck (IsWhoQueryPending() wrongly true for the next character)
+// and our VAR_WHO_TO_UI_FLAG override forced on (routing the next
+// character's unrelated /who to the WhoList). ResetIfStuck only heals this
+// lazily on a *subsequent* send; a fresh-init reset makes every character
+// start clean. RestoreFlagIfOwned puts the engine flag back to the value we
+// snapshotted before overriding. ModuleAutoRegister fires per login and per
+// /reload, before any addon runs, so this always precedes a new burst.
+void ResetState() {
+    g_inFlight = 0;
+    RestoreFlagIfOwned();
+    g_haveSent = false;
+    g_lastSendTick = 0;
+}
+
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
+const Game::ModuleAutoRegister _resetOnInit{&ResetState};
 
 } // namespace
 
