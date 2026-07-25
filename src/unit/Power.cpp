@@ -140,6 +140,70 @@ bool ResolveArgs(void *L, const uint8_t **outDesc, int *outType) {
     return true;
 }
 
+// Out-of-range group-member fallback. When a unit token has no live CGUnit —
+// a party/raid member on a different map or otherwise out of range — the
+// descriptor is gone, but the engine still caches the member's PRIMARY power
+// from SMSG_PARTY_MEMBER_STATS. Mirrors Script_UnitMana / Script_UnitManaMax
+// (0x00517670 / 0x005177e0): token → GUID, then the party stats block
+// (FUN_GROUP_MEMBER_STATS_LOOKUP: type@+9, cur@+0xe, max@+0x10) and the raid
+// slot (FUN_GROUP_MEMBER_SLOT_LOOKUP: type@+0x58, cur@+0x60, max@+0x62), both
+// u16. Reached only after ResolveArgs fails (no live object) — the token is
+// already known valid, so TokenToGUID won't raise. Returns 0 if the GUID isn't
+// rostered, or if an explicit powerType other than the member's primary was
+// requested (the roster holds only the one power).
+enum class RosterKind { Current, Max, Missing };
+
+double RosterPowerFallback(void *L, RosterKind kind) {
+    if (!Game::Lua::IsString(L, 1))
+        return 0.0;
+    auto tokenToGuid = reinterpret_cast<uint64_t(__fastcall *)(const char *)>(
+        static_cast<uintptr_t>(Offsets::FUN_TOKEN_TO_GUID));
+    uint64_t guid = tokenToGuid(Game::Lua::ToString(L, 1));
+    if (guid == 0)
+        return 0.0;
+
+    using Lookup_t = const uint8_t *(__fastcall *)(uint64_t *guid);
+    auto statsFn = reinterpret_cast<Lookup_t>(
+        static_cast<uintptr_t>(Offsets::FUN_GROUP_MEMBER_STATS_LOOKUP));
+    auto slotFn = reinterpret_cast<Lookup_t>(
+        static_cast<uintptr_t>(Offsets::FUN_GROUP_MEMBER_SLOT_LOOKUP));
+
+    int type;
+    uint32_t cur, max;
+    const uint8_t *e = statsFn(&guid);
+    if (e != nullptr) {
+        type = e[Offsets::OFF_GROUP_MEMBER_STATS_POWER_TYPE];
+        cur = *reinterpret_cast<const uint16_t *>(e + Offsets::OFF_GROUP_MEMBER_STATS_POWER);
+        max = *reinterpret_cast<const uint16_t *>(e + Offsets::OFF_GROUP_MEMBER_STATS_MAX_POWER);
+    } else if ((e = slotFn(&guid)) != nullptr) {
+        type = e[Offsets::OFF_RAID_SLOT_POWER_TYPE];
+        cur = *reinterpret_cast<const uint16_t *>(e + Offsets::OFF_RAID_SLOT_POWER);
+        max = *reinterpret_cast<const uint16_t *>(e + Offsets::OFF_RAID_SLOT_MAX_POWER);
+    } else {
+        return 0.0;
+    }
+
+    const int reqType = Game::Lua::IsNumber(L, 2)
+                            ? static_cast<int>(Game::Lua::ToNumber(L, 2))
+                            : -1;
+    if (reqType >= Offsets::UNIT_POWER_MIN_TYPE &&
+        reqType <= Offsets::UNIT_POWER_MAX_TYPE && reqType != type)
+        return 0.0;
+
+    const uint32_t divisor = Game::Lua::ToBoolean(L, 3) ? 1u : PowerDivisor(type);
+    const uint32_t curDisp = cur / divisor;
+    const uint32_t maxDisp = max / divisor;
+    switch (kind) {
+    case RosterKind::Current:
+        return static_cast<double>(curDisp);
+    case RosterKind::Max:
+        return static_cast<double>(maxDisp);
+    case RosterKind::Missing:
+        return static_cast<double>(maxDisp > curDisp ? maxDisp - curDisp : 0u);
+    }
+    return 0.0;
+}
+
 // `UnitPower("unit" [, powerType])` — returns the current power
 // value for the given type. Defaults to the unit's primary power
 // when `powerType` is omitted or set to the modern -1 sentinel.
@@ -153,7 +217,8 @@ static int __fastcall Script_UnitPower(void *L) {
     const uint8_t *desc;
     int type;
     if (!ResolveArgs(L, &desc, &type)) {
-        Game::Lua::PushNumber(L, 0.0);
+        // No live object → out-of-range group member; try the roster cache.
+        Game::Lua::PushNumber(L, RosterPowerFallback(L, RosterKind::Current));
         return 1;
     }
     const uint32_t raw = *reinterpret_cast<const uint32_t *>(
@@ -176,7 +241,7 @@ static int __fastcall Script_UnitPowerMax(void *L) {
     const uint8_t *desc;
     int type;
     if (!ResolveArgs(L, &desc, &type)) {
-        Game::Lua::PushNumber(L, 0.0);
+        Game::Lua::PushNumber(L, RosterPowerFallback(L, RosterKind::Max));
         return 1;
     }
     const uint32_t raw = *reinterpret_cast<const uint32_t *>(
@@ -206,7 +271,7 @@ static int __fastcall Script_UnitPowerMissing(void *L) {
     const uint8_t *desc;
     int type;
     if (!ResolveArgs(L, &desc, &type)) {
-        Game::Lua::PushNumber(L, 0.0);
+        Game::Lua::PushNumber(L, RosterPowerFallback(L, RosterKind::Missing));
         return 1;
     }
     const uint32_t cur = *reinterpret_cast<const uint32_t *>(

@@ -3779,6 +3779,21 @@ enum Offsets {
     GROUP_MEMBER_STATUS_ONLINE = 0x1,
     FUN_GROUP_MEMBER_SLOT_LOOKUP = 0x00496420,
 
+    // Power fields within the two group-member blocks — the out-of-range
+    // fallback the engine's UnitMana/UnitManaMax use when a groupmate has no
+    // live CGUnit (different map / out of range). Stats block (returned by
+    // FUN_GROUP_MEMBER_STATS_LOOKUP): powerType@+9, current@+0xe (u16),
+    // max@+0x10 (u16). Raid slot (FUN_GROUP_MEMBER_SLOT_LOOKUP): powerType
+    // @+0x58, current@+0x60 (u16), max@+0x62 (u16). Values are raw — divide by
+    // the power divisor for display. Verified from Script_UnitMana
+    // (0x00517670) / Script_UnitManaMax (0x005177e0).
+    OFF_GROUP_MEMBER_STATS_POWER_TYPE = 0x9,
+    OFF_GROUP_MEMBER_STATS_POWER = 0xe,
+    OFF_GROUP_MEMBER_STATS_MAX_POWER = 0x10,
+    OFF_RAID_SLOT_POWER_TYPE = 0x58,
+    OFF_RAID_SLOT_POWER = 0x60,
+    OFF_RAID_SLOT_MAX_POWER = 0x62,
+
     // Per-slot GUID tables — used to map party/raid token strings
     // ("party1", "raid17") to GUIDs without going through
     // `FUN_RESOLVE_UNIT_TOKEN`, which only resolves to a local CGUnit
