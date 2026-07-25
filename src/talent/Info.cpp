@@ -18,7 +18,12 @@
 
 namespace Talent::Info {
 
-// `GetTalentSpellID(tabIndex, talentIndex[, rank])` — returns the
+// Cross-class talent record resolver — defined below (before
+// `GetTalentIDByIndex`), shared by both talent getters' optional classID arg.
+static const uint8_t *ResolveTalentRecordForClass(int classID, int tabIndex,
+                                                   int talentIndex);
+
+// `GetTalentSpellID(tabIndex, talentIndex[, rank[, classID]])` — returns the
 // spellID for the given talent at the requested rank, or `nil` if the
 // talent isn't allocated (or any arg is out of range).
 //
@@ -34,19 +39,51 @@ namespace Talent::Info {
 // points in this talent), falls back to rank 1 so the function still
 // produces the talent's canonical spellID for unallocated talents.
 //
+// `classID` is optional (4th arg; pass `rank` as nil to use the default).
+// When a number, resolves against `Talent.dbc` / `TalentTab.dbc` for that
+// class instead of the player's runtime tree — same cross-class path as
+// `GetTalentIDByIndex`. There's no "currentRank" for a class you aren't, so a
+// cross-class query with no explicit `rank` defaults to rank 1 (the talent's
+// canonical spellID). Ordering matches the player-class path exactly (see
+// `ResolveTalentRecordForClass`).
+//
 // Returns `nil` when:
-//   - tab/talentIndex/rank are non-numeric or out of range
+//   - tab/talentIndex/rank/classID are non-numeric-when-required or out of range
 //   - the explicit `rank` exceeds the talent's allocated max (e.g. rank
 //     5 on a 1-rank talent — the SpellRank slot is zero)
 static int __fastcall Script_GetTalentSpellID(void *L) {
     if (!Game::Lua::IsNumber(L, 1) || !Game::Lua::IsNumber(L, 2)) {
-        Game::Lua::Error(L, "Usage: GetTalentSpellID(tabIndex, talentIndex[, rank])");
+        Game::Lua::Error(L,
+            "Usage: GetTalentSpellID(tabIndex, talentIndex[, rank[, classID]])");
         return 0;
     }
     const int tabIndex = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const int talentIndex = static_cast<int>(Game::Lua::ToNumber(L, 2));
     if (tabIndex < 1 || talentIndex < 1)
         return 0;
+
+    // Explicit classID → cross-class DBC path. `rank` (arg 3) is still honored
+    // when given; without it we can't ask the engine for a currentRank on a
+    // class the player isn't, so default to rank 1.
+    if (Game::Lua::IsNumber(L, 4)) {
+        const int classID = static_cast<int>(Game::Lua::ToNumber(L, 4));
+        int rank = 1;
+        if (Game::Lua::IsNumber(L, 3)) {
+            rank = static_cast<int>(Game::Lua::ToNumber(L, 3));
+            if (rank < 1 || rank > Offsets::TALENT_MAX_RANKS)
+                return 0;
+        }
+        const uint8_t *rec =
+            ResolveTalentRecordForClass(classID, tabIndex, talentIndex);
+        if (rec == nullptr)
+            return 0;
+        const uint32_t spellID = *reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_TALENT_SPELL_RANK + (rank - 1) * sizeof(uint32_t));
+        if (spellID == 0)
+            return 0; // rank slot not populated (rank > maxRank for this talent)
+        Game::Lua::PushNumber(L, static_cast<double>(spellID));
+        return 1;
+    }
 
     // Pre-validate tab/idx so we don't trigger `lua_error` from the
     // engine's `Script_GetTalentInfo` on out-of-range input. The engine
@@ -111,8 +148,9 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
 
 // Cross-class talent resolution via the DBC flat arrays — mirrors the engine's
 // tree builder `FUN_004f2c00` but filtered to an arbitrary class instead of the
-// local player's. Used by `GetTalentIDByIndex`'s optional `classID` arg so an
-// addon can inspect any class's tree, not just the one it's running on.
+// local player's. Used by `GetTalentSpellID` / `GetTalentIDByIndex`'s optional
+// `classID` arg so an addon can inspect any class's tree, not just the one it's
+// running on.
 
 // TalentTab.dbc rowID of the `tabIndex`-th (1-based) tab belonging to `classID`,
 // or 0. Tabs are taken in DBC row order and filtered by `classMask` (mask 0 =

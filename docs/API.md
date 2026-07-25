@@ -448,7 +448,7 @@ build instructions.
   - [`CancelShapeshiftForm()`](#cancelshapeshiftform)
 
 - [Talent](#talent)
-  - [`GetTalentSpellID(tabIndex, talentIndex, [rank])`](#gettalentspellidtabindex-talentindex-rank)
+  - [`GetTalentSpellID(tabIndex, talentIndex, [rank[, classID]])`](#gettalentspellidtabindex-talentindex-rank-classid)
   - [`GetTalentIDByIndex(tabIndex, talentIndex[, classID])`](#gettalentidbyindextabindex-talentindex-classid)
 
 - [Targeting](#targeting)
@@ -11021,7 +11021,7 @@ its cancel packet. Vanilla just lacks the public Lua surface.
 
 ## Talent
 
-### `GetTalentSpellID(tabIndex, talentIndex, [rank])`
+### `GetTalentSpellID(tabIndex, talentIndex, [rank[, classID]])`
 
 Returns the spellID for the talent at the given `(tabIndex, talentIndex)`
 and rank, or `nil` if the talent index is out of range or the rank slot
@@ -11035,6 +11035,7 @@ GetTalentSpellID(1, 9)           -- 14751  (Inner Focus, single rank)
 GetTalentSpellID(1, 1)           -- 14525  (Wand Specialization, current rank)
 GetTalentSpellID(1, 1, 1)        -- 14524  (Wand Specialization rank 1)
 GetTalentSpellID(1, 1, 2)        -- 14525  (Wand Specialization rank 2)
+GetTalentSpellID(1, 1, 1, 8)     -- 11210  (Arcane Subtlety r1 — Mage, classID 8)
 
 -- chains into the spell APIs cleanly
 GameTooltip:SetSpellByID(GetTalentSpellID(1, 9))
@@ -11054,18 +11055,29 @@ of how many points the player has invested. Useful for tooltip-on-hover
 scenarios where you want to preview "what rank 5 would do" without
 respec'ing.
 
+`classID` is optional (4th arg; pass `rank` as nil to keep the default)
+and queries any class's talent tree via `Talent.dbc` / `TalentTab.dbc` —
+the same cross-class path as
+[`GetTalentIDByIndex`](#gettalentidbyindextabindex-talentindex-classid),
+with identical `(tab, idx)` ordering. Because there's no "currentRank"
+for a class you aren't, a cross-class query with no explicit `rank`
+defaults to **rank 1** (rather than the player-currentRank default of
+the same-class path).
+
 Returns `nil` for:
 
 - non-numeric or non-positive `tabIndex` / `talentIndex`
-- `tabIndex` or `talentIndex` out of range for the player's class
+- `tabIndex` or `talentIndex` out of range for the class
 - explicit `rank` exceeding the talent's allocated max — e.g. asking
   for rank 5 on a 1-rank talent like Inner Focus
+- a `classID` that matches no class
 
-Reads the engine's per-tab talent arrays at `[0x00BDCD28]` (populated
-at login from `Talent.dbc` filtered by class). The `SpellRank[]` array
-lives at offset `+0x10` of each `TalentEntry` (stride `0x54`), with
-one spellID per rank — vanilla populates indices 0..4 (ranks 1..5),
-the higher slots stay zero.
+Without `classID`, reads the engine's per-tab talent arrays at
+`[0x00BDCD28]` (populated at login from `Talent.dbc` filtered by the
+player's class); with it, reads the `Talent.dbc` flat array directly.
+Either way the `SpellRank[]` array lives at offset `+0x10` of each
+record (stride `0x54`), one spellID per rank — vanilla populates
+indices 0..4 (ranks 1..5), the higher slots stay zero.
 
 Equivalent to one of `GetTalentInfo`'s extended returns in modern WoW
 (varies by version; the talent's spellID has been part of the tuple
