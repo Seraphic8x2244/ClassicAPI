@@ -91,6 +91,7 @@ using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, in
 constexpr int OFF_NAME = 0x1E0;            // localized name[9]
 constexpr int OFF_ICON_ID = 0x1D4;         // -> SpellIcon.dbc
 constexpr int OFF_ATTRIBUTES = 0x18;       // u32 Attributes flags
+constexpr int OFF_ATTRIBUTES_EX2 = 0x24;   // u32 AttributesEx2 flags
 constexpr int OFF_SUBRECORD_VALUE = 0x04;  // SpellIcon path field
 
 // SPELL_ATTR_TRADESPELL — set on profession recipe casts (enchant,
@@ -98,6 +99,12 @@ constexpr int OFF_SUBRECORD_VALUE = 0x04;  // SpellIcon path field
 // 3.3.5's Script_UnitCastingInfo reads bit 0x20 of Attributes (at +0x10
 // there, +0x18 here — the bit value is the same across builds).
 constexpr uint32_t SPELL_ATTR_TRADESPELL = 0x20;
+
+// SPELL_ATTR_RANGED — every ranged ability carries it; the server adds a
+// flat +500ms "aim time" to these (SpellEntry::GetCastTime). Auto-repeat
+// shots (Auto Shot / Shoot, AttributesEx2 bit 0x20) are the one exclusion.
+constexpr uint32_t SPELL_ATTR_RANGED = 0x2;
+constexpr uint32_t SPELL_ATTR_EX2_AUTOREPEAT = 0x20;
 
 struct TrackedSpell {
     int spellID; // 0 = not casting / channeling
@@ -163,8 +170,30 @@ void *Resolve(const char *token) {
 // matches the engine's cast bar exactly — including talents like a Mage's
 // faster casts. Unit arg 0 = local player; flag 0 clamps negatives to 0.
 int CastTimeMs(int spellID) {
-    return static_cast<int>(
+    int ms = static_cast<int>(
         reinterpret_cast<GetCastTime_t>(Offsets::FUN_GET_CAST_TIME)(spellID, 0, 0));
+    // FUN_006e3340 (also the spell tooltip's cast-time source) does NOT add the
+    // flat +500ms "aim time" the server applies to ranged, non-autorepeat
+    // spells — SpellEntry::GetCastTime does `castTime += 500` for
+    // SPELL_ATTR_RANGED. So our zero-latency prediction runs ~500ms short of
+    // the server for Volley / Aimed Shot / Multi-Shot; the confirming
+    // SMSG_SPELL_START then snaps the bar out ~1 RTT later. Mirror the server
+    // here so the prediction is right from frame 1 (only for spells that
+    // already have a cast time — instant ranged abilities that the server
+    // gives a 500ms aim time still surface through the packet path). The
+    // cast-time reconcile in HandleSpellStart remains the backstop.
+    if (ms > 0) {
+        const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
+        if (rec != nullptr) {
+            const uint32_t attr =
+                *reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES);
+            const uint32_t attrEx2 =
+                *reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES_EX2);
+            if ((attr & SPELL_ATTR_RANGED) && !(attrEx2 & SPELL_ATTR_EX2_AUTOREPEAT))
+                ms += 500;
+        }
+    }
+    return ms;
 }
 
 // Effective channel duration (ms) for the local player, 0 if none. Uses
