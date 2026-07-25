@@ -520,6 +520,7 @@ build instructions.
   - [`UnitPower(unit [, powerType [, unmodified]])` / `UnitPowerMax(unit [, powerType [, unmodified]])`](#unitpowerunit--powertype--unmodified--unitpowermaxunit--powertype--unmodified)
   - [`UnitPowerMissing(unit [, powerType [, unmodified]])`](#unitpowermissingunit--powertype--unmodified)
   - [`UnitPowerType(unit)`](#unitpowertypeunit)
+  - [`UnitSpellHaste(unit)`](#unitspellhasteunit)
 
 - [UnitAuras](#unitauras)
   - [`C_UnitAuras.GetAuraDataByIndex(unit, index [, filter])`](#c_unitaurasgetauradatabyindexunit-index--filter)
@@ -12490,6 +12491,27 @@ Chains to the engine's original `Script_UnitPowerType` at
 `0x00517940` to preserve its full unit-resolution flow (object-
 manager lookup with pet / totem / vehicle fallbacks), then reads
 the just-pushed integer and appends the token string.
+
+### `UnitSpellHaste(unit)`
+
+Backport of the TBC+ spell-haste getter — vanilla 1.12 has no haste API.
+Returns the spell haste **percentage**: `0` for an unhasted unit, positive
+when casting is sped up, negative when slowed (Curse of Tongues).
+
+```lua
+local haste = UnitSpellHaste("player")   -- 0 for most vanilla casters
+```
+
+Reads `UNIT_MOD_CAST_SPEED` — the cast-time multiplier at descriptor `+0x22c`
+that the server folds into `SpellEntry::GetCastTime`
+(`castTime *= modCastSpeed`) — and converts it to a percentage:
+`haste% = (1 / modCastSpeed - 1) * 100`. So `modCastSpeed` `1.0` → `0`,
+`0.5` (half cast time) → `100`, `>1.0` → negative.
+
+This is the Blizzard-shaped surface over the field nampower exposes raw as
+`GetUnitField(unit, "modCastSpeed")`, so addons can drop that dependency.
+Consumers that need the raw multiplier back can recover it as
+`1 / (1 + UnitSpellHaste(unit) / 100)`. Returns `0` for invalid units.
 
 ## UnitAuras
 

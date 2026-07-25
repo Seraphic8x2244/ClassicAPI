@@ -826,6 +826,15 @@ enum Offsets {
     // mana/rage/focus/energy/happiness order as POWER1..5). Vanilla
     // 1.12 has 5 power types; the WotLK additions (Runes / Runic Power)
     // don't exist in this descriptor layout.
+
+    // UNIT_MOD_CAST_SPEED — the cast-time multiplier float (1.0 = normal,
+    // <1.0 = faster). The server folds it into `SpellEntry::GetCastTime`
+    // (`castTime *= GetFloatValue(UNIT_MOD_CAST_SPEED)`); the client reads it
+    // in `FUN_006e3340` at descriptor `+0x22c`. Backs `UnitSpellHaste`
+    // (`haste% = (1/mult - 1) * 100`). nampower surfaces the raw float as its
+    // `modCastSpeed` unit field.
+    OFF_UNIT_MOD_CAST_SPEED = 0x22C,
+
     UNIT_POWER_MIN_TYPE = 0,
     UNIT_POWER_MAX_TYPE = 4, // happiness; types 5/6 only valid post-WotLK
 
