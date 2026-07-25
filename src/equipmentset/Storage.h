@@ -22,9 +22,11 @@ namespace EquipmentSet::Storage {
 // Resolves the per-character file path. Returns an empty string until
 // the engine has populated all three session globals (account, realm,
 // character). Path format: `WTF\Account\<acct>\<realm>\<char>\
-// ClassicAPI_EquipmentSets.txt`. Once the engine has the player in
-// world the values are stable for the rest of the session, so callers
-// can cache after the first non-empty return.
+// ClassicAPI_EquipmentSets.txt`. The values are stable only while the
+// current character is in world — they change on a logout→login to a
+// different character (the DLL is NOT reloaded across that transition),
+// so callers must re-resolve and compare rather than caching the first
+// non-empty return permanently. See `Data::EnsureLoaded`.
 std::string ResolveFilePath();
 
 // Reads the file at `path` and overwrites `outSets` with the parsed

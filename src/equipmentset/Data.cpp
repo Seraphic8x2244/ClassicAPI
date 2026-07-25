@@ -88,12 +88,27 @@ void Persist() {
 } // namespace
 
 void EnsureLoaded() {
-    if (g_loaded)
-        return;
-    g_path = Storage::ResolveFilePath();
-    if (g_path.empty())
-        return; // session globals not yet populated; retry on next call
+    // Re-resolve the per-character path on every call rather than latching
+    // once. The injected DLL persists across a logout→character-select→login
+    // (no process restart), so a permanent `g_loaded` latch would leave the
+    // previous character's file path and cached sets in place — the next
+    // character would then read, and save into, character A's data. Detecting
+    // a path change here makes the cache self-heal on any character/account
+    // switch. Every mutation Persist()s immediately, so dropping the old
+    // in-memory sets never loses unsaved work.
+    std::string path = Storage::ResolveFilePath();
+    if (path.empty())
+        return; // session globals not yet populated; keep current, retry later
+    if (g_loaded && path == g_path)
+        return; // already loaded for this character
+
+    g_path = std::move(path);
+    g_sets.clear();
     Storage::Load(g_path, &g_sets);
+    // Per-session "ignore this slot on next save" state belongs to the
+    // character it was set on — clear it when switching characters.
+    for (int i = 0; i < SLOT_COUNT; ++i)
+        g_ignoredForSave[i] = false;
     g_loaded = true;
 }
 
