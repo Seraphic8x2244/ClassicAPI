@@ -516,6 +516,7 @@ build instructions.
   - [`UnitDistanceSquared(unit)`](#unitdistancesquaredunit)
   - [`UnitInLineOfSight(unit)`](#unitinlineofsightunit)
   - [`ClosestUnitPosition(creatureID)`](#closestunitpositioncreatureid)
+  - [`UnitHealthMissing(unit)`](#unithealthmissingunit)
   - [`UnitPower(unit [, powerType])` / `UnitPowerMax(unit [, powerType])`](#unitpowerunit--powertype--unitpowermaxunit--powertype)
   - [`UnitPowerType(unit)`](#unitpowertypeunit)
 
@@ -12348,6 +12349,27 @@ encodes `creatureID` (bits 24–47), and returns the closest one's position
 > starting zones). It can't point at un-synced spawns elsewhere in the
 > zone the way retail's database can — but for "where's the nearest `<mob>`
 > I can see" it's more general than retail.
+
+### `UnitHealthMissing(unit)`
+
+The health deficit — `UnitHealthMax(unit) - UnitHealth(unit)` — in one call.
+A convenience for healing addons (overheal math, "missing health" bars) that
+would otherwise call both engine functions and subtract in Lua every frame.
+
+```lua
+local missing = UnitHealthMissing("player")   -- 0 at full health
+```
+
+Returns `0` at full health and for a valid-but-absent unit (e.g. `"target"`
+with nothing targeted), matching `UnitHealth`'s 0-for-missing convention;
+clamped so a transient `current > max` never returns negative.
+
+Tracks the engine's own `UnitHealth` / `UnitHealthMax` exactly, including
+vanilla's percentage form for non-grouped units (where `UnitHealthMax` is
+`100`): a target at `85/100` reports `15`.
+
+Direct descriptor reads — `desc[+0x40]` (HEALTH), `desc[+0x58]` (MAXHEALTH).
+No engine call, no Lua-stack roundtrip.
 
 ### `UnitPower(unit [, powerType])` / `UnitPowerMax(unit [, powerType])`
 
