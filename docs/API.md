@@ -518,6 +518,7 @@ build instructions.
   - [`ClosestUnitPosition(creatureID)`](#closestunitpositioncreatureid)
   - [`UnitHealthMissing(unit)`](#unithealthmissingunit)
   - [`UnitPower(unit [, powerType])` / `UnitPowerMax(unit [, powerType])`](#unitpowerunit--powertype--unitpowermaxunit--powertype)
+  - [`UnitPowerMissing(unit [, powerType [, unmodified]])`](#unitpowermissingunit--powertype--unmodified)
   - [`UnitPowerType(unit)`](#unitpowertypeunit)
 
 - [UnitAuras](#unitauras)
@@ -12431,6 +12432,27 @@ So a fresh warrior reads `UnitPower("player", 1)` = `0..100`, not
 Direct descriptor reads — `desc[+0x44 + type*4]` for current power,
 `desc[+0x5C + type*4]` for max, divided by the table entry for the
 type. No engine call, no Lua-stack roundtrip.
+
+### `UnitPowerMissing(unit [, powerType [, unmodified]])`
+
+The power deficit — `UnitPowerMax(...) - UnitPower(...)` for the given type —
+in one call. The power analogue of [`UnitHealthMissing`](#unithealthmissingunit),
+for energy/mana/rage "resource needed" checks. Same `unit` / `powerType`
+handling and invalid-unit-returns-`0` semantics as `UnitPower`.
+
+```lua
+local energyNeeded = UnitPowerMissing("player", Enum.PowerType.Energy)
+local rageMissing  = UnitPowerMissing("player")   -- primary power
+```
+
+`unmodified` (arg 3, any truthy value) skips the display divisor and returns
+the raw internal deficit — the same third argument retail's `UnitPower` takes.
+
+Computed as the difference of the two **display** values (each integer-divided
+by the per-type divisor), not by dividing the raw difference, so it equals
+`UnitPowerMax(...) - UnitPower(...)` exactly. Those diverge for rage: raw
+`1000/55` displays as `100/5`, a deficit of `95`, whereas `(1000-55)/10`
+truncates to `94`. Clamped at 0.
 
 ### `UnitPowerType(unit)`
 

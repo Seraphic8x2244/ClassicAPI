@@ -183,6 +183,41 @@ static int __fastcall Script_UnitPowerMax(void *L) {
     return 1;
 }
 
+// `UnitPowerMissing("unit" [, powerType [, unmodified]])` — the power
+// deficit, i.e. `UnitPowerMax - UnitPower` for the given type. Same arg
+// shape and fallbacks as `UnitPower`; `unmodified` (arg 3, truthy) skips
+// the display divisor and returns the raw internal deficit, mirroring
+// retail's third `UnitPower` arg.
+//
+// Computed as the difference of the two DISPLAY values (each integer-divided
+// by the per-type divisor), NOT by dividing the raw difference — so it equals
+// `UnitPowerMax(...) - UnitPower(...)` exactly. For rage those diverge:
+// raw 1000/55 displays as 100/5, giving a deficit of 95, whereas
+// `(1000-55)/10` truncates to 94.
+static int __fastcall Script_UnitPowerMissing(void *L) {
+    if (!Game::Lua::IsString(L, 1)) {
+        Game::Lua::Error(
+            L, "Usage: UnitPowerMissing(\"unit\" [, powerType [, unmodified]])");
+        return 0;
+    }
+    const uint8_t *desc;
+    int type;
+    if (!ResolveArgs(L, &desc, &type)) {
+        Game::Lua::PushNumber(L, 0.0);
+        return 1;
+    }
+    const uint32_t cur = *reinterpret_cast<const uint32_t *>(
+        desc + Offsets::OFF_UNIT_FIELD_POWER1 + type * 4);
+    const uint32_t max = *reinterpret_cast<const uint32_t *>(
+        desc + Offsets::OFF_UNIT_FIELD_MAXPOWER1 + type * 4);
+    const uint32_t divisor = Game::Lua::ToBoolean(L, 3) ? 1u : PowerDivisor(type);
+    const uint32_t curDisp = cur / divisor;
+    const uint32_t maxDisp = max / divisor;
+    Game::Lua::PushNumber(
+        L, static_cast<double>(maxDisp > curDisp ? maxDisp - curDisp : 0u));
+    return 1;
+}
+
 // `UnitPowerType(unit)` — extended to return `(powerType, powerToken)`.
 // Vanilla 1.12's implementation pushes only the integer; we chain
 // to the engine's original (`0x00517940`) to preserve its full
@@ -210,6 +245,7 @@ static int __fastcall Script_UnitPowerType(void *L) {
 static void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("UnitPower", &Script_UnitPower);
     Game::Lua::RegisterGlobalFunction("UnitPowerMax", &Script_UnitPowerMax);
+    Game::Lua::RegisterGlobalFunction("UnitPowerMissing", &Script_UnitPowerMissing);
     Game::Lua::RegisterGlobalFunction("UnitPowerType", &Script_UnitPowerType);
     Game::Lua::RegisterIntegerEnum(
         "Enum", "PowerType",
