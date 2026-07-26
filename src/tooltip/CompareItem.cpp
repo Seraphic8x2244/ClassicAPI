@@ -62,7 +62,7 @@
 #include "item/Location.h"
 #include "item/StatAccum.h"
 #include "item/TooltipItem.h"
-#include "tooltip/SetItemEvent.h"
+#include "tooltip/SetEvents.h"
 #include "ui/ColorData.h"
 
 #include <cstdint>
@@ -598,7 +598,7 @@ int __fastcall Script_SetHyperlinkCompareItem(void *L) {
     // this internal build so a handler doesn't run mid-way through the
     // line-shift below (it fires for the *hovered* item's real Set* instead).
     {
-        Tooltip::SetItemEvent::Suppressor noEvent;
+        Tooltip::SetEvents::Suppressor noEvent;
         reinterpret_cast<BuildItemTooltip_t>(Offsets::FUN_GAMETOOLTIP_BUILD_ITEM)(
             self, static_cast<uint32_t>(equippedID), &equippedGUID, &equippedGUID, 0, 0, 0, 0, 0, 0);
     }

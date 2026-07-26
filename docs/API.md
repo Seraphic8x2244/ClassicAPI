@@ -166,7 +166,7 @@ build instructions.
   - [`GameTooltip:SetInventoryItemByID(itemID)`](#gametooltipsetinventoryitembyiditemid)
   - [`GameTooltip:SetHyperlinkCompareItem("itemLink" [, offset, shiftButton, comparisonTooltip])`](#gametooltipsethyperlinkcompareitemitemlink--offset-shiftbutton-comparisontooltip)
   - [`GameTooltip:IsEquippedItem()`](#gametooltipisequippeditem)
-  - [`OnTooltipSetItem` script](#ontooltipsetitem-script)
+  - [`OnTooltipSet*` scripts (Item / Spell / Unit / GameObject)](#ontooltipset-scripts)
   - [`GameTooltip:SetItemByGUID(itemGUID)`](#gametooltipsetitembyguiditemguid)
   - [`GameTooltip:SetEquipmentSet(name)`](#gametooltipsetequipmentsetname)
   - [`GameTooltip:SetTotem(slot)`](#gametooltipsettotemslot)
@@ -4158,17 +4158,26 @@ GameTooltip:SetBagItem(0, 1)
 if GameTooltip:IsEquippedItem() then ... end  -- false unless that item is also worn
 ```
 
-### `OnTooltipSetItem` script
+### `OnTooltipSet*` scripts
 
-A real frame script — settable with the standard `SetScript` / `GetScript` /
-`HookScript` — that fires whenever a tooltip's **item** is set. Backports the
-modern tooltip script so addons annotate item tooltips by hooking one script
-instead of wrapping every `Set*` method.
-
-Fires for every item-setting path (`SetBagItem`, `SetInventoryItem`,
-`SetHyperlink` for an `item:` link, `SetMerchantItem`, `SetAuctionItem`,
-`SetItemByID`, …). Available on all GameTooltip-type frames (`GameTooltip`,
+`OnTooltipSetItem` / `OnTooltipSetSpell` / `OnTooltipSetUnit` /
+`OnTooltipSetGameObject` — real frame scripts, settable with the standard
+`SetScript` / `GetScript` /
+`HookScript` — that fire whenever a tooltip's **item**, **spell**, **unit**, or
+**gameobject** is set. Backport the modern tooltip scripts so addons annotate
+tooltips by hooking one script per object type instead of wrapping every
+`Set*` method. Available on all GameTooltip-type frames (`GameTooltip`,
 `ItemRefTooltip`, `ShoppingTooltip1/2`, `AtlasLootTooltip`, …).
+
+| Script | Fires after any of |
+|---|---|
+| `OnTooltipSetItem` | `SetBagItem`, `SetInventoryItem`, `SetHyperlink` (`item:`), `SetMerchantItem`, `SetAuctionItem`, `SetItemByID`, … |
+| `OnTooltipSetSpell` | `SetSpell`, `SetSpellByID`, `SetTalent`, `SetShapeshift` |
+| `OnTooltipSetUnit` | `SetUnit` and unit mouseover |
+| `OnTooltipSetGameObject` | gameobject mouseover (herb/ore nodes, chests, mailboxes, signs) |
+
+Vanilla only shipped `OnTooltipAddMoney` / `OnTooltipCleared` /
+`OnTooltipSetDefaultAnchor`; these four are the backported set.
 
 The handler receives the tooltip as the **global `this`**, the 1.12
 frame-script convention — *not* a `self` argument (like every built-in vanilla
@@ -4178,21 +4187,25 @@ script: `OnShow`, `OnEvent`, `OnTooltipCleared`, …). Modern-style
 ```lua
 GameTooltip:HookScript("OnTooltipSetItem", function()
     local name, link, id = this:GetItem()   -- the tooltip is the global `this`
-    if id then
-        this:AddLine("ID: " .. id, 0.6, 0.6, 0.6)
-    end
+    if id then this:AddLine("ID: " .. id, 0.6, 0.6, 0.6) end
+end)
+
+GameTooltip:HookScript("OnTooltipSetUnit", function()
+    local name, unit = this:GetUnit()
+    if unit then this:AddLine(UnitClassBase(unit), 0.6, 0.6, 0.6) end
 end)
 ```
 
-Vanilla only shipped `OnTooltipAddMoney` / `OnTooltipCleared` /
-`OnTooltipSetDefaultAnchor`; `OnTooltipSetSpell` / `OnTooltipSetUnit` are not
-yet provided.
+**Auras don't fire `OnTooltipSetSpell`** — `SetUnitBuff` / `SetUnitDebuff` /
+`SetPlayerBuff` / `SetUnitAura` use a separate aura-tooltip builder, so hovering
+a buff/debuff does not trigger the spell script. This matches retail, where unit
+auras are a distinct tooltip data type rather than a spell.
 
-**Caveat — the event fires from inside the item-tooltip build.** Lightweight
-handler work is fine: reading `this:GetItem()`, `this:AddLine(...)`, printing,
-etc. But avoid *re-entrant* tooltip rebuilds from the handler — e.g.
-`GameTooltip_ShowCompareItem()`, or a `Set*` call on another tooltip. Because
-the handler runs mid-build, re-entering the tooltip / FrameScript machinery can
+**Caveat — the event fires from inside the tooltip build.** Lightweight handler
+work is fine: reading `this:GetItem()` / `this:GetUnit()`, `this:AddLine(...)`,
+printing, etc. But avoid *re-entrant* tooltip rebuilds from the handler — e.g.
+`GameTooltip_ShowCompareItem()`, or a `Set*` call on another tooltip. Because the
+handler runs mid-build, re-entering the tooltip / FrameScript machinery can
 collide with other DLLs that hook the same Lua paths (nampower, SuperWoW,
 weirdutils, …) and crash the client. If you need heavy work like that, defer it
 to the next frame:

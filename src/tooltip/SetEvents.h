@@ -13,12 +13,14 @@
 
 #pragma once
 
-namespace Tooltip::SetItemEvent {
+namespace Tooltip::SetEvents {
 
-// RAII guard that suppresses OnTooltipSetItem firing for the duration of an
-// engine item-build we invoke *internally* (Tooltip::Compare building the
-// equipped item into a shopping tooltip). Without it, a handler would run in
-// the middle of our line-shift / delta rendering and see a half-built tooltip.
+// RAII guard that suppresses tooltip set-event firing (OnTooltipSetItem etc.)
+// for the duration of an engine build we invoke *internally* — currently
+// Tooltip::Compare building the equipped item into a shopping tooltip. Without
+// it, a handler would run in the middle of our line-shift / delta rendering and
+// see a half-built tooltip. Only the item builder runs during that internal
+// build, so in practice this gates OnTooltipSetItem; it's global for safety.
 // Nestable (ref-counted).
 struct Suppressor {
     Suppressor();
@@ -27,4 +29,4 @@ struct Suppressor {
     Suppressor &operator=(const Suppressor &) = delete;
 };
 
-} // namespace Tooltip::SetItemEvent
+} // namespace Tooltip::SetEvents

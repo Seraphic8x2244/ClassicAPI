@@ -140,6 +140,23 @@ enum Offsets {
     //   and call the inner invoker, which is self-contained.
     FUN_GAMETOOLTIP_SCRIPT_RESOLVER = 0x005295D0,
     FUN_FRAME_INVOKE_SCRIPT = 0x00704D50,
+    // The other per-object tooltip builders, co-hooked the same way as
+    // FUN_GAMETOOLTIP_BUILD_ITEM to back OnTooltipSetSpell / OnTooltipSetUnit /
+    // OnTooltipSetGameObject (see Tooltip::SetEvents). Each is the single funnel
+    // its Set*/mouseover paths converge on and clears the tooltip
+    // (FUN_00530050) before repopulating, so firing after it covers every way
+    // that object type gets set:
+    //   - Spell FUN_GAMETOOLTIP_BUILD_SPELL_TOOLTIP (0x0052E610, 7 stack args,
+    //     RET 0x1c) — SetSpell/SetSpellByID/SetTalent/SetShapeshift funnel.
+    //   - Unit  (0x00529fe0, __thiscall(self, guid*), RET 4) — SetUnit +
+    //     the two engine mouseover paths (FUN_004919d0 / FUN_00492890).
+    //     Returns an int the caller (Script_GameTooltip_SetUnit) tests, so the
+    //     co-hook must forward the original's return value.
+    //   - GameObject (0x0052aa20, __thiscall(self, guid*), RET 4) — the GO
+    //     hover populator; resolves the GO (OBJ_TYPE_GAMEOBJECT) and writes the
+    //     GO field at +0x370.
+    FUN_GAMETOOLTIP_BUILD_UNIT = 0x00529FE0,
+    FUN_GAMETOOLTIP_BUILD_GAMEOBJECT = 0x0052AA20,
     FUN_GAMETOOLTIP_ADD_LINE = 0x00530270,        // __thiscall(self, left, right, lColorBGRA*, rColorBGRA*, wrap)
     OFF_GAMETOOLTIP_NUM_LINES = 0x31C,            // int — live line count (AddLine index; +0x320 is the cap)
     // The displayed item's identity is read via the existing
