@@ -397,6 +397,7 @@ build instructions.
   - [`IsPassiveSpell(spellID)` / `IsPassiveSpell(slot, bookType)`](#ispassivespellspellid--ispassivespellslot-booktype)
   - [`C_Spell.IsSpellPassive(spellID)`](#c_spellisspellpassivespellid)
   - [`IsPlayerSpell(spellID)`](#isplayerspellspellid)
+  - [`CanDualWield()`](#candualwield)
   - [`IsSpellKnown(spellID, [isPet])`](#isspellknownspellid-ispet)
   - [`GetSpellBonusDamage(school)`](#getspellbonusdamageschool)
   - [`GetSpellBonusHealing()`](#getspellbonushealing)
@@ -9682,6 +9683,23 @@ Reads a single bit from the engine's spell-knowledge bitmap at
 `[0x00B710FC]` — `(bitmap[spellID >> 5] & (1 << (spellID & 31))) != 0`.
 The same lookup the engine itself does internally. No spellbook walk,
 no talent walk, no profession-window dependency.
+
+### `CanDualWield()`
+
+Returns `true` if the player can equip a weapon in the off hand.
+
+```lua
+if CanDualWield() then ... end   -- true for a warrior/rogue past level 10, etc.
+```
+
+Server-side this is a plain flag (`Player::m_canDualWield`) that starts
+`false` and is turned on **only** by the `SPELL_EFFECT_DUAL_WIELD` spell
+effect — no class has it innately. Exactly one spell in the 1.12 client's
+`Spell.dbc` carries that effect: `674` ("Dual Wield"), the trained
+warrior / rogue / hunter passive, which lands in the known-spell bitmap
+like any learned spell. So `CanDualWield()` is precisely
+`IsPlayerSpell(674)` — there is no separate client-visible capability
+field to read.
 
 ### `IsSpellKnown(spellID, [isPet])`
 

@@ -443,34 +443,46 @@ static int __fastcall Script_C_IsSpellPassive(void *L) {
 //     arrays and not in the talent tree).
 //   - Same shape modern WoW (5.4.8+) uses for the same function — see
 //     `[0x011C25D8]` in 5.4.8's `Wow.exe`.
+// Shared read of the engine's known-spell bitmap (the same bit the helper
+// at `0x0060C740` consults): true iff the local player knows `spellID`.
+// Bounds-checked; false for out-of-range IDs or before the bitmap exists.
+static bool PlayerKnowsSpell(int spellID) {
+    if (spellID < 1)
+        return false;
+    const int spellCount = *reinterpret_cast<const int *>(
+        static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
+    if (spellID > spellCount)
+        return false;
+    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
+        static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
+    if (bitmap == nullptr)
+        return false;
+    const uint32_t mask = 1u << (spellID & 31);
+    return (bitmap[spellID >> 5] & mask) != 0;
+}
+
 static int __fastcall Script_IsPlayerSpell(void *L) {
     if (!Game::Lua::IsNumber(L, 1)) {
         Game::Lua::Error(L, "Usage: IsPlayerSpell(spellID)");
         return 0;
     }
     const int spellID = static_cast<int>(Game::Lua::ToNumber(L, 1));
-    if (spellID < 1) {
-        Game::Lua::PushBool(L, 0);
-        return 1;
-    }
+    Game::Lua::PushBoolean(L, PlayerKnowsSpell(spellID));
+    return 1;
+}
 
-    const int spellCount = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
-    if (spellID > spellCount) {
-        Game::Lua::PushBoolean(L, 0);
-        return 1;
-    }
+// `CanDualWield()` — true if the local player can equip a weapon in the off
+// hand. The server tracks this as a plain bool (`Player::m_canDualWield`)
+// flipped on only by `SPELL_EFFECT_DUAL_WIELD` (effect 40); no class has it
+// innately. Verified against the client Spell.dbc: exactly ONE spell carries
+// that effect — 674 "Dual Wield", the trained warrior/rogue/hunter passive —
+// and it lands in the known-spell bitmap like any learned spell. So there's
+// no separate client-visible capability flag to read; `IsPlayerSpell(674)`
+// is the exact equivalent of the server's `CanDualWield()`.
+static constexpr int kDualWieldSpellID = 674;
 
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
-    if (bitmap == nullptr) {
-        Game::Lua::PushBoolean(L, 0);
-        return 1;
-    }
-
-    const uint32_t mask = 1u << (spellID & 31);
-    const bool isKnown = (bitmap[spellID >> 5] & mask) != 0;
-    Game::Lua::PushBoolean(L, isKnown);
+static int __fastcall Script_CanDualWield(void *L) {
+    Game::Lua::PushBoolean(L, PlayerKnowsSpell(kDualWieldSpellID));
     return 1;
 }
 
@@ -623,6 +635,7 @@ static void RegisterLuaFunctions() {
                                       &Script_FindSpellBookSlotByID);
     Game::Lua::RegisterGlobalFunction("IsPassiveSpell", &Script_IsPassiveSpell);
     Game::Lua::RegisterGlobalFunction("IsPlayerSpell", &Script_IsPlayerSpell);
+    Game::Lua::RegisterGlobalFunction("CanDualWield", &Script_CanDualWield);
     Game::Lua::RegisterGlobalFunction("IsSpellKnown", &Script_IsSpellKnown);
     Game::Lua::RegisterGlobalFunction("IsHarmfulSpell", &Script_IsHarmfulSpell);
     Game::Lua::RegisterGlobalFunction("IsHelpfulSpell", &Script_IsHelpfulSpell);
