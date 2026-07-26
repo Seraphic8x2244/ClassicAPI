@@ -74,4 +74,19 @@ void EvictAbsent(uint64_t unitGuid, const uint32_t *presentSpellIds, int count);
 // the aura is still active server-side: the cache survives descriptor clears.
 int Enumerate(uint64_t unitGuid, bool harmful, CachedAura *out, int maxOut);
 
+// Feeds the cache from an out-of-range group member's aura spell-ID array
+// (`Group::MemberStats::AuraArray` — 48 slots, buffs 0..BUFF_COUNT-1, debuffs
+// after). Such a member has no CGUnit and never yields SMSG_SPELL_GO, so the
+// SpellGo path never learns their auras' timing — but SMSG_PARTY_MEMBER_STATS
+// carries the spell IDs and the server sends it promptly when an aura is
+// added/removed. So a spell ID that newly *appears* here did so ~one server
+// tick + latency after the real application: we stamp a best-effort
+// `now + base duration` expiration (base only — no remote caster mods, no
+// caster recorded). Auras already present the first time we see a member have
+// unknown age and are NOT stamped; only genuine absent->present transitions
+// are. Idempotent within a frame; call it before enumerating the array so a
+// just-appeared aura carries its guess on the same poll. The Store guard keeps
+// any real SpellGo timing we already hold, so this never downgrades better data.
+void ObserveGroupAuras(uint64_t guid, const uint16_t *auraArray);
+
 } // namespace Aura::Source

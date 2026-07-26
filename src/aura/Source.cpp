@@ -178,6 +178,45 @@ void Store(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
             true};
 }
 
+// ---- Out-of-range group-member aura snapshots ---------------------------
+//
+// Transition state for `ObserveGroupAuras`: the last aura spell-ID set we saw
+// for each out-of-range group member, so we can stamp a duration guess only
+// when an aura genuinely appears (not for auras already present when we first
+// started watching that member). See the header for the rationale.
+
+struct GroupSnapshot {
+    uint64_t guid;
+    uint32_t touchMs;
+    bool used;
+    uint16_t ids[Offsets::UNIT_AURA_TOTAL];
+};
+constexpr int kGroupSnapshots = 44;              // MAX_RAID (40) + slack
+constexpr uint32_t kGroupSnapshotTtlMs = 30000;  // forget members not polled for 30s
+GroupSnapshot g_groupSnaps[kGroupSnapshots];
+
+bool SnapshotHasId(const GroupSnapshot &s, uint16_t id) {
+    for (uint16_t v : s.ids)
+        if (v == id)
+            return true;
+    return false;
+}
+
+// Stamp a base-duration expiration guess for a group aura that just appeared.
+// casterGuid stays 0 (unknown), so `Store`'s guard preserves any real SpellGo
+// timing we already hold. Skips non-aura spells and auras with no finite base
+// duration (nothing meaningful to guess — leave expiration unknown).
+void StampGroupGuess(uint64_t guid, uint16_t spellId, int8_t kind, uint32_t now) {
+    const uint8_t *rec = Spell::Lookup::RecordForID(static_cast<int>(spellId));
+    if (!SpellAppliesAura(rec))
+        return;
+    const uint32_t base = SpellDurationMs(rec, /*casterIsPlayer*/ false);
+    if (base == 0)
+        return;
+    Store(guid, spellId, /*casterGuid*/ 0, now + base, base, /*fromCast*/ false,
+          kind);
+}
+
 // Evict the entry for an aura the engine reports gone. Keyed by (target,
 // spell) like the rest of the cache. Without this, the GetAuraDataByIndex
 // fallback would keep surfacing a dropped aura until its computed expiry —
@@ -199,6 +238,10 @@ void Evict(uint64_t targetGuid, uint32_t spellId) {
 void FlushAll() {
     for (auto &e : g_cache)
         e.used = false;
+    // Reset transition baselines too: post-transition group auras re-sync and
+    // should be treated as first-sight (unknown age), not diffed as new.
+    for (auto &s : g_groupSnaps)
+        s.used = false;
 }
 
 // -1 = no map seen yet (never a valid Map.dbc id), so the first tick just
@@ -233,6 +276,12 @@ void OnWorldTick() {
     for (auto &e : g_cache) {
         if (e.used && e.expirationMs != 0 && now >= e.expirationMs)
             e.used = false;
+    }
+    // Forget snapshots for members we haven't polled recently (left the group,
+    // or no longer displayed) so a later re-appearance re-baselines cleanly.
+    for (auto &s : g_groupSnaps) {
+        if (s.used && now - s.touchMs > kGroupSnapshotTtlMs)
+            s.used = false;
     }
 }
 
@@ -476,6 +525,57 @@ int Enumerate(uint64_t unitGuid, bool harmful, CachedAura *out, int maxOut) {
         out[n++] = {e.spellId, e.casterGuid, e.expirationMs, e.durationMs};
     }
     return n;
+}
+
+void ObserveGroupAuras(uint64_t guid, const uint16_t *auraArray) {
+    if (guid == 0 || auraArray == nullptr)
+        return;
+    const int total = Offsets::UNIT_AURA_TOTAL;
+    const int buffCount = Offsets::UNIT_AURA_BUFF_COUNT;
+    const uint32_t now = NowMs();
+
+    GroupSnapshot *snap = nullptr;
+    for (auto &s : g_groupSnaps)
+        if (s.used && s.guid == guid) {
+            snap = &s;
+            break;
+        }
+
+    if (snap == nullptr) {
+        // First sight of this member — record a baseline without stamping;
+        // their current auras have unknown age.
+        GroupSnapshot *dst = nullptr;
+        for (auto &s : g_groupSnaps)
+            if (!s.used) {
+                dst = &s;
+                break;
+            }
+        if (dst == nullptr) { // full — evict the least-recently-polled
+            dst = &g_groupSnaps[0];
+            for (auto &s : g_groupSnaps)
+                if (s.touchMs < dst->touchMs)
+                    dst = &s;
+        }
+        dst->guid = guid;
+        dst->used = true;
+        dst->touchMs = now;
+        for (int i = 0; i < total; ++i)
+            dst->ids[i] = auraArray[i];
+        return;
+    }
+
+    // Stamp a guess for every spell ID present now but absent from the prior
+    // snapshot (a genuine appearance), then refresh the snapshot.
+    for (int slot = 0; slot < total; ++slot) {
+        const uint16_t id = auraArray[slot];
+        if (id == 0 || SnapshotHasId(*snap, id))
+            continue;
+        StampGroupGuess(guid, id, slot < buffCount ? KIND_HELPFUL : KIND_HARMFUL,
+                        now);
+    }
+    for (int i = 0; i < total; ++i)
+        snap->ids[i] = auraArray[i];
+    snap->touchMs = now;
 }
 
 } // namespace Aura::Source

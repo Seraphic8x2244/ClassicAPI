@@ -686,6 +686,7 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
     const uint16_t *arr = Group::MemberStats::AuraArray(guid);
     if (arr == nullptr)
         return false;
+    Aura::Source::ObserveGroupAuras(guid, arr);
     int start, end;
     GroupRange(filter, start, end);
     int matches = 0;
@@ -709,6 +710,7 @@ bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
     const uint16_t *arr = Group::MemberStats::AuraArray(guid);
     if (arr == nullptr)
         return false;
+    Aura::Source::ObserveGroupAuras(guid, arr);
     const int start = (filter != nullptr && *filter == Filter::Harmful)
                           ? Offsets::UNIT_AURA_BUFF_COUNT
                           : 0;
@@ -734,6 +736,7 @@ bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
     const uint16_t *arr = Group::MemberStats::AuraArray(guid);
     if (arr == nullptr)
         return false;
+    Aura::Source::ObserveGroupAuras(guid, arr);
     const int start = (filter != nullptr && *filter == Filter::Harmful)
                           ? Offsets::UNIT_AURA_BUFF_COUNT
                           : 0;
@@ -763,6 +766,7 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, bool playerOnly,
     const uint16_t *arr = Group::MemberStats::AuraArray(guid);
     if (arr == nullptr)
         return;
+    Aura::Source::ObserveGroupAuras(guid, arr);
     int start, end;
     GroupRange(filter, start, end);
     const int level = GroupMemberLevel(guid);
