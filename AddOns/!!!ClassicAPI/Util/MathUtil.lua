@@ -11,12 +11,19 @@ local random = math.random
 local atan2 = math.atan2
 local sqrt = math.sqrt
 
-math.huge = 1 / 0
+MathUtil =
+{
+	Epsilon = .000001,
+};
 
-function CreateCounter(initialCount)
+MathUtil.ApproxZero = MathUtil.Epsilon;
+MathUtil.ApproxOne = 1.0 - MathUtil.Epsilon;
+
+function CreateCounter(initialCount, step)
     local count = initialCount or 0
+    step = step or 1
     return function()
-        count = count + 1
+        count = count + step
         return count
     end
 end
