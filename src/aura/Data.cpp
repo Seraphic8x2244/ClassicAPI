@@ -140,6 +140,22 @@ double PlayerBuffExpirationSeconds(const uint8_t *entry) {
     const uint32_t expirationMs = expirationTable[slotCode];
     if (expirationMs == 0)
         return 0.0;
+    // Report "no timer" once the stored expiration has elapsed — this is not a
+    // heuristic, it's exactly what the engine's own GetPlayerBuffTimeLeft does.
+    // Script_GetPlayerBuffTimeLeft (0x004e4930) → FUN_004e4450 reads this same
+    // expiration table and returns:
+    //     if ((int)(now - expiration[slot]) >= 0) return 0;  // elapsed -> 0
+    //     return expiration[slot] - now;                      // else remaining
+    // Permanent auras (paladin auras, passives, racials) carry an infinite
+    // Spell.dbc duration (SpellDuration base -1); the server stores the fixed
+    // cast-time in this slot for them, so it's always "already elapsed" and the
+    // engine shows no countdown. The signed `(int)` compare also absorbs the
+    // ~24.86-day GetTickCount wrap (both operands wrap together).
+    using TickCount_t = uint32_t(__fastcall *)();
+    const uint32_t nowMs = reinterpret_cast<TickCount_t>(
+        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
+    if (static_cast<int32_t>(nowMs - expirationMs) >= 0)
+        return 0.0; // expiration reached/passed → permanent or no timer
     return static_cast<double>(expirationMs) * 0.001;
 }
 
