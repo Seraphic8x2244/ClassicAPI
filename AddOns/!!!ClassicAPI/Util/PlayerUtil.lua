@@ -28,7 +28,7 @@ function PlayerUtil.GetClassColor()
 end
 
 function PlayerUtil.GetCurrentSpeed()
-    return GetUnitSpeed("player") / 7 * 100
+    return GetUnitSpeed("player") / BASE_MOVEMENT_SPEED * 100
 end
 
 function GetPlayerGuid()
