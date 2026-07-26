@@ -300,6 +300,7 @@ build instructions.
 - [Lua](#lua)
   - [`select(index, ...)`](#selectindex-)
   - [`table.wipe(t)`](#tablewipet)
+  - [`table.count(tbl)`](#tablecounttbl)
   - [`Mixin(object, ...)` / `CreateFromMixins(...)`](#mixinobject--createfrommixins)
   - [`string.match` / `string.gmatch`](#stringmatch--stringgmatch)
   - [`strsplit(sep, str [, pieces])`](#strsplitsep-str--pieces)
@@ -7214,6 +7215,29 @@ removal" pattern works in practice even though it's technically
 undefined per the Lua reference manual.
 
 Errors on non-table input.
+
+### `table.count(tbl)`
+
+Returns `(numTableNodes, numArrayNodes, maxArrayIndex)` describing how a table
+is populated (a modern WoW diagnostic, added retail 11.2.5). These are counts
+of live entries, **not** the table's allocated capacity:
+
+- **`numTableNodes`** — total number of key/value pairs.
+- **`numArrayNodes`** — how many of those have an integer key in the range
+  `[1..numTableNodes]` (the "contiguous array part" heuristic).
+- **`maxArrayIndex`** — the largest positive integral key (`>= 1`), or `0` if
+  there is none. Negative/zero integral keys don't count.
+
+```lua
+table.count({ 10, 20, 30 })           -- 3, 3, 3
+table.count({ a = 1, b = 2 })         -- 2, 0, 0
+table.count({ [1] = "x", foo = "y" }) -- 2, 1, 1
+table.count({ [100] = "x" })          -- 1, 0, 100
+table.count({ [-3] = "x" })           -- 1, 0, 0
+```
+
+Pure iteration over the table (`lua_next`), so no dependency on Lua's internal
+storage layout. Errors on non-table input.
 
 ### `Mixin(object, ...)` / `CreateFromMixins(...)`
 
