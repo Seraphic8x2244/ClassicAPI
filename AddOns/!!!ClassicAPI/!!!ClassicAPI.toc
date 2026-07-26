@@ -39,3 +39,6 @@ Util\TradeSkillLink.lua
 Util\IconDataProvider.lua
 Util\GameTooltip.lua
 Util\Rectangle.lua
+Util\Vector2D.lua
+Util\Vector3D.lua
+Util\Vector4D.lua
