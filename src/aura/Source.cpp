@@ -70,6 +70,49 @@ uint32_t SpellDurationMs(const uint8_t *spellRecord, bool casterIsPlayer) {
     return ms > 0 ? static_cast<uint32_t>(ms) : 0;
 }
 
+// ---- Recent local-player aura casts --------------------------------------
+
+// The aura-application hooks (OnAuraAdded / OnAuraStacksChanged) get no caster,
+// so they compute the UNMODIFIED base duration (`skipMod = 1`). That's correct
+// for other units' auras, but wrong for one the LOCAL PLAYER just cast: it
+// should carry the player-talented duration (Improved Shadow Word: Pain → 24s
+// vs the 18s base). SpellGo normally owns that entry with the talented value,
+// but when it can't attribute the cast to this target — an empty SMSG_SPELL_GO
+// hit list files it under the caster instead, or a slot reshuffle evicts and
+// refills the entry after SpellGo ran — the base value is what's left, so the
+// duration flickers 24 → 18. SpellGo (which knows caster == player) records the
+// spellId here so the application hooks can recover the player-modified
+// duration for it.
+constexpr int kRecentCastCount = 16;
+constexpr uint32_t kRecentCastTtlMs = 1500;
+struct RecentCast {
+    uint32_t spellId;
+    uint32_t tMs; // 0 = empty
+};
+RecentCast g_recentCasts[kRecentCastCount];
+int g_recentCastCursor = 0;
+
+void RememberPlayerCast(uint32_t spellId) {
+    const uint32_t now = NowMs();
+    for (auto &r : g_recentCasts)
+        if (r.spellId == spellId) {
+            r.tMs = now;
+            return;
+        }
+    g_recentCasts[g_recentCastCursor] = {spellId, now};
+    g_recentCastCursor = (g_recentCastCursor + 1) % kRecentCastCount;
+}
+
+bool WasRecentPlayerCast(uint32_t spellId) {
+    if (spellId == 0)
+        return false;
+    const uint32_t now = NowMs();
+    for (const auto &r : g_recentCasts)
+        if (r.spellId == spellId && r.tMs != 0 && now - r.tMs <= kRecentCastTtlMs)
+            return true;
+    return false;
+}
+
 // ---- Cache ---------------------------------------------------------------
 
 // Helpful/harmful classification, recorded from the aura's descriptor slot
@@ -252,6 +295,12 @@ void __fastcall SpellGo_h(uint64_t *itemGUID, uint64_t *casterGUID,
         durationMs = SpellDurationMs(rec, casterIsPlayer);
     const uint32_t expirationMs = durationMs > 0 ? NowMs() + durationMs : 0;
 
+    // Let the application hooks recover the player-talented duration for this
+    // spell if they end up owning the target's entry (empty hit list / refill
+    // race) — see WasRecentPlayerCast.
+    if (casterIsPlayer)
+        RememberPlayerCast(spellId);
+
     if (numTargets == 0) {
         // No explicit hit list (self-cast with caster-implicit target).
         Store(caster, spellId, caster, expirationMs, durationMs, true,
@@ -283,9 +332,15 @@ void StampApplication(void *unit, uint32_t spellId, int8_t kind) {
     const uint64_t unitGuid = Unit::Identity::GuidForObject(unit);
     if (unitGuid == 0)
         return;
-    const uint32_t durationMs = SpellDurationMs(rec, /*casterIsPlayer*/ false);
+    // If the local player just cast this aura, use its player-talented duration
+    // (and attribute the caster) — SpellGo couldn't always land the talented
+    // value on this target's entry. Otherwise base (we lack other casters'
+    // mods). See WasRecentPlayerCast.
+    const bool byPlayer = WasRecentPlayerCast(spellId);
+    const uint32_t durationMs = SpellDurationMs(rec, byPlayer);
+    const uint64_t caster = byPlayer ? Unit::Identity::PlayerGuid() : 0;
     const uint32_t expirationMs = durationMs > 0 ? NowMs() + durationMs : 0;
-    Store(unitGuid, spellId, /*casterGuid*/ 0, expirationMs, durationMs,
+    Store(unitGuid, spellId, caster, expirationMs, durationMs,
           /*fromCast*/ false, kind);
 }
 
