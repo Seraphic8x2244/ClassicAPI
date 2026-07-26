@@ -1,24 +1,11 @@
--- Backport of 3.3.5 FrameXML/Mixin.lua to vanilla 1.12 / Lua 5.0.
+-- `Mixin` and `CreateFromMixins` are engine (DLL) natives — see
+-- src/baselib/Mixin.cpp — so they exist whenever ClassicAPI is injected,
+-- even with this addon disabled, mirroring retail where they live in
+-- TableUtil as C functions. Only the composite helper (which calls a Lua
+-- `:Init` method) stays here, like retail's Mixin.lua.
 --
--- Implementation differences from the 3.3.5 source:
---   - Lua 5.0 has no select(); inside a vararg function the args are
---     gathered into an implicit `arg` table (`arg.n` for the count).
-
-function Mixin(object, ...)
-    for i = 1, arg.n do
-        local mixin = arg[i]
-        if mixin then
-            for k, v in pairs(mixin) do
-                object[k] = v
-            end
-        end
-    end
-    return object
-end
-
-function CreateFromMixins(...)
-    return Mixin({}, unpack(arg))
-end
+-- Lua 5.0 note: varargs arrive in the implicit `arg` table (`arg.n` count),
+-- so we forward them with unpack(arg) rather than 5.1's `...`.
 
 function CreateAndInitFromMixin(mixin, ...)
     local object = CreateFromMixins(mixin)

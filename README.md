@@ -47,7 +47,7 @@ Full per-function reference: **[docs/API.md](docs/API.md)**.
 | [Loot](docs/API.md#loot) | `C_Loot.GetNearbyLootableUnits`, `C_Loot.GetLastScanResults`, `C_Loot.IsScanInProgress`, `C_Loot.LootUnit`, `C_Loot.LootUnitItem`, `C_Loot.ScanNearbyLoot` |
 | [LootHistory](docs/API.md#loothistory) | `C_LootHistory.GetNumItems`, `C_LootHistory.GetItem`, `C_LootHistory.GetPlayerInfo`, `C_LootHistory.Clear` |
 | [LossOfControl](docs/API.md#lossofcontrol) | `C_LossOfControl.GetActiveLossOfControlData`, `C_LossOfControl.GetActiveLossOfControlDataCount` |
-| [Lua](docs/API.md#lua) | `coroutine.create`, `coroutine.resume`, `coroutine.status`, `coroutine.wrap`, `coroutine.yield`, `math.fmod`, `math.huge`, `math.modf`, `select`, `string.gmatch`, `string.match`, `string.reverse`, `strjoin`, `strreplace`, `strrev`, `strsplit`, `strtrim`, `table.wipe` |
+| [Lua](docs/API.md#lua) | `coroutine.create`, `coroutine.resume`, `coroutine.status`, `coroutine.wrap`, `coroutine.yield`, `CreateFromMixins`, `math.fmod`, `math.huge`, `math.modf`, `Mixin`, `select`, `string.gmatch`, `string.match`, `string.reverse`, `strjoin`, `strreplace`, `strrev`, `strsplit`, `strtrim`, `table.wipe` |
 | [Macros](docs/API.md#macros) | `GetLooseMacroIcons`, `GetLooseMacroItemIcons`, `GetMacroIcons`, `GetMacroItemIcons`, `GetMacroSpell` |
 | [Mail](docs/API.md#mail) | `GetInboxItemLink`, `GetSendMailItemLink` |
 | [Map](docs/API.md#map) | `C_Map.GetAreaInfo`, `C_Map.GetAreas`, `C_Map.GetAreaTriggerInfo`, `C_Map.GetAreaTriggers`, `C_Map.GetBestMapForUnit`, `C_Map.GetMapAreaIDs`, `C_Map.GetMapOverlays`, `C_Map.GetMapWorldSize` |

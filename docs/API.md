@@ -300,6 +300,7 @@ build instructions.
 - [Lua](#lua)
   - [`select(index, ...)`](#selectindex-)
   - [`table.wipe(t)`](#tablewipet)
+  - [`Mixin(object, ...)` / `CreateFromMixins(...)`](#mixinobject--createfrommixins)
   - [`string.match` / `string.gmatch`](#stringmatch--stringgmatch)
   - [`strsplit(sep, str [, pieces])`](#strsplitsep-str--pieces)
   - [`strjoin(delimiter, ...)`](#strjoindelimiter-)
@@ -7213,6 +7214,32 @@ removal" pattern works in practice even though it's technically
 undefined per the Lua reference manual.
 
 Errors on non-table input.
+
+### `Mixin(object, ...)` / `CreateFromMixins(...)`
+
+The FrameXML table-mixin primitives, provided as engine C functions.
+
+- **`Mixin(object, ...)`** — shallow-copies every key/value from each table
+  argument onto `object` (later arguments win on key collisions) and returns
+  `object`. Non-table arguments are skipped.
+- **`CreateFromMixins(...)`** — `Mixin({}, ...)`: returns a new table seeded
+  from the given mixins.
+
+```lua
+local Greeter = {}
+function Greeter:Hello() return "hi, "..self.name end
+local obj = CreateFromMixins(Greeter)
+obj.name = "Bob"
+obj:Hello()   -- "hi, Bob"
+```
+
+Modern WoW provides these as C functions in `TableUtil`; ClassicAPI does the
+same (rather than leaving them in the `!!!ClassicAPI` addon) so they exist
+whenever the DLL is injected — even if the addon is disabled. The composite
+`CreateAndInitFromMixin(mixin, ...)` (which calls a `:Init` method) remains a
+Lua helper in the addon, mirroring retail's `Mixin.lua`. The taint-based
+`SecureMixin` family is intentionally omitted — vanilla 1.12 has no execution
+taint system, so there is nothing for it to guard.
 
 ### `string.match` / `string.gmatch`
 
