@@ -379,9 +379,6 @@ build instructions.
   - [`C_QuestLog.IsQuestDataCachedByID(questID)`](#c_questlogisquestdatacachedbyidquestid)
   - [`GetQuestLogLeaderBoardID(objectiveIndex [, questIndex])`](#getquestlogleaderboardidobjectiveindex--questindex)
 
-- [Screen](#screen)
-  - [`GetPhysicalScreenSize()`](#getphysicalscreensize)
-
 - [Spell](#spell)
   - [`C_Spell.DoesSpellExist(spellID)`](#c_spelldoesspellexistspellid)
   - [`C_Spell.GetSchoolString(schoolMask)`](#c_spellgetschoolstringschoolmask)
@@ -446,6 +443,10 @@ build instructions.
   - [`GetMirrorTimerInfo(index)` / `GetMirrorTimerProgress(label)`](#getmirrortimerinfoindex--getmirrortimerprogresslabel)
   - [`GetShapeshiftFormID()`](#getshapeshiftformid)
   - [`CancelShapeshiftForm()`](#cancelshapeshiftform)
+
+- [System](#system)
+  - [`GetPhysicalScreenSize()`](#getphysicalscreensize)
+  - [`CopyToClipboard(text [, removeMarkup])`](#copytoclipboardtext--removemarkup)
 
 - [Talent](#talent)
   - [`GetTalentSpellID(tabIndex, talentIndex, [rank[, classID]])`](#gettalentspellidtabindex-talentindex-rank-classid)
@@ -9194,40 +9195,6 @@ A separate function keeps the existing call wire-compatible.
 > first, skip zero slots, then the item array. 1-based `objectiveIndex`
 > counts only non-empty slots.
 
-## Screen
-
-### `GetPhysicalScreenSize()`
-
-Returns `(widthPixels, heightPixels)` — the display's physical
-resolution in pixels. Modern WoW added this as a native in 7.0
-(Legion); FrameXML's `PixelUtil` builds its entire pixel↔UI-unit
-conversion on it (`768.0 / physicalHeight`), which is what lets addons
-snap frames to whole pixels for crisp borders at fractional UI scales.
-
-```lua
-local w, h = GetPhysicalScreenSize()   -- e.g. 1920, 1080
-```
-
-Vanilla 1.12 has no such native — and no pre-parsed pixel-dimension
-global. `GetScreenWidth()`/`GetScreenHeight()` return UI-space units
-(derived from the UIParent aspect ratio at `[UIParent + 0x7c]`), not
-pixels. The engine only ever holds the current mode as the
-`gxResolution` CVar string (`"WIDTHxHEIGHT"`); both `SetScreenResolution`
-(`0x0048bfd0`) and the display-init path sscanf it on demand rather
-than caching dimensions anywhere. So we read the `gxResolution` CVar
-directly through the engine's by-name lookup (`FUN_FIND_CVAR`, value at
-`+0x20`) and parse it — the same source of truth the engine uses.
-
-Returns `1024, 768` (→ factor 1.0, making PixelUtil a 1:1 no-op) when
-the CVar is missing or unparseable. Caveat: in windowed mode
-`gxResolution` reflects the configured render resolution, which may
-differ from the OS window's client size — vanilla exposes no separate
-window-pixel query.
-
-The companion `PixelUtil` table (`PixelUtil.SetPoint`/`SetSize`/
-`SetStatusBarValue`/…) is provided Lua-side by the ClassicAPI addon and
-consumes this function.
-
 ## Spell
 
 > **All `C_Spell.*` functions in this section accept any spell
@@ -11031,6 +10998,78 @@ via the engine's direct sender at [`FUN_006E7040`](../src/Offsets.h#L428).
 Mirrors 3.3.5a's `Script_CancelShapeshiftForm` inner (`FUN_00726CE0`),
 which does the same effect-array scan + form-id match before issuing
 its cancel packet. Vanilla just lacks the public Lua surface.
+
+## System
+
+Host/OS-level helpers that aren't tied to a game domain.
+
+### `GetPhysicalScreenSize()`
+
+Returns `(widthPixels, heightPixels)` — the display's physical
+resolution in pixels. Modern WoW added this as a native in 7.0
+(Legion); FrameXML's `PixelUtil` builds its entire pixel↔UI-unit
+conversion on it (`768.0 / physicalHeight`), which is what lets addons
+snap frames to whole pixels for crisp borders at fractional UI scales.
+
+```lua
+local w, h = GetPhysicalScreenSize()   -- e.g. 1920, 1080
+```
+
+Vanilla 1.12 has no such native — and no pre-parsed pixel-dimension
+global. `GetScreenWidth()`/`GetScreenHeight()` return UI-space units
+(derived from the UIParent aspect ratio at `[UIParent + 0x7c]`), not
+pixels. The engine only ever holds the current mode as the
+`gxResolution` CVar string (`"WIDTHxHEIGHT"`); both `SetScreenResolution`
+(`0x0048bfd0`) and the display-init path sscanf it on demand rather
+than caching dimensions anywhere. So we read the `gxResolution` CVar
+directly through the engine's by-name lookup (`FUN_FIND_CVAR`, value at
+`+0x20`) and parse it — the same source of truth the engine uses.
+
+Returns `1024, 768` (→ factor 1.0, making PixelUtil a 1:1 no-op) when
+the CVar is missing or unparseable. Caveat: in windowed mode
+`gxResolution` reflects the configured render resolution, which may
+differ from the OS window's client size — vanilla exposes no separate
+window-pixel query.
+
+The companion `PixelUtil` table (`PixelUtil.SetPoint`/`SetSize`/
+`SetStatusBarValue`/…) is provided Lua-side by the ClassicAPI addon and
+consumes this function.
+
+### `CopyToClipboard(text [, removeMarkup])`
+
+Copies `text` to the Windows clipboard and returns the number of bytes
+copied. Vanilla has no clipboard access at all, so this is a ClassicAPI
+addition backed by the Win32 clipboard API. Available on both the in-game
+and login/character-select screens.
+
+- `text` — the string to copy (numbers are coerced, like Lua does).
+- `removeMarkup` — optional; when truthy, strip WoW UI escape sequences
+  before copying so the clipboard gets plain text:
+  - `|cAARRGGBB … |r` color codes → removed
+  - `|H…|h text |h` hyperlinks → keeps only the visible text
+  - `|T…|t` textures → removed
+  - `|n` → newline, `||` → literal `|`
+  - unknown `|x` sequences are left verbatim, so real text that merely
+    contains a pipe survives
+- returns the byte length of the copied (possibly stripped) string —
+  consistent with Lua's `#s`. `0` for an empty string or if the clipboard
+  couldn't be opened.
+
+```lua
+CopyToClipboard("hello world")                              -- 11
+local link = "\124cffff0000Red\124r"                        -- real single-pipe markup
+CopyToClipboard(link, true)                                 -- 3   (clipboard gets "Red")
+CopyToClipboard(link)                                       -- 15  (raw escapes copied)
+```
+
+> The string is treated as UTF-8 (matching the credential and TTS modules)
+> and written as `CF_UNICODETEXT`; Windows synthesizes `CF_TEXT` for legacy
+> consumers.
+>
+> Note when testing from the chat box: the edit box escapes every typed `|`
+> into `||`, so a literal `|cff…` you type is no longer a color code by the
+> time it reaches Lua. Build real markup with `\124` (as above) to exercise
+> `removeMarkup`.
 
 ## Talent
 

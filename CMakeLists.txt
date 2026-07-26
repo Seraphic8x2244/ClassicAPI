@@ -118,7 +118,9 @@ target_sources(${PROJECT_NAME} PRIVATE "${CLASSICAPI_VERSION_RC}")
 # ole32: COM (CoInitializeEx / CoCreateInstance / CoTaskMemFree) for the
 # SAPI text-to-speech backend in src/voicechat/Tts.cpp. The SAPI GUIDs are
 # instantiated in that TU via <initguid.h>, so no sapi.lib is needed.
-target_link_libraries(${PROJECT_NAME} PRIVATE minhook advapi32 ole32)
+# user32: Win32 clipboard API (OpenClipboard / SetClipboardData) for
+# CopyToClipboard in src/clipboard/Copy.cpp.
+target_link_libraries(${PROJECT_NAME} PRIVATE minhook advapi32 ole32 user32)
 
 target_include_directories(
   ${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
