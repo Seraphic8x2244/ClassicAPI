@@ -38,3 +38,4 @@ Util\LinkUtil.lua
 Util\TradeSkillLink.lua
 Util\IconDataProvider.lua
 Util\GameTooltip.lua
+Util\Rectangle.lua
