@@ -5338,6 +5338,12 @@ enum Offsets {
     // (form ID for shapeshift, channel index for periodic, etc.).
     OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME = 0x16C,  // int32[3]
     OFF_SPELL_RECORD_EFFECT_MISC_VALUE = 0x1A8,       // int32[3]
+    // Per-effect SpellMechanic ids (EffectMechanic[3]). One int32[3] (0xC)
+    // after EffectBasePoints (0x130); cross-checked against EffectRadiusIndex
+    // (0x160) and EffectApplyAuraName (0x16C). Vanilla often stores a spell's
+    // mechanic on an effect rather than the spell-level Mechanic (0x14), so
+    // bleed / DoT detection needs this array in addition to that field.
+    OFF_SPELL_RECORD_EFFECT_MECHANIC = 0x13C,         // int32[3]
     SPELL_RECORD_EFFECT_COUNT = 3,
 
     // SPELL_EFFECT_* id array (`Effect[3]`) — five arrays before

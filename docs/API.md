@@ -402,6 +402,7 @@ build instructions.
   - [`C_Spell.GetSpellLink(spellID)`](#c_spellgetspelllinkspellid)
   - [`C_Spell.GetSpellDescription(spellID)`](#c_spellgetspelldescriptionspellid)
   - [`C_Spell.GetSpellMechanicByID(spellID)`](#c_spellgetspellmechanicbyidspellid)
+  - [`C_Spell.GetSpellEffectMechanics(spellID)`](#c_spellgetspelleffectmechanicsspellid)
   - [`C_Spell.GetSpellRadius(spellID)` / `GetSpellRadius(slot, bookType)`](#c_spellgetspellradiusspellid--getspellradiusslot-booktype)
   - [`C_Spell.GetSpellPowerCost(spellIdentifier)`](#c_spellgetspellpowercostspellidentifier)
   - [`C_Spell.GetSpellReagents(spellID)`](#c_spellgetspellreagentsspellid)
@@ -9638,6 +9639,41 @@ column is exactly what this function returns):
 > **No mechanic `30`.** The table tops out at `27`. Sap and Gouge report
 > `14` (incapacitated) in 1.12 — the `30` ("sapped") value used by some
 > addon tables is a later-expansion addition and has no row here.
+
+### `C_Spell.GetSpellEffectMechanics(spellID)`
+
+Returns the spell's three per-effect `SpellMechanic` ids (`Spell.dbc`
+`EffectMechanic[3]`) as a 1-based array table, or `nil` for an invalid /
+out-of-range spell ID. Each entry uses the same numbering as
+[`GetSpellMechanicByID`](#c_spellgetspellmechanicbyidspellid) (`0` = that
+effect carries no mechanic).
+
+```lua
+C_Spell.GetSpellEffectMechanics(1822)  -- Rake  → { 0, 15, 0 }
+C_Spell.GetSpellEffectMechanics(703)   -- Garrote → { 0, 0, 0 }
+C_Spell.GetSpellEffectMechanics(133)   -- Fireball → { 0, 0, 0 }
+```
+
+Complements [`GetSpellMechanicByID`](#c_spellgetspellmechanicbyidspellid),
+which reads only the **spell-level** `Mechanic` field (`+0x14`). Vanilla
+frequently stores a spell's mechanic on an **effect** instead — periodic
+damage such as bleeds is the common case. Garrote/Rupture/Rend/Rip tag
+`bleeding` (15) at the spell level, but **Rake** has spell-level `0` and
+`EffectMechanic[2] = 15`, so effect-mechanic-aware callers (e.g. bleed
+classification for immunity tracking) need this array:
+
+```lua
+local function IsBleed(spellID)
+    if C_Spell.GetSpellMechanicByID(spellID) == 15 then return true end
+    local em = C_Spell.GetSpellEffectMechanics(spellID)
+    if em then for i = 1, 3 do if em[i] == 15 then return true end end end
+    return false
+end
+```
+
+Reads `Spell.dbc` directly (`EffectMechanic[3]` at `+0x13C`), so it covers
+every spell the client knows — not just the player's spellbook — with no
+caching or network round-trip.
 
 ### `C_Spell.GetSpellRadius(spellID)` / `GetSpellRadius(slot, bookType)`
 
