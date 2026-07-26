@@ -23,6 +23,7 @@ Full per-function reference: **[docs/API.md](docs/API.md)**.
 | [Chat](docs/API.md#chat) | `GetCurrentChatGUID` |
 | [ChatBubbles](docs/API.md#chatbubbles) | `C_ChatBubbles.GetAllChatBubbles` |
 | [Class](docs/API.md#class) | `FillLocalizedClassList` |
+| [ColorUtil](docs/API.md#colorutil) | `C_ColorUtil.ConvertRGBToHSV`, `C_ColorUtil.ConvertHSVToRGB`, `C_ColorUtil.ConvertHSVToHSL`, `C_ColorUtil.ConvertHSLToHSV`, `C_ColorUtil.ConvertHSLToRGB`, `C_ColorUtil.GenerateTextColorCode`, `C_ColorUtil.WrapTextInColor`, `C_ColorUtil.WrapTextInColorCode` |
 | [Combat](docs/API.md#combat) | `InCombatLockdown` |
 | [CVar](docs/API.md#cvar) | `C_CVar.GetCVarBool` |
 | [Cursor](docs/API.md#cursor) | `GetCursorInfo` |

@@ -1,3 +1,8 @@
+COLOR_FORMAT_RGBA = "RRGGBBAA"
+COLOR_FORMAT_RGB = "RRGGBB"
+COLOR_FORMAT_ARGB = "AARRGGBB"
+FONT_COLOR_CODE_CLOSE = "|r"
+
 do
 	local ColorMixin = ColorMixin
 	for _, classColor in pairs(RAID_CLASS_COLORS) do
@@ -12,30 +17,40 @@ function ExtractColorValueFromHex(str, index)
 end
 
 function CreateColorFromHexString(hexColor)
-	if string.len(hexColor) == 8 then
+	if string.len(hexColor) == string.len(COLOR_FORMAT_ARGB) then
 		local a, r, g, b = ExtractColorValueFromHex(hexColor, 1), ExtractColorValueFromHex(hexColor, 3), ExtractColorValueFromHex(hexColor, 5), ExtractColorValueFromHex(hexColor, 7);
 		return CreateColor(r, g, b, a);
-	else
-		error("CreateColorFromHexString input must be hexadecimal digits in this format: AARRGGBB.", 2);
 	end
+	error("CreateColorFromHexString input must be hexadecimal digits in this format: "..COLOR_FORMAT_ARGB..".", 2);
+	return nil;
 end
 
 function CreateColorFromRGBAHexString(hexColor)
-	if string.len(hexColor) == 8 then
+	if string.len(hexColor) == string.len(COLOR_FORMAT_RGBA) then
 		local r, g, b, a = ExtractColorValueFromHex(hexColor, 1), ExtractColorValueFromHex(hexColor, 3), ExtractColorValueFromHex(hexColor, 5), ExtractColorValueFromHex(hexColor, 7);
 		return CreateColor(r, g, b, a);
-	else
-		error("CreateColorFromRGBAHexString input must be hexadecimal digits in this format: RRGGBBAA.", 2);
 	end
+	error("CreateColorFromRGBAHexString input must be hexadecimal digits in this format: "..COLOR_FORMAT_RGBA..".", 2);
+	return nil;
 end
 
 function CreateColorFromRGBHexString(hexColor)
-	if string.len(hexColor) == 6 then
+	if string.len(hexColor) == string.len(COLOR_FORMAT_RGB) then
 		local r, g, b = ExtractColorValueFromHex(hexColor, 1), ExtractColorValueFromHex(hexColor, 3), ExtractColorValueFromHex(hexColor, 5);
 		return CreateColor(r, g, b, 1);
-	else
-		error("CreateColorFromRGBHexString input must be hexadecimal digits in this format: RRGGBB.", 2);
 	end
+	error("CreateColorFromRGBHexString input must be hexadecimal digits in this format: "..COLOR_FORMAT_RGB..".", 2);
+	return nil;
+end
+
+function CreateColorFromBestRGBHexString(hexColor)
+	if string.len(hexColor) == string.len(COLOR_FORMAT_RGBA) then
+		return CreateColorFromRGBAHexString(hexColor);
+	elseif string.len(hexColor) == string.len(COLOR_FORMAT_RGB) then
+		return CreateColorFromRGBHexString(hexColor);
+	end
+	error("CreateColorFromBestRGBHexString input must be hexadecimal digits in either of these formats: "..COLOR_FORMAT_RGBA.." / "..COLOR_FORMAT_RGB..".", 2);
+	return nil;
 end
 
 function CreateColorFromBytes(r, g, b, a)
@@ -68,9 +83,7 @@ end
 function GetClassColoredTextForUnit(unit, text)
 	local _, classFilename = UnitClass(unit);
 	local color = GetClassColorObj(classFilename);
-	if (color) then
-		return color:WrapTextInColorCode(text);
-	end
+	return color and color:WrapTextInColorCode(text) or text;
 end
 
 function GetFactionColor(factionGroupTag)
@@ -82,7 +95,7 @@ function GetFactionColor(factionGroupTag)
 end
 
 function RGBToColorCode(r, g, b)
-	return string.format("|cff%.2x%.2x%.2x", r * 255, g * 255, b * 255);
+	return string.format("|cff%02x%02x%02x", r * 255, g * 255, b * 255);
 end
 
 function RGBTableToColorCode(rgbTable)

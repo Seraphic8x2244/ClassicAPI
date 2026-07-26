@@ -34,6 +34,16 @@ build instructions.
 - [Class](#class)
   - [`FillLocalizedClassList(table [, isFemale])`](#filllocalizedclasslisttable-isfemale)
 
+- [ColorUtil](#colorutil)
+  - [`C_ColorUtil.ConvertRGBToHSV(r, g, b)`](#c_colorutilconvertrgbtohsvr-g-b)
+  - [`C_ColorUtil.ConvertHSVToRGB(h, s, v)`](#c_colorutilconverthsvtorgbh-s-v)
+  - [`C_ColorUtil.ConvertHSVToHSL(h, s, v)`](#c_colorutilconverthsvtohslh-s-v)
+  - [`C_ColorUtil.ConvertHSLToHSV(h, s, l)`](#c_colorutilconverthsltohsvh-s-l)
+  - [`C_ColorUtil.ConvertHSLToRGB(h, s, l)`](#c_colorutilconverthsltorgbh-s-l)
+  - [`C_ColorUtil.GenerateTextColorCode(color)`](#c_colorutilgeneratetextcolorcodecolor)
+  - [`C_ColorUtil.WrapTextInColor(text, color)`](#c_colorutilwraptextincolortext-color)
+  - [`C_ColorUtil.WrapTextInColorCode(text, colorCode)`](#c_colorutilwraptextincolorcodetext-colorcode)
+
 - [Combat](#combat)
   - [`InCombatLockdown()`](#incombatlockdown)
 
@@ -1059,6 +1069,80 @@ anyway, so callers won't typically notice.
 Sparse class IDs (vanilla skips classID 6 — Death Knight didn't
 exist yet — and a few others) have NULL records and are silently
 skipped.
+
+## ColorUtil
+
+The modern `C_ColorUtil` color-space and text-color-code helpers. All are
+pure functions (no engine state); conventions match a retail-family client
+that ships them natively, verified in-game.
+
+**Ranges:** hue is in **degrees**, `[0, 360)`; saturation / value / lightness
+are `[0, 1]`. RGB channels are `[0, 1]` (not 0–255). Achromatic (gray) inputs
+return a hue of **`-1`** — a sentinel, not `0` — which the reverse conversions
+accept as "no hue" (equivalent to `saturation == 0`).
+
+The `color` argument is a table with `r`, `g`, `b` fields in `[0, 1]`
+(`ColorMixin`-shaped). An optional `a` is honored (default `1`), though the
+color code always encodes 8 hex digits with alpha.
+
+### `C_ColorUtil.ConvertRGBToHSV(r, g, b)`
+
+Returns `(h, s, v)`. Achromatic input → `h == -1`.
+
+```lua
+C_ColorUtil.ConvertRGBToHSV(0, 1, 0)         -- 120, 1, 1   (pure green)
+C_ColorUtil.ConvertRGBToHSV(0.5, 0.5, 0.5)   -- -1, 0, 0.5  (gray)
+```
+
+### `C_ColorUtil.ConvertHSVToRGB(h, s, v)`
+
+Returns `(r, g, b)`. A negative hue (or `s == 0`) is treated as achromatic
+and yields `r == g == b == v`.
+
+```lua
+C_ColorUtil.ConvertHSVToRGB(120, 1, 1)   -- 0, 1, 0
+```
+
+### `C_ColorUtil.ConvertHSVToHSL(h, s, v)`
+
+Returns `(h, s, l)`. Hue passes through unchanged.
+
+### `C_ColorUtil.ConvertHSLToHSV(h, s, l)`
+
+Returns `(h, s, v)`. Hue passes through unchanged.
+
+### `C_ColorUtil.ConvertHSLToRGB(h, s, l)`
+
+Returns `(r, g, b)`. A negative hue (or `s == 0`) is achromatic → `r == g ==
+b == l`.
+
+### `C_ColorUtil.GenerateTextColorCode(color)`
+
+Returns the bare 8-hex color string `"AARRGGBB"` (alpha first), **not**
+including the `|c` escape.
+
+```lua
+C_ColorUtil.GenerateTextColorCode({r = 1, g = 0, b = 0})   -- "ffff0000"
+```
+
+### `C_ColorUtil.WrapTextInColor(text, color)`
+
+Wraps `text` in the color's escape sequence: `"|c" .. AARRGGBB .. text ..
+"|r"`.
+
+```lua
+C_ColorUtil.WrapTextInColor("Hi", {r = 1, g = 0, b = 0})   -- "|cffff0000Hi|r"
+```
+
+### `C_ColorUtil.WrapTextInColorCode(text, colorCode)`
+
+Wraps `text` in the given bare color code: `"|c" .. colorCode .. text ..
+"|r"`. Pair with `GenerateTextColorCode` (which produces `colorCode`).
+
+```lua
+local code = C_ColorUtil.GenerateTextColorCode({r = 1, g = 0, b = 0})
+C_ColorUtil.WrapTextInColorCode("Hi", code)   -- "|cffff0000Hi|r"
+```
 
 ## Combat
 
