@@ -693,6 +693,101 @@ int GroupMemberLevel(uint64_t guid) {
     return Group::MemberStats::Lookup(guid).level;
 }
 
+// True if the group array exposes ANY visible aura (either kind). When it
+// does, the server's out-of-range aura data is present and authoritative, so
+// we do NOT supplement from the Aura::Source cache — mirroring how the
+// descriptor path treats a populated descriptor (DescriptorHasVisibleAura).
+// Only when the array is entirely empty do we fall back to the cache: the
+// server resends out-of-range stats as deltas only, so a member seen in range
+// and then moved away again leaves an empty party-stats aura array (the array
+// is cleared when they become visible and never re-sent), yet their auras
+// still sit in the cache from when we observed them in range.
+bool GroupArrayHasVisibleAura(const uint16_t *arr) {
+    for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot) {
+        const uint32_t id = GroupSpellID(arr, slot);
+        if (id != 0 && IsVisible(SpellRecord(id)))
+            return true;
+    }
+    return false;
+}
+
+// Whether cache entry `c` may supplement the (empty) group array: a visible
+// aura, not already present in the array, and — when player-filtered — cast by
+// us. See GroupArrayHasVisibleAura for when this path runs.
+bool GroupFallbackEligible(const uint16_t *arr, const Aura::Source::CachedAura &c,
+                           bool playerOnly) {
+    if (!IsVisible(SpellRecord(c.spellId)))
+        return false;
+    for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot)
+        if (GroupSpellID(arr, slot) == c.spellId)
+            return false;
+    if (playerOnly && c.casterGuid != Unit::Identity::PlayerGuid())
+        return false;
+    return true;
+}
+
+// Nth (1-based) cache-fallback aura of `filter`'s kind for an out-of-range
+// member whose group array is empty. Pushes the AuraData table on a hit.
+bool PushNthGroupCacheFallback(void *L, uint64_t guid, const uint16_t *arr,
+                               int oneBasedIndex, Filter filter, bool playerOnly) {
+    Aura::Source::CachedAura buf[kFallbackMax];
+    const int n =
+        Aura::Source::Enumerate(guid, filter == Filter::Harmful, buf, kFallbackMax);
+    int seen = 0;
+    for (int i = 0; i < n; ++i) {
+        if (!GroupFallbackEligible(arr, buf[i], playerOnly))
+            continue;
+        if (++seen == oneBasedIndex) {
+            PushEnriched(L, guid, buf[i].spellId, filter == Filter::Helpful, 1,
+                         GroupMemberLevel(guid), false);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Append every cache-fallback aura of `filter`'s kind into the array table.
+void AppendGroupCacheFallbacks(void *L, uint64_t guid, const uint16_t *arr,
+                               Filter filter, bool playerOnly, int outerIdx,
+                               int &nextKey) {
+    Aura::Source::CachedAura buf[kFallbackMax];
+    const int n =
+        Aura::Source::Enumerate(guid, filter == Filter::Harmful, buf, kFallbackMax);
+    const int level = GroupMemberLevel(guid);
+    for (int i = 0; i < n; ++i) {
+        if (!GroupFallbackEligible(arr, buf[i], playerOnly))
+            continue;
+        Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
+        PushEnriched(L, guid, buf[i].spellId, filter == Filter::Helpful, 1, level,
+                     false);
+        Game::Lua::SetTable(L, outerIdx);
+    }
+}
+
+// Single cache-fallback aura matching `spellID` (when nonzero) or `spellName`
+// (when non-null), of the given kind. Backs the by-ID / by-name group queries.
+bool PushGroupCacheFallbackMatch(void *L, uint64_t guid, const uint16_t *arr,
+                                 bool harmful, uint32_t spellID,
+                                 const char *spellName, bool playerOnly) {
+    Aura::Source::CachedAura buf[kFallbackMax];
+    const int n = Aura::Source::Enumerate(guid, harmful, buf, kFallbackMax);
+    for (int i = 0; i < n; ++i) {
+        if (spellID != 0 && buf[i].spellId != spellID)
+            continue;
+        if (spellName != nullptr) {
+            const char *nm = LocalizedSpellName(SpellRecord(buf[i].spellId));
+            if (nm == nullptr || std::strcmp(nm, spellName) != 0)
+                continue;
+        }
+        if (!GroupFallbackEligible(arr, buf[i], playerOnly))
+            continue;
+        PushEnriched(L, guid, buf[i].spellId, !harmful, 1, GroupMemberLevel(guid),
+                     false);
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
@@ -716,6 +811,10 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
             return true;
         }
     }
+    // Empty array (server delta-resend gap): supplement from the cache.
+    if (!GroupArrayHasVisibleAura(arr))
+        return PushNthGroupCacheFallback(L, guid, arr, oneBasedIndex, filter,
+                                         playerOnly);
     return false;
 }
 
@@ -741,6 +840,17 @@ bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
         PushEnriched(L, guid, spellID, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
                      GroupMemberLevel(guid), false);
         return true;
+    }
+    if (!GroupArrayHasVisibleAura(arr)) {
+        const bool both = (filter == nullptr);
+        if ((both || *filter == Filter::Helpful) &&
+            PushGroupCacheFallbackMatch(L, guid, arr, false, spellID, nullptr,
+                                        playerOnly))
+            return true;
+        if ((both || *filter == Filter::Harmful) &&
+            PushGroupCacheFallbackMatch(L, guid, arr, true, spellID, nullptr,
+                                        playerOnly))
+            return true;
     }
     return false;
 }
@@ -772,6 +882,17 @@ bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
                      GroupMemberLevel(guid), false);
         return true;
     }
+    if (!GroupArrayHasVisibleAura(arr)) {
+        const bool both = (filter == nullptr);
+        if ((both || *filter == Filter::Helpful) &&
+            PushGroupCacheFallbackMatch(L, guid, arr, false, 0, spellName,
+                                        playerOnly))
+            return true;
+        if ((both || *filter == Filter::Harmful) &&
+            PushGroupCacheFallbackMatch(L, guid, arr, true, 0, spellName,
+                                        playerOnly))
+            return true;
+    }
     return false;
 }
 
@@ -794,6 +915,10 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, bool playerOnly,
                      filter == Filter::Helpful, 1, level, false);
         Game::Lua::SetTable(L, outerIdx);
     }
+    // Empty array (server delta-resend gap): supplement from the cache.
+    if (!GroupArrayHasVisibleAura(arr))
+        AppendGroupCacheFallbacks(L, guid, arr, filter, playerOnly, outerIdx,
+                                  nextKey);
 }
 
 } // namespace Aura::Data
