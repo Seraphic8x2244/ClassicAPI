@@ -265,6 +265,7 @@ void RegisterFns() {
     Game::Lua::RegisterTableFunction("string", "match", &Script_string_match);
     Game::Lua::RegisterTableFunction("string", "gmatch", Script_string_gmatch);
     Game::Lua::RegisterTableFunction("string", "reverse", &Script_string_reverse);
+    Game::Lua::RegisterTableFunction("string", "split", &Script_strsplit);
     Game::Lua::RegisterGlobalFunction("strsplit", &Script_strsplit);
     Game::Lua::RegisterGlobalFunction("strjoin", &Script_strjoin);
     Game::Lua::RegisterGlobalFunction("strtrim", &Script_strtrim);
