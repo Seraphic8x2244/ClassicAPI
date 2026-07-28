@@ -202,6 +202,10 @@ build instructions.
   - [`Enum.ItemQuality`](#enumitemquality)
   - [`Enum.PowerType`](#enumpowertype)
 
+- [Glue](#glue)
+  - [`C_Glue.IsFirstLoadThisSession()`](#c_glueisfirstloadthissession)
+  - [`C_Glue.IsOnGlueScreen()`](#c_glueisongluescreen)
+
 - [Gossip](#gossip)
   - [`C_GossipInfo.GetText()`](#c_gossipinfogettext)
   - [`C_GossipInfo.GetOptions()`](#c_gossipinfogetoptions)
@@ -4706,6 +4710,47 @@ not modern's `ComboPoints` reuse of the same number.
 
 ```lua
 local rage = UnitPower("player", Enum.PowerType.Rage)
+```
+
+## Glue
+
+Backports of two `C_Glue` session helpers. `C_Glue` is registered on the glue
+(login / character-select) Lua state; `IsOnGlueScreen` is *also* registered
+in-game, so code that runs in either environment can branch on it. Neither
+needs an engine flag — both answers fall out of which glue boot / Lua state
+is asking.
+
+### `C_Glue.IsFirstLoadThisSession()`
+
+Returns `true` only while the **first** glue screen since the process
+launched is showing, `false` on every later return to the glue screen. Login
+↔ character-select transitions stay within the first glue session (they never
+enter the world), so it stays `true` across them — it flips `false` only once
+you've entered the world and logged back out. Glue state only.
+
+```lua
+if C_Glue.IsFirstLoadThisSession() then
+    -- one-time-per-launch startup (intro cinematic, news, …)
+end
+```
+
+Backed by a process-static count of glue boots (the glue script-registration
+pass fires once per boot: initial launch + each world→glue logout); boot 1 is
+the first load.
+
+### `C_Glue.IsOnGlueScreen()`
+
+Returns `true` when a GlueXML screen is showing (login or character select —
+no character in the world), `false` in the world. Registered on **both** Lua
+states, so it's callable from glue and in-game code alike. The two states are
+mutually exclusive (the glue state exists only when no character is in the
+world), so the answer is fixed per state — `true` from the glue registration,
+`false` from the in-game one.
+
+```lua
+if C_Glue.IsOnGlueScreen() then
+    -- at login / character select
+end
 ```
 
 ## Gossip
