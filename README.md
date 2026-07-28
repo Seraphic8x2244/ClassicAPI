@@ -38,7 +38,7 @@ Full per-function reference: **[docs/API.md](docs/API.md)**.
 | [Frame](docs/API.md#frame) | `region:SetPoint("point")` (one-arg form), `region:SetSize`, `region:GetSize`, `region:IsMouseOver`, `region:GetRect`, `region:IsDragging`, `frame:SetShown`, `frame:SetResizeBounds`, `frame:HookScript`, `frame:IsEventRegistered`, `frame:GetEffectiveAlpha` |
 | [FriendList](docs/API.md#friendlist) | `C_FriendList.IsWhoQueryPending`, `C_FriendList.SendWhoQueryByName` |
 | [GameObject](docs/API.md#gameobject) | `C_GameObjectInfo.GetGameObjectInfoByID`, `C_GameObjectInfo.RequestLoadGameObjectByID`, `ClosestGameObjectPosition` |
-| [Glue](docs/API.md#glue) | `C_Glue.IsFirstLoadThisSession`, `C_Glue.IsOnGlueScreen` |
+| [Glue](docs/API.md#glue) | `C_Glue.IsOnGlueScreen` |
 | [Gossip](docs/API.md#gossip) | `C_GossipInfo.CloseGossip`, `C_GossipInfo.GetActiveQuests`, `C_GossipInfo.GetAvailableQuests`, `C_GossipInfo.GetNumActiveQuests`, `C_GossipInfo.GetNumAvailableQuests`, `C_GossipInfo.GetNumOptions`, `C_GossipInfo.GetOptions`, `C_GossipInfo.GetText`, `C_GossipInfo.SelectActiveQuest`, `C_GossipInfo.SelectAvailableQuest`, `C_GossipInfo.SelectOption`, `C_GossipInfo.SelectOptionByIndex` |
 | [GameTooltip](docs/API.md#gametooltip) | `GameTooltip:AddSpellByID`, `GameTooltip:GetGameObject`, `GameTooltip:GetItem`, `GameTooltip:GetOwner`, `GameTooltip:GetSpell`, `GameTooltip:GetUnitGUID`, `GameTooltip:HasGameObject`, `GameTooltip:HasItem`, `GameTooltip:HasSpell`, `GameTooltip:HasUnit`, `GameTooltip:IsEquippedItem`, `GameTooltip:SetEquipmentSet`, `GameTooltip:SetHyperlinkCompareItem`, `GameTooltip:SetInventoryItemByID`, `GameTooltip:SetItemByGUID`, `GameTooltip:SetItemByID`, `GameTooltip:SetSpellByID`, `GameTooltip:SetTalentByID`, `GameTooltip:SetTotem`, `GameTooltip:SetUnitAura`, `OnTooltipSetItem`, `OnTooltipSetSpell`, `OnTooltipSetUnit`, `OnTooltipSetGameObject` (scripts) |
 | [Hooks](docs/API.md#hooks) | `hooksecurefunc` |
@@ -91,6 +91,7 @@ the glue state because GlueXML had no way to reach them otherwise.
 | [Account](docs/API.md#account) | `SaveAccount`, `DeleteAccount`, `GetSavedAccounts`, `LoginWithSavedAccount` (passwords encrypted in Windows Credential Manager, scoped per realmlist; plaintext never returned to Lua) |
 | [CharacterList](docs/API.md#characterlist) | `GetSavedCharacterOrder`, `SetSavedCharacterOrder` (persist to `WTF\Account\...\ClassicAPI.txt`) |
 | CVar | `GetCVar`, `SetCVar`, `RegisterCVar`, `GetCVarDefault`, `C_CVar.GetCVarBool` (storage is process-global — writes from glue are visible in-world and vice versa) |
+| [Glue](docs/API.md#glue) | `C_Glue.IsFirstLoadThisSession`, `C_Glue.IsOnGlueScreen` |
 | Script | `RunScript` (compile and run a Lua chunk in the glue state's globals — useful for slash-command-style helpers in GlueXML) |
 | State | `IsLoggedIn` |
 
