@@ -26,6 +26,8 @@
 //   - `region:SetSize(w, h)` / `region:GetSize()` — registered on the
 //     REGION base method registry, so they resolve on frames, buttons,
 //     textures, fontstrings — everything.
+//   - `region:IsMouseOver([top, bottom, left, right])` — cursor-in-rect
+//     test with optional per-edge offsets, also on the REGION registry.
 //   - `frame:SetShown(shown)` — Show/Hide are per-branch script functions
 //     (each with its own object typecheck), so SetShown is registered
 //     separately on Frame / Texture / FontString with matching delegates.
@@ -81,6 +83,73 @@ int __fastcall Script_GetSize(void *L) {
     CallScript(Offsets::FUN_SCRIPT_REGION_GETWIDTH, L); // (self, w)
     CallScript(Offsets::FUN_SCRIPT_REGION_GETHEIGHT, L); // (self, w, h)
     return 2;
+}
+
+// ---- IsMouseOver (Region base — all region types) --------------------------
+
+// `region:IsMouseOver([topOffset, bottomOffset, leftOffset, rightOffset])` —
+// true when the cursor is within the region's rect, each edge optionally
+// shifted by the matching offset (added to that edge, modern semantics:
+// +top/-bottom/-left/+right enlarges). Vanilla addons have always done this
+// in Lua as MouseIsOver(); we register it as the native Region method later
+// clients expose.
+//
+// The math mirrors the engine exactly: GetLeft/Right/Top/Bottom (Region
+// registry, all types) and GetCursorPosition both return values scaled by the
+// same k = FUN_0041ad70()*DAT_007ffd68 factor, but the rect getters also
+// divide by the region's effective scale — so dividing the cursor by that same
+// effective scale (read from obj+0x7C, the field GetLeft/GetEffectiveScale
+// themselves read) puts both in the region's logical space. A getter returns
+// nil for an unpositioned region → we report false.
+
+// Calls a Region getter that returns one number; false if it pushed nil/none.
+bool CallRegionNumber(void *L, uintptr_t fn, double *out) {
+    Game::Lua::SetTop(L, 1); // (self)
+    CallScript(fn, L);       // (self, value | nil)
+    if (!Game::Lua::IsNumber(L, 2))
+        return false;
+    *out = Game::Lua::ToNumber(L, 2);
+    return true;
+}
+
+int __fastcall Script_IsMouseOver(void *L) {
+    // Offsets first — the stack gets reshaped by the delegated getters.
+    const double offTop = Game::Lua::IsNumber(L, 2) ? Game::Lua::ToNumber(L, 2) : 0.0;
+    const double offBottom = Game::Lua::IsNumber(L, 3) ? Game::Lua::ToNumber(L, 3) : 0.0;
+    const double offLeft = Game::Lua::IsNumber(L, 4) ? Game::Lua::ToNumber(L, 4) : 0.0;
+    const double offRight = Game::Lua::IsNumber(L, 5) ? Game::Lua::ToNumber(L, 5) : 0.0;
+
+    void *obj = Game::Lua::ResolveObject(L, 1);
+    if (obj == nullptr) {
+        Game::Lua::PushBool(L, false);
+        return 1;
+    }
+    const float effScale = *reinterpret_cast<const float *>(
+        reinterpret_cast<const uint8_t *>(obj) + Offsets::OFF_REGION_EFFECTIVE_SCALE);
+
+    double left, right, top, bottom;
+    if (effScale == 0.0f ||
+        !CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETLEFT, &left) ||
+        !CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETRIGHT, &right) ||
+        !CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETTOP, &top) ||
+        !CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETBOTTOM, &bottom)) {
+        Game::Lua::PushBool(L, false); // no resolved rect
+        return 1;
+    }
+
+    Game::Lua::SetTop(L, 0);
+    CallScript(Offsets::FUN_SCRIPT_GETCURSORPOSITION, L); // (x, y)
+    const double x = Game::Lua::ToNumber(L, 1) / effScale;
+    const double y = Game::Lua::ToNumber(L, 2) / effScale;
+
+    left += offLeft;
+    right += offRight;
+    top += offTop;
+    bottom += offBottom;
+
+    const bool inside = x >= left && x <= right && y >= bottom && y <= top;
+    Game::Lua::PushBool(L, inside);
+    return 1;
 }
 
 // ---- SetShown (per-branch Show/Hide delegates) -----------------------------
@@ -274,6 +343,7 @@ const Game::HookAutoRegister _setPointHook{
 const Game::Lua::FrameMethodEntry g_regionMethods[] = {
     {"SetSize", &Script_SetSize},
     {"GetSize", &Script_GetSize},
+    {"IsMouseOver", &Script_IsMouseOver},
 };
 
 const Game::Lua::FrameMethodEntry g_frameMethods[] = {

@@ -1314,6 +1314,23 @@ enum Offsets {
     FUN_SCRIPT_REGION_SETHEIGHT = 0x007A2150,
     FUN_SCRIPT_REGION_GETWIDTH = 0x007A1E00,
     FUN_SCRIPT_REGION_GETHEIGHT = 0x007A2030,
+    // Region rect getters (return a number, or nil when the region has no
+    // resolved rect). All on the REGION base registry → callable on any
+    // region type. Used by Frame::Modern's IsMouseOver.
+    FUN_SCRIPT_REGION_GETLEFT = 0x007A1980,
+    FUN_SCRIPT_REGION_GETRIGHT = 0x007A1AA0,
+    FUN_SCRIPT_REGION_GETTOP = 0x007A1BC0,
+    FUN_SCRIPT_REGION_GETBOTTOM = 0x007A1CE0,
+    // In-game GetCursorPosition (0x0046DAD0 is the glue-state copy). Pushes
+    // (x, y) in the same k = FUN_0041ad70()*DAT_007ffd68 space the region
+    // rect getters use — so dividing by the region's effective scale puts
+    // the cursor in the region's logical coordinate space.
+    FUN_SCRIPT_GETCURSORPOSITION = 0x0048B820,
+    // Region effective-scale field: `piVar[0x1f]` (float) read by both
+    // GetEffectiveScale (0x00774FC0) and internally by GetLeft/Top/etc. —
+    // present on every region object, so it's the all-region way to get the
+    // effective scale without the Frame-only GetEffectiveScale method.
+    OFF_REGION_EFFECTIVE_SCALE = 0x7C,
     FUN_SCRIPT_FRAME_SHOW = 0x00775750,
     FUN_SCRIPT_FRAME_HIDE = 0x00775810,
     FUN_SCRIPT_FRAME_SETMINRESIZE = 0x00776020,

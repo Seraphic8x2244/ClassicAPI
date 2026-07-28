@@ -155,6 +155,7 @@ build instructions.
 - [Frame](#frame)
   - [`region:SetPoint("point")` (one-argument form)](#regionsetpointpoint-one-argument-form)
   - [`region:SetSize(width, height)` / `region:GetSize()`](#regionsetsizewidth-height--regiongetsize)
+  - [`region:IsMouseOver([topOffset, bottomOffset, leftOffset, rightOffset])`](#regionismouseovertopoffset-bottomoffset-leftoffset-rightoffset)
   - [`frame:SetShown(shown)`](#framesetshownshown)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
@@ -3592,6 +3593,25 @@ The modern combined setter/getter for `SetWidth`+`SetHeight` /
 `GetWidth`+`GetHeight`. Works on any region type — frames, buttons,
 textures (including engine-created ones like
 `button:GetNormalTexture()`), fontstrings.
+
+### `region:IsMouseOver([topOffset, bottomOffset, leftOffset, rightOffset])`
+
+`true` when the mouse cursor is within the region's rectangle, `false`
+otherwise. The four optional offsets shift the corresponding edge before
+the test (added to that edge, matching modern semantics: positive
+`topOffset` / `rightOffset` and negative `bottomOffset` / `leftOffset`
+enlarge the hit area). Registered on the Region base, so it works on any
+region type — frames, buttons, textures, fontstrings.
+
+Uses the engine's own rect getters and cursor position, dividing the
+cursor by the region's effective scale — the exact computation vanilla
+addons have long open-coded as `MouseIsOver()`. Returns `false` for a
+region with no resolved rect (unpositioned / zero-size).
+
+```lua
+ItemRefTooltip:IsMouseOver()                 -- true while hovering the tooltip
+Minimap:IsMouseOver(20, -20, -20, 20)        -- true within a 20px halo around it
+```
 
 ### `frame:SetShown(shown)`
 
