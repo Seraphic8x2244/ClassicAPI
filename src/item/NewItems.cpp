@@ -30,11 +30,23 @@
 //
 // The feed is event-driven, not polled: it hangs off `Bag::UpdateDelayed`,
 // which co-hooks the engine's three `BAG_UPDATE` fire sites and signals once
-// per frame in which a bag actually changed. On that signal we scan bags
-// 0..4, diff the resident item GUIDs against the previous scan, flag anything
-// newly acquired, and prune flags for items that left. `BAG_NEW_ITEMS_UPDATED`
-// (no payload — matching retail) fires whenever the new-item set changes. So
-// nothing runs on quiet frames.
+// per frame in which a bag actually changed. On that signal we scan bags 0..4,
+// flag any resident GUID that isn't in the owned "seen-set", reconcile the
+// seen-set against everything owned now, and prune flags for items that have
+// genuinely left. `BAG_NEW_ITEMS_UPDATED` (no payload — matching retail) fires
+// whenever the new-item set changes. Nothing runs on quiet frames.
+//
+// The seen-set is deliberately NOT rebuilt from each scan: a bag update in
+// progress transiently drops items from the read — sometimes the entire
+// backpack at once, for a frame or two — and a naive "seen = this scan"
+// approach would then re-flag the momentarily-missing item as new when it
+// reappears (the exact bug this system had). Instead each entry carries a
+// consecutive-absent-scan counter (`SeenReconcile`): present items reset it to
+// 0, absent ones age by one, and only items absent `kMaxMissStreak` scans
+// running are evicted. Counting scans (not wall-clock) means a pause with no
+// bag activity never ages an owned item; any reappearance resets the streak.
+// This keeps the set BOUNDED to ~currently-owned items — genuinely-removed
+// items age out — while absorbing the transient reads.
 //
 // The one exception is establishing the login baseline: a lightweight
 // WorldTick handler waits ~1.5s after the player is first resolvable (long
@@ -47,7 +59,7 @@
 // — even though only *bag* items are ever flagged new. That's what stops a
 // move INTO a bag from any of those (unequip, or a pull from the bank) from
 // looking like a fresh loot: the item's GUID was already in the owned set, so
-// the bag diff treats it as a move. The bank is reachable without the bank
+// the seen-set treats it as already-owned, not new. The bank is reachable without the bank
 // window open because its GUIDs are read straight from the invMgr array (the
 // same gate-bypass `C_Item.GetItemCount` uses; the array is server-populated
 // at login).
@@ -88,7 +100,23 @@ constexpr int kMaxItems = 512;
 // engine ms counter) so it's independent of frame rate.
 constexpr uint32_t kSettleMs = 1500;
 
-uint64_t g_seen[kMaxItems]; // all owned GUIDs (bags + equipment + bank) at the last scan
+// Consecutive bag-change scans an item may be absent from the read before it's
+// dropped from the seen-set. A bag update in progress transiently drops items
+// from the scan — sometimes the whole backpack at once — for a frame or two;
+// counting SCANS (not wall-clock) means a pause with no bag activity never ages
+// an owned item, and any reappearance resets the streak to 0, so a transient
+// miss never reaches the threshold. Genuinely-removed items hit it within a few
+// subsequent bag changes and age out — that's what keeps the set BOUNDED to
+// ~currently-owned items rather than everything ever owned.
+constexpr int kMaxMissStreak = 4;
+
+// One seen-set entry: an owned item's GUID and how many consecutive scans it
+// has been absent from the read (0 = present this scan).
+struct SeenEntry {
+    uint64_t guid;
+    int miss;
+};
+SeenEntry g_seen[kMaxItems];
 int g_seenCount = 0;
 uint64_t g_new[kMaxItems]; // subset currently flagged "new"
 int g_newCount = 0;
@@ -113,6 +141,44 @@ bool AddUnique(uint64_t *arr, int *count, uint64_t guid) {
         return false;
     arr[(*count)++] = guid;
     return true;
+}
+
+// --- seen-set (bounded, absent-scan-count evicted) -----------------------
+
+bool SeenContains(uint64_t guid) {
+    for (int i = 0; i < g_seenCount; ++i)
+        if (g_seen[i].guid == guid)
+            return true;
+    return false;
+}
+
+// One scan's reconcile: age every entry by one missed scan, then reset the
+// streak (and insert) for everything owned right now, then evict entries that
+// have been absent `kMaxMissStreak` scans running. `owned` is the union of the
+// current bag scan and non-bag owned items (equipment + bank).
+void SeenReconcile(const uint64_t *owned, int ownedCount) {
+    for (int i = 0; i < g_seenCount; ++i)
+        ++g_seen[i].miss;
+    for (int j = 0; j < ownedCount; ++j) {
+        const uint64_t guid = owned[j];
+        if (guid == 0)
+            continue;
+        bool found = false;
+        for (int i = 0; i < g_seenCount; ++i)
+            if (g_seen[i].guid == guid) {
+                g_seen[i].miss = 0;
+                found = true;
+                break;
+            }
+        if (!found && g_seenCount < kMaxItems)
+            g_seen[g_seenCount++] = {guid, 0};
+    }
+    for (int i = 0; i < g_seenCount;) {
+        if (g_seen[i].miss >= kMaxMissStreak)
+            g_seen[i] = g_seen[--g_seenCount];
+        else
+            ++i;
+    }
 }
 
 bool RemoveFrom(uint64_t *arr, int *count, uint64_t guid) {
@@ -257,12 +323,6 @@ void FireChanged() {
     Event::Custom::Fire(Event::Custom::Lookup(kEvtNewItems), "");
 }
 
-void CopyToSeen(const uint64_t *current, int count) {
-    for (int i = 0; i < count; ++i)
-        g_seen[i] = current[i];
-    g_seenCount = count;
-}
-
 // Login-baseline handler. Runs every frame but does no work once the
 // baseline is taken — it only watches for (re)login and, after a short
 // settle, takes the single authoritative baseline scan. Steady state is just
@@ -290,11 +350,14 @@ void OnTick() {
     if (player == nullptr)
         return; // not resolvable yet — retry next tick
 
-    // Everything currently owned — bags AND worn equipment — becomes the
+    // Everything currently owned — bags AND worn equipment + bank — becomes the
     // baseline; nothing owned at login is "new". Including equipment means a
     // later unequip (paperdoll → bag) is recognized as a move, not a loot.
-    g_seenCount = ScanBags(player, g_seen);
-    AppendNonBagOwned(g_seen, &g_seenCount);
+    uint64_t owned[kMaxItems];
+    int ownedCount = ScanBags(player, owned);
+    AppendNonBagOwned(owned, &ownedCount);
+    g_seenCount = 0;
+    SeenReconcile(owned, ownedCount);
     g_newCount = 0;
     g_seeded = true;
 }
@@ -316,21 +379,35 @@ void OnBagChanged() {
     const int bagCount = ScanBags(player, currentBags);
 
     bool changed = false;
-    // Drop flags for items no longer in the bags (used, sold, equipped, banked).
+    // Flag bag items we've never owned. An item merely dropped from a recent
+    // scan (bag update mid-swap) is still in the seen-set (its miss streak is
+    // below the threshold), so it is NOT re-flagged when it reappears — that
+    // was the false-"new" bug. Checked before the reconcile so a genuinely new
+    // item isn't inserted first.
+    for (int i = 0; i < bagCount; ++i) {
+        if (!SeenContains(currentBags[i]))
+            changed |= AddUnique(g_new, &g_newCount, currentBags[i]);
+    }
+
+    // Reconcile the seen-set against everything owned now (bags + equipment +
+    // bank): resets present items, ages absent ones, evicts long-gone ones.
+    uint64_t owned[kMaxItems];
+    int ownedCount = 0;
+    for (int i = 0; i < bagCount; ++i)
+        AddUnique(owned, &ownedCount, currentBags[i]);
+    AppendNonBagOwned(owned, &ownedCount);
+    SeenReconcile(owned, ownedCount);
+
+    // Drop flags only for items that have genuinely left (fallen out of the
+    // seen-set entirely), not ones merely missing from this one scan.
     for (int i = 0; i < g_newCount;) {
-        if (!Contains(currentBags, bagCount, g_new[i])) {
+        if (!SeenContains(g_new[i])) {
             g_new[i] = g_new[--g_newCount];
             changed = true;
         } else {
             ++i;
         }
     }
-    for (int i = 0; i < bagCount; ++i) {
-        if (!Contains(g_seen, g_seenCount, currentBags[i]))
-            changed |= AddUnique(g_new, &g_newCount, currentBags[i]);
-    }
-    CopyToSeen(currentBags, bagCount);
-    AppendNonBagOwned(g_seen, &g_seenCount);
 
     if (changed)
         FireChanged();
