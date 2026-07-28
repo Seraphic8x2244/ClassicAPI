@@ -5417,6 +5417,7 @@ enum Offsets {
     // sum). AttributesEx2 (+0x24) bit 0x20000000 disables spell mods.
     OFF_SPELL_RECORD_FAMILY_NAME = 0x280,             // u32
     OFF_SPELL_RECORD_FAMILY_FLAGS = 0x284,            // u64
+    OFF_SPELL_RECORD_ICON_ID = 0x1D4,                 // u32 SpellIconID (→ SpellIcon.dbc)
     OFF_SPELL_RECORD_ATTRIBUTES = 0x18,               // u32 (base Attributes)
     SPELL_ATTR_PASSIVE = 0x40,                        // bit 6 — always-on aura
     OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x24,           // u32

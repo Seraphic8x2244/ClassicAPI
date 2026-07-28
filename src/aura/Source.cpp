@@ -27,6 +27,7 @@
 #include "unit/Identity.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace Aura::Source {
 
@@ -234,6 +235,263 @@ void Evict(uint64_t targetGuid, uint32_t spellId) {
     }
 }
 
+// ---- Server-side duration modifiers (trigger-driven inference) -----------
+//
+// Some server mechanics change a DoT's remaining time on another unit with
+// NO client-visible signal — verified in tortoise-wow: the change goes
+// through SetAuraDuration / RefreshHolder, and UpdateAuraDuration only
+// notifies the aura's target-if-a-player (self-scoped), never the observing
+// caster; on a mob the packet isn't even built. We can't hear the *change*,
+// but we DO see the TRIGGERING cast's SMSG_SPELL_GO, so we mirror the
+// server's edit on the cached entry. Rules come from Lua
+// (`C_UnitAuras.RegisterAuraDurationModifier`), so the server-specific set
+// lives in the addon, not the DLL. Turtle examples:
+//   Conflagrate  -> Immolate:    reduce 3s   (Immolate keeps ticking, -3s)
+//   Molten Blast -> Flame Shock:  refresh    (RefreshHolder → reset to max)
+// A trigger is matched by exact spellID (from the server's script binding,
+// stable across ranks); the affected aura by SpellFamilyName + a family-flag
+// overlap (+ optional icon) — rank-proof, exactly how the server's scripts
+// find it. Conflagrate's *full*-consume path removes Immolate, which clears
+// the descriptor slot → OnAuraRemoved already handles it; the reduce rule
+// covers the keep-ticking case. Probabilistic refreshes (Carnage's roll) are
+// deliberately NOT shipped as defaults — the client can't know the server's
+// roll outcome, so inferring them would show wrong timers.
+
+enum ModOp { MOD_REFRESH = 0, MOD_REDUCE = 1, MOD_SET = 2, MOD_REMOVE = 3 };
+
+struct DurationMod {
+    uint32_t triggerSpellId; // exact trigger; 0 = match by family+school below
+    uint32_t triggerFamily;  // (triggerSpellId==0) trigger's SpellFamilyName
+    int32_t triggerSchool;   // (triggerSpellId==0) school index; -1 = any school
+    uint32_t affectedFamily; // SpellFamilyName of the affected aura
+    uint64_t affectedMask;   // must overlap the affected aura's SpellFamilyFlags
+    uint32_t affectedIcon;   // 0 = any; else affected aura's SpellIconID must equal
+    int32_t op;
+    int32_t valueMs; // REDUCE/SET amount; ignored by REFRESH/REMOVE
+};
+constexpr int kMaxMods = 128;
+DurationMod g_mods[kMaxMods];
+int g_modCount = 0;
+
+bool AffectedMatches(const uint8_t *rec, const DurationMod &m) {
+    if (rec == nullptr)
+        return false;
+    if (*reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != m.affectedFamily)
+        return false;
+    const uint64_t flags = *reinterpret_cast<const uint64_t *>(
+        rec + Offsets::OFF_SPELL_RECORD_FAMILY_FLAGS);
+    if ((flags & m.affectedMask) == 0)
+        return false;
+    if (m.affectedIcon != 0 &&
+        *reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_SPELL_RECORD_ICON_ID) != m.affectedIcon)
+        return false;
+    return true;
+}
+
+// A rule's trigger matches either by exact spellID, or (triggerSpellId == 0)
+// by the cast spell's SpellFamilyName + school index — one rule then covers
+// every rank / server-added spell of a class's school (e.g. any priest
+// shadow-school cast, for Shadow Weaving). triggerSchool < 0 = any school.
+bool TriggerMatches(const DurationMod &m, uint32_t triggerSpellId,
+                    const uint8_t *triggerRec) {
+    if (m.triggerSpellId != 0)
+        return m.triggerSpellId == triggerSpellId;
+    if (triggerRec == nullptr)
+        return false;
+    if (*reinterpret_cast<const uint32_t *>(
+            triggerRec + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != m.triggerFamily)
+        return false;
+    if (m.triggerSchool >= 0 &&
+        static_cast<int32_t>(*reinterpret_cast<const uint32_t *>(
+            triggerRec + Offsets::OFF_SPELL_SCHOOL)) != m.triggerSchool)
+        return false;
+    return true;
+}
+
+void ApplyMod(Entry &e, const DurationMod &m, uint32_t now) {
+    switch (m.op) {
+    case MOD_REFRESH:
+        if (e.durationMs > 0)
+            e.expirationMs = now + e.durationMs; // RefreshHolder → reset to max
+        break;
+    case MOD_SET:
+        e.durationMs = static_cast<uint32_t>(m.valueMs);
+        e.expirationMs = now + static_cast<uint32_t>(m.valueMs);
+        break;
+    case MOD_REDUCE:
+        if (e.expirationMs != 0) {
+            if (e.expirationMs > now + static_cast<uint32_t>(m.valueMs))
+                e.expirationMs -= static_cast<uint32_t>(m.valueMs);
+            else
+                e.used = false; // shaved to/past now → server removes it
+        }
+        break;
+    case MOD_REMOVE:
+        e.used = false;
+        break;
+    }
+}
+
+// On a trigger cast landing on its hit targets, mirror the server's duration
+// edit on the caster's own matching cached aura. Called from SpellGo_h before
+// the aura gate — triggers (Conflagrate, Molten Blast) apply no aura of their
+// own, so they'd otherwise be dropped.
+void ApplyDurationModifiers(uint32_t triggerSpellId, uint64_t caster,
+                            const uint64_t *targets, int numTargets) {
+    if (triggerSpellId == 0 || caster == 0 || numTargets <= 0)
+        return;
+    const uint8_t *triggerRec =
+        Spell::Lookup::RecordForID(static_cast<int>(triggerSpellId));
+    const uint32_t now = NowMs();
+    for (int r = 0; r < g_modCount; ++r) {
+        const DurationMod &m = g_mods[r];
+        if (!TriggerMatches(m, triggerSpellId, triggerRec))
+            continue;
+        for (int t = 0; t < numTargets; ++t) {
+            for (auto &e : g_cache) {
+                if (!e.used || e.targetGuid != targets[t])
+                    continue;
+                // The mechanic acts on the trigger-caster's own aura. Cast-applied
+                // auras (Immolate, Flame Shock) carry caster == player from SpellGo;
+                // but PROC-applied ones (Shadow Weaving) enter the cache via the
+                // application hooks with casterGuid 0 (no SMSG_SPELL_GO ever named a
+                // caster), so accept those too and attribute them to this trigger
+                // caster (also gives them a sourceUnit).
+                if (e.casterGuid != 0 && e.casterGuid != caster)
+                    continue;
+                if (!AffectedMatches(
+                        Spell::Lookup::RecordForID(static_cast<int>(e.spellId)), m))
+                    continue;
+                if (e.casterGuid == 0)
+                    e.casterGuid = caster;
+                ApplyMod(e, m, now);
+                break; // one matching aura per (rule, target), like the server
+            }
+        }
+    }
+}
+
+bool RegisterDurationMod(uint32_t triggerSpellId, uint32_t triggerFamily,
+                         int32_t triggerSchool, uint32_t affectedFamily,
+                         uint64_t affectedMask, uint32_t affectedIcon, int op,
+                         int32_t valueMs) {
+    // Trigger must be identified one way or the other.
+    if ((triggerSpellId == 0 && triggerFamily == 0) || affectedMask == 0 ||
+        op < MOD_REFRESH || op > MOD_REMOVE)
+        return false;
+    for (int i = 0; i < g_modCount; ++i) { // replace an identical rule
+        DurationMod &m = g_mods[i];
+        if (m.triggerSpellId == triggerSpellId && m.triggerFamily == triggerFamily &&
+            m.triggerSchool == triggerSchool && m.affectedFamily == affectedFamily &&
+            m.affectedMask == affectedMask && m.affectedIcon == affectedIcon) {
+            m.op = op;
+            m.valueMs = valueMs;
+            return true;
+        }
+    }
+    if (g_modCount >= kMaxMods)
+        return false;
+    g_mods[g_modCount++] = {triggerSpellId, triggerFamily, triggerSchool,
+                            affectedFamily, affectedMask, affectedIcon, op, valueMs};
+    return true;
+}
+
+int OpFromString(const char *s) {
+    if (s == nullptr)
+        return -1;
+    if (_stricmp(s, "refresh") == 0)
+        return MOD_REFRESH;
+    if (_stricmp(s, "reduce") == 0)
+        return MOD_REDUCE;
+    if (_stricmp(s, "set") == 0)
+        return MOD_SET;
+    if (_stricmp(s, "remove") == 0)
+        return MOD_REMOVE;
+    return -1;
+}
+
+// `C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, affectedFamily,
+//     affectedFamilyFlags, affectedIcon, op [, valueSeconds])` -> bool.
+// op: "refresh" | "reduce" | "set" | "remove". valueSeconds used by
+// reduce/set. affectedIcon 0 = match any icon. Re-registering an identical
+// (trigger, family, flags, icon) tuple replaces its op/value.
+int __fastcall Script_RegisterAuraDurationModifier(void *L) {
+    if (!Game::Lua::IsNumber(L, 1) || !Game::Lua::IsNumber(L, 2) ||
+        !Game::Lua::IsNumber(L, 3) || !Game::Lua::IsNumber(L, 4) ||
+        !Game::Lua::IsString(L, 5)) {
+        Game::Lua::Error(
+            L, "Usage: C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, "
+               "affectedFamily, affectedFamilyFlags, affectedIcon, op[, "
+               "valueSeconds])");
+        return 0;
+    }
+    const auto trigger = static_cast<uint32_t>(Game::Lua::ToNumber(L, 1));
+    const auto family = static_cast<uint32_t>(Game::Lua::ToNumber(L, 2));
+    const auto mask = static_cast<uint64_t>(Game::Lua::ToNumber(L, 3));
+    const auto icon = static_cast<uint32_t>(Game::Lua::ToNumber(L, 4));
+    const int op = OpFromString(Game::Lua::ToString(L, 5));
+    const int32_t valueMs =
+        Game::Lua::IsNumber(L, 6)
+            ? static_cast<int32_t>(Game::Lua::ToNumber(L, 6) * 1000.0)
+            : 0;
+    if (op < 0) {
+        Game::Lua::PushBool(L, false);
+        return 1;
+    }
+    Game::Lua::PushBool(L, RegisterDurationMod(trigger, /*triggerFamily*/ 0,
+                                               /*triggerSchool*/ -1, family, mask,
+                                               icon, op, valueMs));
+    return 1;
+}
+
+// `C_UnitAuras.RegisterAuraDurationModifierByTrigger(triggerFamily,
+//     triggerSchool, affectedFamily, affectedFamilyFlags, affectedIcon, op
+//     [, valueSeconds])` -> bool. Like the above, but the trigger is matched
+// by SpellFamilyName + school index instead of an exact spellID — one rule
+// covers every rank / server-added spell of a class's school. triggerSchool
+// < 0 = any school. E.g. Shadow Weaving: priest (6) shadow-school (5) casts
+// refresh the target's Shadow Vulnerability.
+int __fastcall Script_RegisterAuraDurationModifierByTrigger(void *L) {
+    if (!Game::Lua::IsNumber(L, 1) || !Game::Lua::IsNumber(L, 2) ||
+        !Game::Lua::IsNumber(L, 3) || !Game::Lua::IsNumber(L, 4) ||
+        !Game::Lua::IsNumber(L, 5) || !Game::Lua::IsString(L, 6)) {
+        Game::Lua::Error(
+            L, "Usage: C_UnitAuras.RegisterAuraDurationModifierByTrigger("
+               "triggerFamily, triggerSchool, affectedFamily, affectedFamilyFlags, "
+               "affectedIcon, op[, valueSeconds])");
+        return 0;
+    }
+    const auto tfamily = static_cast<uint32_t>(Game::Lua::ToNumber(L, 1));
+    const auto tschool = static_cast<int32_t>(Game::Lua::ToNumber(L, 2));
+    const auto family = static_cast<uint32_t>(Game::Lua::ToNumber(L, 3));
+    const auto mask = static_cast<uint64_t>(Game::Lua::ToNumber(L, 4));
+    const auto icon = static_cast<uint32_t>(Game::Lua::ToNumber(L, 5));
+    const int op = OpFromString(Game::Lua::ToString(L, 6));
+    const int32_t valueMs =
+        Game::Lua::IsNumber(L, 7)
+            ? static_cast<int32_t>(Game::Lua::ToNumber(L, 7) * 1000.0)
+            : 0;
+    if (op < 0 || tfamily == 0) {
+        Game::Lua::PushBool(L, false);
+        return 1;
+    }
+    Game::Lua::PushBool(L, RegisterDurationMod(/*triggerSpellId*/ 0, tfamily, tschool,
+                                               family, mask, icon, op, valueMs));
+    return 1;
+}
+
+void RegisterDurationModLua() {
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "RegisterAuraDurationModifier",
+                                     &Script_RegisterAuraDurationModifier);
+    Game::Lua::RegisterTableFunction("C_UnitAuras",
+                                     "RegisterAuraDurationModifierByTrigger",
+                                     &Script_RegisterAuraDurationModifierByTrigger);
+}
+
+const Game::ModuleAutoRegister _autoregDurationMod{&RegisterDurationModLua};
+
 // Wipe the whole cache. Used on a map transition (see OnWorldTick).
 void FlushAll() {
     for (auto &e : g_cache)
@@ -327,6 +585,11 @@ void __fastcall SpellGo_h(uint64_t *itemGUID, uint64_t *casterGUID,
     // applies no aura, so it would otherwise be dropped. Player casts only.
     if (caster == Unit::Identity::PlayerGuid())
         Totem::Tracker::OnPlayerSpellGo(spellId);
+
+    // Mirror server-side duration edits the client is never told about
+    // (Conflagrate -3s Immolate, Molten Blast refresh Flame Shock, …). Runs
+    // before the aura gate below: the trigger spell applies no aura itself.
+    ApplyDurationModifiers(spellId, caster, targets, numTargets);
 
     const uint8_t *rec = Spell::Lookup::RecordForID(static_cast<int>(spellId));
     if (!SpellAppliesAura(rec))

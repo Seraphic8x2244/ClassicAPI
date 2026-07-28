@@ -553,6 +553,7 @@ build instructions.
   - [`C_UnitAuras.GetPlayerAuraBySpellID(spellID)`](#c_unitaurasgetplayeraurabyspellidspellid)
   - [`C_UnitAuras.GetAuraDataBySpellName(unit, spellName [, filter])`](#c_unitaurasgetauradatabyspellnameunit-spellname--filter)
   - [`C_UnitAuras.RegisterComboDuration(spellID, baseSeconds, maxSeconds)`](#c_unitaurasregistercombodurationspellid-baseseconds-maxseconds)
+  - [`C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`](#c_unitaurasregisterauradurationmodifiertriggerspellid-affectedfamily-affectedfamilyflags-affectedicon-op--valueseconds)
   - [`C_UnitAuras.GetUnitAuras(unit [, filter])`](#c_unitaurasgetunitaurasunit--filter)
   - [`C_UnitAuras.GetAuraDispelTypeColor(dispelName)`](#c_unitaurasgetauradispeltypecolordispelname)
 
@@ -13173,6 +13174,67 @@ takes over automatically). No realm detection involved. This function
 is the escape hatch for *other* custom servers with the same class of
 gap — call it from your own config or addon; a registered override
 beats both the DBC and the built-in values.
+
+### `C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`
+
+ClassicAPI extension for **server-side DoT-duration changes on another
+unit that the client is never told about**. Returns `true` on success.
+
+`expirationTime` for a debuff on another unit is computed from the cast
+packet (`SMSG_SPELL_GO`) at cast time. When the server later changes that
+debuff's remaining duration — a refresh, or a partial consume — 1.12 sends
+**no** packet an observing caster can see (verified in the server source:
+the change runs through `SetAuraDuration`/`RefreshHolder`, and the only
+duration packet is self-scoped to the aura-bearer; on a mob it isn't even
+built). So the cached `expirationTime` would go stale.
+
+The client *does* always see the **triggering** cast, though. Register a
+rule and ClassicAPI mirrors the server's edit on the cached aura when that
+trigger lands:
+
+| Arg | Meaning |
+|-----|---------|
+| `triggerSpellID` | The spell whose cast triggers the change (match one rank per call — use the exact IDs the server binds). |
+| `affectedFamily` | `SpellFamilyName` of the affected aura (e.g. `5` warlock, `11` shaman, `7` druid). |
+| `affectedFamilyFlags` | A `SpellFamilyFlags` bitmask; the affected aura matches if it overlaps. Family + flag is rank-proof (covers every rank at once). |
+| `affectedIcon` | `SpellIconID` the affected aura must have, or `0` to match any. |
+| `op` | `"refresh"` (reset to full duration), `"reduce"` (subtract `valueSeconds`, removing the aura if it would go non-positive), `"set"` (to `valueSeconds`), `"remove"`. |
+| `valueSeconds` | Amount for `reduce`/`set`; ignored otherwise. |
+
+The rule only fires for the aura **cast by the same unit** as the trigger
+(these mechanics act on the caster's own DoT), and misses are excluded for
+free (a missed trigger isn't in the packet's hit list).
+
+**`C_UnitAuras.RegisterAuraDurationModifierByTrigger(triggerFamily, triggerSchool, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`**
+is the same, but matches the *trigger* by `SpellFamilyName` + school index
+(`0` physical … `2` fire, `5` shadow, `6` arcane; `< 0` = any) instead of an
+exact spellID — one rule covers a whole class of spells (every rank, plus
+server-added ones). Use it when the trigger is a category rather than a named
+ability.
+
+`!!!ClassicAPI` ships a default Turtle ruleset
+([Util/AuraDurationModifiers.lua](../AddOns/!!!ClassicAPI/Util/AuraDurationModifiers.lua)):
+Conflagrate shaves 3s off the caster's Immolate, Molten Blast refreshes the
+caster's Flame Shock, and — for a 5/5 Shadow Weaving priest (talent `15334`,
+where the proc is 100%) — any shadow-school priest cast refreshes the target's
+Shadow Vulnerability (`15258`). Deliberately excluded: probabilistic effects
+(Carnage's roll-gated Rip/Rake refresh, and Shadow Weaving below 5/5) — the
+client can't see the server's roll, so inferring them would show wrong timers.
+Two accepted best-effort caveats on the Shadow Weaving rule: DoT *ticks*
+(SW:P / Devouring Plague) also refresh it server-side but emit no cast packet,
+so a pure DoT-only phase under-counts slightly; and a full-consume Conflagrate
+variant on other servers *removes* Immolate, which ClassicAPI already evicts
+via the normal removal path (so the reduce rule is harmless there).
+
+```lua
+-- Flags are hex; Lua 5.0 has no 0x literals, so use tonumber(hex, 16).
+-- Conflagrate (Rank 4) shaves 3s off the caster's Immolate (warlock, flag 0x4):
+C_UnitAuras.RegisterAuraDurationModifier(18932, 5, tonumber("4", 16), 0, "reduce", 3)
+-- Molten Blast refreshes the caster's Flame Shock (shaman, flag 0x10000000):
+C_UnitAuras.RegisterAuraDurationModifier(36916, 11, tonumber("10000000", 16), 0, "refresh")
+-- Any priest (6) shadow-school (5) cast refreshes Shadow Vulnerability (15258):
+C_UnitAuras.RegisterAuraDurationModifierByTrigger(6, 5, 6, tonumber("4000000", 16), 9, "refresh")
+```
 
 ### `C_UnitAuras.GetUnitAuras(unit [, filter])`
 
