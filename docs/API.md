@@ -156,6 +156,8 @@ build instructions.
   - [`region:SetPoint("point")` (one-argument form)](#regionsetpointpoint-one-argument-form)
   - [`region:SetSize(width, height)` / `region:GetSize()`](#regionsetsizewidth-height--regiongetsize)
   - [`region:IsMouseOver([topOffset, bottomOffset, leftOffset, rightOffset])`](#regionismouseovertopoffset-bottomoffset-leftoffset-rightoffset)
+  - [`region:GetRect()`](#regiongetrect)
+  - [`region:IsDragging()`](#regionisdragging)
   - [`frame:SetShown(shown)`](#framesetshownshown)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
@@ -3611,6 +3613,33 @@ region with no resolved rect (unpositioned / zero-size).
 ```lua
 ItemRefTooltip:IsMouseOver()                 -- true while hovering the tooltip
 Minimap:IsMouseOver(20, -20, -20, 20)        -- true within a 20px halo around it
+```
+
+### `region:GetRect()`
+
+Returns the region's `left, bottom, width, height` in one call (the
+modern combined form of `GetLeft`+`GetBottom`+`GetWidth`+`GetHeight`).
+Composed from the engine's own getters, so all UI-scale conversion is its
+code. On the Region base — works on any region type. Returns nothing for
+a region with no resolved rect (unpositioned), matching retail.
+
+```lua
+UIParent:GetRect()   -- 0, 0, <screenWidth>, <screenHeight>
+Minimap:GetRect()    -- <left>, <bottom>, 140, 140
+```
+
+### `region:IsDragging()`
+
+`true` while the region is the frame currently being moved or resized by
+the mouse — i.e. after `StartMoving`/`StartSizing` and before
+`StopMovingOrSizing` — `false` otherwise. Reads the engine's single global
+drag target (the same slot `StopMovingOrSizing` checks to decide whether
+it owns the active drag). On the Region base; non-frame regions (textures,
+fontstrings) always report `false`, since only frames can be dragged.
+
+```lua
+-- in a frame's OnUpdate while the user drags it:
+if self:IsDragging() then ... end
 ```
 
 ### `frame:SetShown(shown)`

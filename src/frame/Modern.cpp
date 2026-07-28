@@ -28,6 +28,10 @@
 //     textures, fontstrings — everything.
 //   - `region:IsMouseOver([top, bottom, left, right])` — cursor-in-rect
 //     test with optional per-edge offsets, also on the REGION registry.
+//   - `region:GetRect()` — left, bottom, width, height, composed from the
+//     engine's Region getters. Also on the REGION registry.
+//   - `region:IsDragging()` — true while the region is the frame currently
+//     being moved/sized. Reads the engine's global drag target.
 //   - `frame:SetShown(shown)` — Show/Hide are per-branch script functions
 //     (each with its own object typecheck), so SetShown is registered
 //     separately on Frame / Texture / FontString with matching delegates.
@@ -149,6 +153,52 @@ int __fastcall Script_IsMouseOver(void *L) {
 
     const bool inside = x >= left && x <= right && y >= bottom && y <= top;
     Game::Lua::PushBool(L, inside);
+    return 1;
+}
+
+// ---- GetRect (Region base — all region types) ------------------------------
+
+// `region:GetRect()` → left, bottom, width, height. Composed from the
+// engine's own Region getters (so all UI-scale conversion is its code).
+// Matches retail: returns nothing for a region with no resolved rect —
+// gated on GetLeft, which pushes nil when the position isn't resolved (a
+// size-only region with no anchor has width/height but no rect).
+int __fastcall Script_GetRect(void *L) {
+    double left, bottom, width, height;
+    if (!CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETLEFT, &left))
+        return 0;
+    CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETBOTTOM, &bottom);
+    CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETWIDTH, &width);
+    CallRegionNumber(L, Offsets::FUN_SCRIPT_REGION_GETHEIGHT, &height);
+    Game::Lua::SetTop(L, 1);
+    Game::Lua::PushNumber(L, left);
+    Game::Lua::PushNumber(L, bottom);
+    Game::Lua::PushNumber(L, width);
+    Game::Lua::PushNumber(L, height);
+    return 4;
+}
+
+// ---- IsDragging (Region base — all region types) ---------------------------
+
+// `region:IsDragging()` — true while this region is the frame currently
+// being moved/sized (StartMoving/StartSizing active, before
+// StopMovingOrSizing). The engine tracks a single drag target in the global
+// UI context at +0xCFC; StopMovingOrSizing itself gates on
+// `context+0xCFC == self`, which is exactly this predicate. Reading the
+// global context (rather than self+0xA0) keeps it correct for non-frame
+// regions — a texture/fontstring self can never match the frame stored
+// there, so it reports false, as it should.
+int __fastcall Script_IsDragging(void *L) {
+    void *self = Game::Lua::ResolveObject(L, 1);
+    void *ctx = *reinterpret_cast<void *const *>(
+        static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
+    void *dragTarget =
+        ctx != nullptr
+            ? *reinterpret_cast<void *const *>(
+                  reinterpret_cast<const uint8_t *>(ctx) +
+                  Offsets::OFF_UI_CONTEXT_DRAG_TARGET)
+            : nullptr;
+    Game::Lua::PushBool(L, self != nullptr && self == dragTarget);
     return 1;
 }
 
@@ -344,6 +394,8 @@ const Game::Lua::FrameMethodEntry g_regionMethods[] = {
     {"SetSize", &Script_SetSize},
     {"GetSize", &Script_GetSize},
     {"IsMouseOver", &Script_IsMouseOver},
+    {"GetRect", &Script_GetRect},
+    {"IsDragging", &Script_IsDragging},
 };
 
 const Game::Lua::FrameMethodEntry g_frameMethods[] = {

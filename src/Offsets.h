@@ -1331,6 +1331,15 @@ enum Offsets {
     // present on every region object, so it's the all-region way to get the
     // effective scale without the Frame-only GetEffectiveScale method.
     OFF_REGION_EFFECTIVE_SCALE = 0x7C,
+
+    // Global UI/screen context pointer (every frame's +0xA0 field mirrors
+    // it; GetCursorPosition reads the cursor from *ptr + 0x1118). Its
+    // +0xCFC slot holds the frame currently being moved/sized via
+    // StartMoving/StartSizing (0 when idle) — the drag target. Backs
+    // Frame::Modern's IsDragging: StopMovingOrSizing (0x00776990) gates its
+    // clear on `*(context+0xCFC) == self`, i.e. the IsDragging predicate.
+    VAR_UI_CONTEXT_PTR = 0x00CF0BD8,
+    OFF_UI_CONTEXT_DRAG_TARGET = 0xCFC,
     FUN_SCRIPT_FRAME_SHOW = 0x00775750,
     FUN_SCRIPT_FRAME_HIDE = 0x00775810,
     FUN_SCRIPT_FRAME_SETMINRESIZE = 0x00776020,
