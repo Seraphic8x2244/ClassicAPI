@@ -155,25 +155,6 @@ _initFrame:SetScript("OnEvent", function()
     end
 end);
 
--- Vanilla has no Frame:IsMouseOver(); do it ourselves from cursor + bounds.
-local function DebugTools_IsMouseOver(frame)
-    if (not frame) then return false; end
-    local visOK, visible = pcall(frame.IsVisible, frame);
-    if (not visOK or not visible) then return false; end
-    local sOK, scale = pcall(frame.GetEffectiveScale, frame);
-    if (not sOK or not scale or scale == 0) then return false; end
-    local cx, cy = GetCursorPosition();
-    cx = cx / scale;
-    cy = cy / scale;
-    local lOK, left   = pcall(frame.GetLeft,   frame);
-    local rOK, right  = pcall(frame.GetRight,  frame);
-    local tOK, top    = pcall(frame.GetTop,    frame);
-    local bOK, bottom = pcall(frame.GetBottom, frame);
-    if (not (lOK and rOK and tOK and bOK)) then return false; end
-    if (not (left and right and top and bottom)) then return false; end
-    return cx >= left and cx <= right and cy >= bottom and cy <= top;
-end
-
 local _EventTraceFrame;
 
 _framesSinceLast = 0;
@@ -566,7 +547,7 @@ function EventTraceFrame_Update()
                         button:GetHighlightTexture():SetVertexColor(.8, .8, 1, .15);
                         button:UnlockHighlight();
                     end
-                    if (DebugTools_IsMouseOver(button)) then
+                    if (button:IsMouseOver()) then
                         EventTraceFrameEvent_OnEnter(button);
                     end
                 end
@@ -1016,8 +997,8 @@ local function _CollectFramesUnderMouse(showHidden)
     local frame = EnumerateFrames(nil);
     while (frame) do
         local visOK, visible = pcall(frame.IsVisible, frame);
-        local mouseOver = DebugTools_IsMouseOver(frame);
-        if (mouseOver and (showHidden or (visOK and visible))) then
+        local overOK, mouseOver = pcall(frame.IsMouseOver, frame);
+        if (overOK and mouseOver and (showHidden or (visOK and visible))) then
             local nameOK, name = pcall(frame.GetName, frame);
             if (not nameOK or not name) then name = "<anonymous>"; end
             table.insert(matches, { name = name, frame = frame });
