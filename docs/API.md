@@ -162,6 +162,7 @@ build instructions.
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
+  - [`frame:GetEffectiveAlpha()`](#framegeteffectivealpha)
 
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
@@ -3689,6 +3690,22 @@ local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:IsEventRegistered("PLAYER_LOGIN")   -- true
 f:IsEventRegistered("PLAYER_LOGOUT")  -- false
+```
+
+### `frame:GetEffectiveAlpha()`
+
+Returns the frame's **effective** alpha — its own `GetAlpha()` multiplied
+by every ancestor's, i.e. the opacity WoW actually composites at render
+time (fading `UIParent` fades all of its children). Vanilla exposes only
+`GetAlpha` (a frame's own alpha); this walks `self → parent → …` via the
+engine's own `GetAlpha`/`GetParent`, so it sees exactly what the engine
+does — including the 8-bit quantization of alpha (`SetAlpha(0.5)` stores
+`127/255 ≈ 0.498`, and effective alpha is the product of those).
+
+```lua
+UIParent:GetEffectiveAlpha()   -- 1
+-- with UIParent at 0.5 and Minimap's own alpha 1:
+Minimap:GetEffectiveAlpha()    -- ~0.498 (0.5 truncates to 127/255)
 ```
 
 ## FriendList
