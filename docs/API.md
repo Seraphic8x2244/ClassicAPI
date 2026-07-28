@@ -532,6 +532,7 @@ build instructions.
   - [`UnitStandState(unit)`](#unitstandstateunit)
   - [`UnitInRange(unit)`](#unitinrangeunit)
   - [`UnitDistanceSquared(unit)`](#unitdistancesquaredunit)
+  - [`UnitPosition(unit)`](#unitpositionunit)
   - [`UnitInLineOfSight(unit)`](#unitinlineofsightunit)
   - [`ClosestUnitPosition(creatureID)`](#closestunitpositioncreatureid)
   - [`UnitHealthMissing(unit)`](#unithealthmissingunit)
@@ -12533,16 +12534,57 @@ human.
 
 Reads world positions via the `CGObject::GetPosition` vtable virtual
 (slot 5, offset `+0x14`) — the same path `UnitInRange` /
-`CheckInteractDistance` use. **Center-to-center**, not reach-aware (that
-edge-to-edge nicety is UnitXP_SP3's niche); the value equals what you'd
-compute from SuperWoW's `UnitPosition`, but it's self-contained (no
-sibling-DLL dependency, and no clash with SuperWoW's own `UnitPosition`,
-which is left untouched).
+`CheckInteractDistance` and our own [`UnitPosition`](#unitpositionunit)
+use. **Center-to-center**, not reach-aware (that edge-to-edge nicety is
+UnitXP_SP3's niche); the value equals what you'd compute from the raw
+`UnitPosition` coordinates, and it's self-contained (no sibling-DLL
+dependency).
 
 > No self-quirk (unlike `UnitInRange`): `UnitDistanceSquared("player")`
 > returns a legitimate `(0, true)`. Because a real `0` (self, or two
 > exactly co-located units) is indistinguishable by value from the miss
 > placeholder, always branch on `checkedPosition`.
+
+### `UnitPosition(unit)`
+
+Returns `posY, posX, posZ, instanceID` — the unit's world position, in
+the modern (WoD+) `UnitPosition` shape. `nil` when the unit has no known
+position.
+
+```lua
+local posY, posX, posZ, instanceID = UnitPosition("player")
+```
+
+| Return | Meaning |
+|--------|---------|
+| `posY` | World Y coordinate (the west axis). |
+| `posX` | World X coordinate (the north axis). |
+| `posZ` | World Z coordinate (height). |
+| `instanceID` | Currently-loaded map id (`Map.dbc` row — e.g. `0` Eastern Kingdoms, `1` Kalimdor). Every visible unit shares the player's instance. |
+
+**Order matches retail** — `posY` (west) first, then `posX` (north), then
+`posZ`, mirroring Blizzard's own `UnitPosition`. So an addon written for
+retail that does `local py, px = UnitPosition(u)` gets its coordinates
+labelled as expected. (World X is north/south, Y is west/east — WoW's
+long-standing convention.)
+
+**Not group-restricted.** Retail returns `nil` for units outside your
+party/raid (a privacy guard that doesn't exist in 1.12). This backport
+reads any *visible* unit — `"target"`, `"mouseover"`, nameplate tokens,
+arbitrary party/raid members in sync range — so it's strictly more
+permissive, closer to SuperWoW's unit-position access. Units the client
+can't currently see (out of range, another zone) have no position → `nil`.
+
+Reads through the same `CGObject::GetPosition` virtual as
+[`UnitDistanceSquared`](#unitdistancesquaredunit); the two are consistent
+(the squared delta of two `UnitPosition` reads equals
+`UnitDistanceSquared`).
+
+> **SuperWoW interaction.** SuperWoW also defines a global `UnitPosition`
+> with a different return shape. Both register on the same Lua state, so
+> if SuperWoW is loaded the last registrant wins — install order decides
+> which shape is live. Without SuperWoW, this retail-shaped version is the
+> one you get.
 
 ### `UnitInLineOfSight(unit)`
 
