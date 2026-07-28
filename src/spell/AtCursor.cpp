@@ -140,20 +140,31 @@ bool Resolve() {
 
 namespace {
 
+// 4th arg is the GUID high dword. Ghidra types it `float` from usage, but
+// it's a plain dword on the stack (the engine assigns it the current
+// selection's high dword when 0); `unsigned` puts the correct 4 bytes there.
 using CastDispatch_t = void(__fastcall *)(unsigned slot, int bookType,
-                                           unsigned targetGuidLo, float targetGuidHi);
+                                           unsigned targetGuidLo, unsigned targetGuidHi);
 using NameToSlot_t = int(__fastcall *)(const char *name, void *out);
 
-void DispatchSlot(int slot0Based, int bookType) {
+void DispatchSlot(int slot0Based, int bookType, uint64_t targetGuid) {
     auto dispatch = reinterpret_cast<CastDispatch_t>(
         Offsets::FUN_SPELL_CAST_DISPATCH);
-    // (0, 0) GUID = no implicit target; the engine handles placement.
-    dispatch(static_cast<unsigned>(slot0Based), bookType, 0, 0.0f);
+    // GUID 0 = no implicit target (engine uses current selection / placement).
+    // A real GUID casts a unit-target spell straight at that unit.
+    dispatch(static_cast<unsigned>(slot0Based), bookType,
+             static_cast<unsigned>(targetGuid),
+             static_cast<unsigned>(targetGuid >> 32));
 }
 
 } // namespace
 
-bool DispatchSpellCast(int spellID) {
+bool IsPlacementActive() {
+    return *reinterpret_cast<const uint32_t *>(
+               Offsets::VAR_SPELL_PLACEMENT_STATE) != 0;
+}
+
+bool DispatchSpellCast(int spellID, uint64_t targetGuid) {
     if (spellID <= 0)
         return false;
 
@@ -167,11 +178,11 @@ bool DispatchSpellCast(int spellID) {
     if (slot1 <= 0)
         return false; // not in the player's spellbook
 
-    DispatchSlot(slot1 - 1, bookType);
+    DispatchSlot(slot1 - 1, bookType, targetGuid);
     return true;
 }
 
-bool DispatchSpellCastByName(const char *name) {
+bool DispatchSpellCastByName(const char *name, uint64_t targetGuid) {
     if (name == nullptr || *name == '\0')
         return false;
 
@@ -185,7 +196,7 @@ bool DispatchSpellCastByName(const char *name) {
     if (slot < 0)
         return false; // not in the player's spellbook
 
-    DispatchSlot(slot, bookType);
+    DispatchSlot(slot, bookType, targetGuid);
     return true;
 }
 

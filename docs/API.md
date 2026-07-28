@@ -10586,34 +10586,47 @@ the item-use path for grenades / on-use ground-target items.
 
 ### `C_Spell.CastAtUnit(spellIDOrName, unit)`
 
-Casts a ground-target spell at `unit`'s feet, bypassing the AoE
-reticle click. ClassicAPI's analog of modern's
-`/cast [@unit] Flamestrike` — `CastAtUnit(spell, "player")` drops it
-at the player's position, `"target"` at the target's, and so on for
-any unit token (`"mouseover"`, `"party1"`, `"raid7"`, …). Returns
-`true` when the placement landed at the unit; `false` for
-non-ground-target spells (cast still fires normally), unknown
-spells, or a unit with no resolvable position.
+Casts a spell **at `unit`, whatever its target type** — ClassicAPI's
+analog of modern's `/cast [@unit] Spell`:
+
+- **Ground-target spells** (Flamestrike, Blizzard, Rain of Fire, …) are
+  placed at the unit's feet, bypassing the AoE reticle click.
+- **Unit-target / normal spells** (Frostbolt, Renew, a buff, …) fire
+  directly on the unit — regardless of your current selection, so you can
+  buff `"party1"` or heal `"player"` while an enemy stays targeted.
+
+Works with any unit token (`"target"`, `"player"`, `"mouseover"`,
+`"party1"`, `"raid7"`, …). Returns `true` when the spell was cast at the
+unit (fired or placed); `false` for a spell not in your spellbook, a unit
+with no resolvable position, or a unit the engine won't accept as a target
+for that spell (wrong faction, out of range).
 
 The first argument takes a spellID or a spell name, with the same
 exact-rank / `(Rank N)` semantics as `CastAtCursor`.
 
 ```lua
+-- ground-target: dropped at the unit's feet
 C_Spell.CastAtUnit(2120, "target")            -- Flamestrike at the target's feet
-C_Spell.CastAtUnit(10, "player")              -- Blizzard Rank 1 on yourself
 C_Spell.CastAtUnit("Blizzard(Rank 6)", "target")
+
+-- unit-target / normal: cast straight on the unit, ignoring current target
+C_Spell.CastAtUnit("Frostbolt", "target")
+C_Spell.CastAtUnit("Renew", "player")         -- heal yourself mid-fight
+C_Spell.CastAtUnit("Power Word: Fortitude", "party1")
 ```
 
-Same two-stage shape as
-[`C_Spell.CastAtCursor`](#c_spellcastatcursorspellidorname), but instead of
-the cursor raycast, step 2 reads the unit's world position from its
-`GetPosition` virtual (the same one `CheckInteractDistance` /
-`UnitInRange` use) and commits placement there via
-`FUN_COMMIT_PLACEMENT_COORDS`. The unit is resolved *before* the cast
-is dispatched, so an absent/invalid unit fails cleanly without
-leaving the engine armed in placement mode. A genuinely unrecognized
-unit-token string raises the engine's standard "Unknown unit" error,
-matching `UnitHealth("garbage")`.
+The unit is resolved once to its object; the cast is dispatched with the
+unit's **GUID** as the implicit target (the engine substitutes it exactly
+where it would the current selection), so a unit-target spell fires
+immediately at that unit. A ground spell ignores the GUID and enters
+placement mode instead, which is then committed at the unit's world
+position (read from its `GetPosition` virtual — the same one
+`CheckInteractDistance` / `UnitInRange` use) via
+`FUN_COMMIT_PLACEMENT_COORDS`. The engine can't be left armed in placement
+mode on failure: if no placement is active after dispatch the cast already
+went out, and a non-ground placement (an unaccepted unit target) is
+cancelled. A genuinely unrecognized unit-token string raises the engine's
+standard "Unknown unit" error, matching `UnitHealth("garbage")`.
 
 The companion item version is
 [`C_Item.UseAtUnit`](#c_itemuseatunititeminfo-unit).

@@ -13,7 +13,15 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace Spell::AtCursor {
+
+// True while the engine has an in-flight targeting placement of any kind
+// (ground reticle, unit/item/corpse select). `VAR_SPELL_PLACEMENT_STATE != 0`.
+// Used by `CastAtUnit` to tell a unit-target spell that fired immediately
+// (no placement) from a ground spell that's waiting for a location.
+bool IsPlacementActive();
 
 // Resolves the engine's in-flight ground-target placement at the
 // player's current cursor world position. Intended to be called
@@ -51,7 +59,14 @@ bool CommitAtCoords(const float coords[3]);
 // name form defers to the engine's own resolver, which parses a
 // trailing `(Rank N)` — `"Blizzard"` casts the highest known rank,
 // `"Blizzard(Rank 6)"` casts that rank.
-bool DispatchSpellCast(int spellID);
-bool DispatchSpellCastByName(const char *name);
+//
+// `targetGuid` is the implicit cast target: `0` = the engine's default
+// (current selection, or ground placement for AoE); a unit's GUID makes
+// a unit-target/normal spell fire directly on that unit (the engine
+// substitutes it exactly where it would the current target). Ground
+// spells ignore it and still enter placement. `CastAtUnit` passes the
+// resolved unit's GUID; `CastAtCursor` leaves it 0.
+bool DispatchSpellCast(int spellID, uint64_t targetGuid = 0);
+bool DispatchSpellCastByName(const char *name, uint64_t targetGuid = 0);
 
 } // namespace Spell::AtCursor
