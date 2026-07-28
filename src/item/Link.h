@@ -51,4 +51,18 @@ bool NameFromCGItem(const uint8_t *cgItem, char *out, size_t outSize);
 // possible link (`item:` payload + colored prefix + bracketed name).
 bool BasicFromItemID(uint32_t itemID, char *out, size_t outSize);
 
+// Writes the suffix-decorated display name for `(itemID, suffixID)` into
+// `out` WITHOUT a live item instance — the by-string analog of
+// NameFromCGItem. `suffixID` is the 3rd `item:` field (random property /
+// suffix); 0 = base name. Applies the "... of the Owl" suffix via the
+// engine's inner builder (FUN_ITEM_BUILD_NAME_FROM_ID) when the item is
+// cached and the suffix is a valid ItemRandomProperties row. Returns false
+// (out empty) if the item isn't cached or has no name — warm and retry.
+bool NameFromIDSuffix(uint32_t itemID, int suffixID, char *out, size_t outSize);
+
+// Like BasicFromItemID but preserves the random `suffixID` in both the
+// `item:` payload (`item:N:0:suffix:0`) and the bracketed, suffix-decorated
+// name. `suffixID` 0 reduces exactly to BasicFromItemID.
+bool BasicFromIDSuffix(uint32_t itemID, int suffixID, char *out, size_t outSize);
+
 } // namespace Item::Link

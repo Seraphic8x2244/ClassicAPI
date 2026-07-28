@@ -22,6 +22,7 @@ namespace Item::Arg {
 // can ignore `name` and treat `itemID == 0` as "no usable input".
 struct Resolved {
     int itemID;
+    int suffix; // random-property / suffix ID (3rd `item:` field), 0 if none
     const char *name;
 };
 

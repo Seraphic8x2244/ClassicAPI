@@ -316,6 +316,16 @@ enum Offsets {
     // C_Item.GetItemName exactly. Inner formatter FUN_005D8B00.
     FUN_ITEM_BUILD_INSTANCE_NAME = 0x005D8BC0,
 
+    // Inner name formatter behind FUN_ITEM_BUILD_INSTANCE_NAME, callable
+    // WITHOUT a CGItem: `__fastcall(char *out /*ecx*/, uint outSize /*edx*/,
+    // uint32 itemID, int suffixID)`. Fetches the ItemStats record for itemID
+    // and, when suffixID is a valid ItemRandomProperties row with a localized
+    // suffix name (record +0x1c + locale*4), formats base + suffix via
+    // ITEM_SUFFIX_TEMPLATE; otherwise the base name. Lets the by-STRING item
+    // paths (GetItemNameByID, C_Item.GetItemInfo) apply an item link's random
+    // suffix without a live item instance.
+    FUN_ITEM_BUILD_NAME_FROM_ID = 0x005D8B00,
+
     // Engine's inventory swap-and-send. Same primitive
     // `Script_EquipCursorItem` (0x00489660) uses after the cursor's
     // source location has been resolved. Sends opcode 0x10D

@@ -94,8 +94,27 @@ static int __fastcall Script_C_Item_GetItemName(void *L) {
 // for `itemID`, firing a background cache fill on miss. Accepts the
 // same input shapes as `GetItemInfoInstant` (number, `"item:NNN..."`
 // string, or any string containing a parseable `item:NN` chunk).
+//
+// When the input is an item link carrying a random suffix
+// (`item:12022:0:769:0`), the returned name is suffix-decorated
+// ("Iridium Chain of the Owl") — the 3rd `item:` field is parsed and
+// applied via the engine's own name builder, so it matches the global
+// `GetItemInfo`'s name. A bare itemID (number or `item:N`) has no suffix
+// and yields the base name.
 static int __fastcall Script_C_Item_GetItemNameByID(void *L) {
-    return PushNameForItemID(L, Item::Arg::ResolveItemID(L, 1));
+    const Item::Arg::Resolved r = Item::Arg::Resolve(L, 1);
+    if (r.itemID <= 0)
+        return 0;
+    char buf[128];
+    if (Item::Link::NameFromIDSuffix(static_cast<uint32_t>(r.itemID), r.suffix,
+                                     buf, sizeof(buf))) {
+        Game::Lua::PushString(L, buf);
+        return 1;
+    }
+    // Not cached yet — fire a background fill and return nil (same miss
+    // behavior as the base-name path).
+    Item::Data::WarmCache(static_cast<uint32_t>(r.itemID));
+    return 0;
 }
 
 static void RegisterLuaFunctions() {

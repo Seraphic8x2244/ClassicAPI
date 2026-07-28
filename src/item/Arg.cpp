@@ -21,7 +21,7 @@
 namespace Item::Arg {
 
 Resolved Resolve(void *L, int idx) {
-    Resolved out{0, nullptr};
+    Resolved out{0, 0, nullptr};
     if (Game::Lua::IsNumber(L, idx)) {
         out.itemID = static_cast<int>(Game::Lua::ToNumber(L, idx));
         return out;
@@ -34,7 +34,18 @@ Resolved Resolve(void *L, int idx) {
         return out;
     }
     if (const char *m = std::strstr(s, "item:")) {
-        out.itemID = std::atoi(m + 5);
+        m += 5;
+        out.itemID = std::atoi(m);
+        // Random suffix is the 3rd colon-separated field: itemID:enchant:suffix.
+        // Walk to the 2nd ':' (stopping at the link boundary), read the number
+        // after it. Bare "item:N" (no colons) leaves suffix 0.
+        int colons = 0;
+        for (const char *p = m; *p != '\0' && *p != '|'; ++p) {
+            if (*p == ':' && ++colons == 2) {
+                out.suffix = std::atoi(p + 1);
+                break;
+            }
+        }
         return out;
     }
     // Plain string — try numeric, otherwise expose as a name for

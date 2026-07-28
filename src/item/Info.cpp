@@ -259,7 +259,8 @@ static int __fastcall Script_C_Item_GetItemFamily(void *L) {
 // the value lands on a retry after `GET_ITEM_INFO_RECEIVED`,
 // matching the modern async contract.
 static int __fastcall Script_C_Item_GetItemInfo(void *L) {
-    const int itemID = Item::Arg::ResolveItemID(L, 1);
+    const Item::Arg::Resolved arg = Item::Arg::Resolve(L, 1);
+    const int itemID = arg.itemID;
     if (itemID <= 0)
         return 0;
 
@@ -288,14 +289,24 @@ static int __fastcall Script_C_Item_GetItemInfo(void *L) {
     const char *description = *reinterpret_cast<const char *const *>(
         record + Offsets::OFF_ITEMSTATS_DESCRIPTION);
 
+    // Apply the link's random suffix ("... of the Owl") to both the name and
+    // the reconstructed link when the input carried one (arg.suffix); with no
+    // suffix these reduce to the base name / plain `item:N:0:0:0` link.
+    char suffixedName[128];
+    const char *displayName =
+        Item::Link::NameFromIDSuffix(static_cast<uint32_t>(itemID), arg.suffix,
+                                     suffixedName, sizeof(suffixedName))
+            ? suffixedName
+            : name;
+
     char iconPath[260];
     if (!BuildIconPath(displayInfoID, iconPath, sizeof(iconPath)))
         iconPath[0] = 0;
     char link[256];
-    const bool haveLink = Item::Link::BasicFromItemID(static_cast<uint32_t>(itemID),
-                                                      link, sizeof(link));
+    const bool haveLink = Item::Link::BasicFromIDSuffix(static_cast<uint32_t>(itemID),
+                                                        arg.suffix, link, sizeof(link));
 
-    Game::Lua::PushString(L, PushedOrEmpty(name));                    // 1  itemName
+    Game::Lua::PushString(L, PushedOrEmpty(displayName));             // 1  itemName
     if (haveLink)
         Game::Lua::PushString(L, link);                              // 2  itemLink
     else
