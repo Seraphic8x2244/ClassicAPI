@@ -459,6 +459,8 @@ build instructions.
   - [`IsStealthed()`](#isstealthed)
   - [`IsFalling()`](#isfalling)
   - [`IsSwimming()`](#isswimming)
+  - [`IsIndoors()`](#isindoors)
+  - [`IsOutdoors()`](#isoutdoors)
   - [`IsAssistingRitual()`](#isassistingritual)
   - [`IsInGroup()`](#isingroup)
   - [`IsInRaid()`](#isinraid)
@@ -11097,6 +11099,37 @@ Same movement-flags word as `IsFalling`, testing `MOVEFLAG_SWIMMING`
 ```lua
 if IsSwimming() then
     -- breath bar logic, mount-failure suppression, etc.
+end
+```
+
+### `IsIndoors()`
+
+Returns `1` if the local player is under a WMO roof — inside a building,
+cave, or instance interior — and `nil` otherwise. `nil` before the player
+object exists (pre-world).
+
+Recomputed live from the engine's WMO geometry query, so it flips as you
+cross an interior threshold rather than tracking the current zone/area —
+you can be indoors and outdoors within the same subzone. Returns `1`/`nil`
+(not `true`/`false`) to match the historical retail contract and
+SuperWoW 2.2, so both `if IsIndoors()` and `IsIndoors() == 1` work.
+
+```lua
+if IsIndoors() then
+    -- suppress a mount cast that would just fail
+end
+```
+
+### `IsOutdoors()`
+
+Returns `1` if the local player is outdoors (open sky, or simply not
+inside a WMO interior) and `nil` otherwise. Exact complement of
+[`IsIndoors()`](#isindoors) for a resolvable player; both return `nil`
+pre-world.
+
+```lua
+if IsOutdoors() then
+    CastSpellByName("Mount Up")
 end
 ```
 
