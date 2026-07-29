@@ -547,7 +547,7 @@ function EventTraceFrame_Update()
                         button:GetHighlightTexture():SetVertexColor(.8, .8, 1, .15);
                         button:UnlockHighlight();
                     end
-                    if (button:IsMouseOver()) then
+                    if MouseIsOver(button) then
                         EventTraceFrameEvent_OnEnter(button);
                     end
                 end
