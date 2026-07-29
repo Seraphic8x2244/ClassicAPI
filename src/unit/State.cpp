@@ -31,6 +31,22 @@ namespace {
 
 using CancelAuraSend_t = void(__fastcall *)(int spellID);
 
+// `FUN_UNIT_IS_OUTDOORS(unit) -> uint`, nonzero = outdoors (see Offsets.h).
+// The thunk tail-jumps into the WMO query, so eax carries the result even
+// though a decompiler renders the thunk itself as `void`.
+using IsOutdoorsQuery_t = uint32_t(__fastcall *)(const void *unit);
+
+// Tri-state indoor/outdoor read for the local player: 1 = outdoors,
+// 0 = indoors, -1 = unknown (no resolvable player object, e.g. pre-world).
+int PlayerOutdoorState() {
+    auto *player = Unit::Identity::PlayerObject();
+    if (player == nullptr)
+        return -1;
+    auto fn = reinterpret_cast<IsOutdoorsQuery_t>(
+        static_cast<uintptr_t>(Offsets::FUN_UNIT_IS_OUTDOORS));
+    return fn(player) != 0 ? 1 : 0;
+}
+
 uint32_t PlayerMovementFlags() {
     auto *player = Unit::Identity::PlayerObject();
     if (player == nullptr)
@@ -200,10 +216,37 @@ int __fastcall Script_IsAssistingRitual(void *L) {
     return 1;
 }
 
+// `IsIndoors()` — 1 iff the local player is under a WMO roof (inside a
+// building / cave / instance interior), else nil. Recomputed live from the
+// engine's WMO geometry query, so it flips as you cross an interior
+// threshold — not tied to the zone/area. nil before the player object
+// exists (pre-world). Vanilla 1.12 ships no binding for this.
+//
+int __fastcall Script_IsIndoors(void *L) {
+    if (PlayerOutdoorState() == 0)
+        Game::Lua::PushNumber(L, 1.0);
+    else
+        Game::Lua::PushNil(L);
+    return 1;
+}
+
+// `IsOutdoors()` — 1 iff the local player is outdoors (open sky, or not
+// inside a WMO interior), else nil. Exact complement of `IsIndoors` for a
+// resolvable player; both return nil pre-world. See `Script_IsIndoors`.
+int __fastcall Script_IsOutdoors(void *L) {
+    if (PlayerOutdoorState() == 1)
+        Game::Lua::PushNumber(L, 1.0);
+    else
+        Game::Lua::PushNil(L);
+    return 1;
+}
+
 } // namespace
 
 static void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("IsMounted", &Script_IsMounted);
+    Game::Lua::RegisterGlobalFunction("IsIndoors", &Script_IsIndoors);
+    Game::Lua::RegisterGlobalFunction("IsOutdoors", &Script_IsOutdoors);
     Game::Lua::RegisterGlobalFunction("Dismount", &Script_Dismount);
     Game::Lua::RegisterGlobalFunction("IsStealthed", &Script_IsStealthed);
     Game::Lua::RegisterGlobalFunction("IsFalling", &Script_IsFalling);

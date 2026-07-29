@@ -4714,6 +4714,23 @@ enum Offsets {
     // `castGameObject != 0`).
     OFF_CGPLAYER_CAST_GAMEOBJECT_PTR = 0xB4,
 
+    // Indoor/outdoor query for a unit — backs `IsIndoors()` / `IsOutdoors()`
+    // (`unit/State.cpp`). `__fastcall(unit) -> uint` where **nonzero =
+    // outdoors**, 0 = indoors. A 2-instruction thunk: reads the unit's
+    // world/collision-context pointer at `unit + 0xE0` and tail-jumps to the
+    // WMO query `FUN_006706f0`. That query is fully null-safe — null context
+    // or a unit not inside a WMO group returns 1 (outdoors); otherwise it
+    // resolves the current WMO group via `FUN_0069d4f0` and returns bit 15
+    // (`0x8000`) of the group's runtime flags word (the OUTDOOR bit).
+    //
+    // Derived from SuperWoW 2.2's `IsIndoors` handler (which does exactly
+    // `unit = ObjMgr(0x10, PlayerGUID()); push (query(unit)==0)`), then
+    // confirmed against the vanilla binary. Vanilla ships no Lua binding for
+    // this; the 3.3.5 client's `IsIndoors` (`0x00612300`) uses the identical
+    // shape (`unit + 0xB8` → WMO group flag test), so the semantics are
+    // cross-checked across both clients.
+    FUN_UNIT_IS_OUTDOORS = 0x00612cc0,
+
     // No `MOVEFLAG_FLYING` constant intentionally. Vanilla 1.12
     // doesn't flip a flying bit during taxi flights (verified
     // empirically: `IsFlying()` checking 0x01000000 stayed false
