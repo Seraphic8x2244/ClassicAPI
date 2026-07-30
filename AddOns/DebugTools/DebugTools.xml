@@ -456,14 +456,11 @@
                         </Anchor>
                     </Anchors>
                 </FontString>
-                <!-- Breadcrumb showing the active navigation path,
-                     e.g. "_G > MyFrame > backdrop". Updated each
-                     `TableInspectorFrame_Update` tick. -->
                 <FontString name="$parentBreadcrumb" inherits="GameFontHighlightSmall" justifyH="LEFT">
-                    <Size x="380" y="16"/>
+                    <Size x="300" y="16"/>
                     <Anchors>
                         <Anchor point="TOPLEFT">
-                            <Offset x="80" y="-34"/>
+                            <Offset x="156" y="-34"/>
                         </Anchor>
                     </Anchors>
                 </FontString>
@@ -508,6 +505,17 @@
                 </Anchors>
                 <Scripts>
                     <OnClick>TableInspector_Back();</OnClick>
+                </Scripts>
+            </Button>
+            <Button name="$parentRefreshButton" inherits="UIPanelButtonTemplate" text="Refresh">
+                <Size x="70" y="20"/>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="$parentBackButton" relativePoint="RIGHT">
+                        <Offset x="4" y="0"/>
+                    </Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnClick>TableInspector_Refresh();</OnClick>
                 </Scripts>
             </Button>
             <Slider name="$parentScroll" orientation="VERTICAL">

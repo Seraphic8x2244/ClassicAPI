@@ -20,6 +20,7 @@
 --   TableInspector_Show(tbl, label)   -- open with `tbl` as root, `label` shown in breadcrumb
 --   TableInspector_Push(tbl, label)   -- drill in (called by row click)
 --   TableInspector_Back()             -- pop one level
+--   TableInspector_Refresh()          -- re-read the current level's live table (scroll kept)
 --   TableInspector_Close()            -- hide the window
 --   /tinspect <luaexpr>               -- evaluate `<luaexpr>` as Lua and open if result is a table
 ------------------------------------------------------------------------------
@@ -181,6 +182,13 @@ function TableInspector_Back()
     _RebuildEntries();
     local scroll = getglobal("TableInspectorFrameScroll");
     if (scroll) then scroll:SetValue(0); end
+    TableInspectorFrame_Update();
+end
+
+function TableInspector_Refresh()
+    local top = _navStack[table.getn(_navStack)];
+    if (not top or type(top.tbl) ~= "table") then return; end
+    _RebuildEntries();
     TableInspectorFrame_Update();
 end
 
