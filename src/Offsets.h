@@ -554,6 +554,31 @@ enum Offsets {
     // input it's the right primitive.
     FUN_TOKEN_TO_GUID = 0x00515970,
 
+    // Mouseover-unit GUID globals — the `"mouseover"` token resolves to
+    // these (see the token-dispatch list above). Written ONLY by
+    // `FUN_SET_MOUSEOVER_UNIT`; zero when nothing is moused over. Used by
+    // `Unit::Mouseover` to detect the loss transition.
+    VAR_MOUSEOVER_GUID_LO = 0x00B4E2C8,
+    VAR_MOUSEOVER_GUID_HI = 0x00B4E2CC,
+
+    // The engine's single mouseover set/clear chokepoint —
+    // `__stdcall(guidLo, guidHi, arg3, arg4)` (early returns are all
+    // `ret 0x10`, and the caller pushes 4 without cleaning). It is the
+    // ONLY writer of `VAR_MOUSEOVER_GUID_*`, so every mouseover
+    // gain/loss/change flows through it. On a unit gain it fires
+    // `UPDATE_MOUSEOVER_UNIT` itself (via `FUN_FIRE_EVENT_NO_ARGS(0x150)`
+    // in the friendly/hostile-unit tooltip case); on loss it clears the
+    // GUID but fires nothing — the gap `Unit::Mouseover` closes.
+    // Change-gated by its callers (if it ran per-frame the gain fire
+    // would spam every frame while hovering, which vanilla doesn't), so
+    // it's a cool hook target.
+    FUN_SET_MOUSEOVER_UNIT = 0x00492890,
+
+    // Event ID of `UPDATE_MOUSEOVER_UNIT` (name-table slot
+    // `0x00BE16D8` → `(0x16D8 - 0x1198) / 4`). Fired with no args via
+    // `FUN_FIRE_EVENT_NO_ARGS`; Lua handlers read `UnitExists("mouseover")`.
+    EVENT_UPDATE_MOUSEOVER_UNIT = 0x150,
+
     // `SStrCmpI(a, b, n)` — Storm's case-insensitive memcmp-style
     // comparator. **`int __stdcall(const char *a, const char *b, int n)`**
     // — the function ends with `ret 0xc`, so the callee pops the

@@ -435,6 +435,17 @@ and other DLLs claim for custom events.
 
 ## Notes on specific entries
 
+- **`[336] UPDATE_MOUSEOVER_UNIT` now fires on loss too (ClassicAPI).**
+  Stock 1.12 fires this only when a mouseover unit is *gained*; moving
+  the cursor off a unit clears the mouseover and signals nothing.
+  ClassicAPI co-hooks the engine's mouseover set/clear chokepoint
+  (`0x00492890`, the sole writer of the mouseover GUID) and fires
+  `UPDATE_MOUSEOVER_UNIT` on the unit→non-unit transition, matching
+  retail. Gated on the *old* mouseover being a unit and the *new* one
+  not, so moving off a gameobject / item (which never fired a gain)
+  doesn't spuriously fire. No payload either way — handlers read
+  `UnitExists("mouseover")`, false at fire time on loss. See
+  [API.md](API.md#update_mouseover_unit-event-loss-fire-fix).
 - **Repeated `UNIT_*` entries at low indices** (e.g. four slots named
   `UNIT_DAMAGE` at 128–131, five `UNIT_STATS` at 144–148, seven
   `UNIT_RESISTANCES` at 149–155) — these are the per-stat /

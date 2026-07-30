@@ -129,6 +129,7 @@ build instructions.
   - [`QUEST_REMOVED` event](#quest_removed-event)
   - [`QUEST_TURNED_IN` event](#quest_turned_in-event)
   - [`UNIT_FACTION` event (fire-coverage fix)](#unit_faction-event-fire-coverage-fix)
+  - [`UPDATE_MOUSEOVER_UNIT` event (loss-fire fix)](#update_mouseover_unit-event-loss-fire-fix)
   - [`UPDATE_SHAPESHIFT_FORM` event](#update_shapeshift_form-event)
 
 - [Expansion](#expansion)
@@ -3122,6 +3123,60 @@ after — single fire if any byte changed. The bulk snapshot is 64
 byte reads (cheap) and naturally handles the case where one packet
 carries multiple rep updates whose threshold crossings ripple AT_WAR
 state across unrelated slots.
+
+### `UPDATE_MOUSEOVER_UNIT` event (loss-fire fix)
+
+`UPDATE_MOUSEOVER_UNIT` exists in the vanilla event table and fires when a
+mouseover unit is **gained**, but the 1.12 engine **never fires it on
+loss** — moving the cursor off a unit clears the mouseover and signals
+nothing. Modern WoW fires it for both gain and loss, so addons observing
+`UnitExists("mouseover")` can react when it becomes false. We restore the
+loss fire.
+
+Payload is unchanged (none in vanilla — same as retail): the event
+carries no args; handlers read `UnitExists("mouseover")`, which is
+`nil`/false at fire time on the loss path.
+
+```lua
+local f = CreateFrame("Frame")
+f:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+f:SetScript("OnEvent", function()
+    if event == "UPDATE_MOUSEOVER_UNIT" then
+        if UnitExists("mouseover") then
+            -- gained (or changed to) a mouseover unit
+        else
+            -- mouseover unit lost (the vanilla gap this fills)
+        end
+    end
+end)
+```
+
+**Transitions and who fires them:**
+
+| From | To | Fires? | Source |
+|------|----|:------:|--------|
+| unit | nothing | yes | ClassicAPI (silent in stock 1.12) |
+| unit | gameobject | yes | ClassicAPI (mouseover unit genuinely lost) |
+| gameobject | nothing | no | — (never fired a gain; not a unit) |
+| anything | unit | yes | engine's own inline fire (gain / unit→unit) |
+
+**Implementation notes**
+
+The mouseover GUID lives in two globals written **only** by the engine's
+mouseover set/clear chokepoint (`0x00492890`), so every gain / loss /
+change flows through it — on a unit gain it fires `UPDATE_MOUSEOVER_UNIT`
+itself, on loss it clears the GUID silently. We co-hook that function:
+resolve whether the mouseover is a *unit* before and after the original,
+and fire on the unit→non-unit transition. Gating on unit *type* (not just
+"GUID present → absent") is load-bearing — the same GUID slot also holds
+gameobjects and items, which never fire a gain, so the type check is what
+keeps moving off a herb node or chest from spuriously firing. The
+`!hasUnit` half prevents a double-fire on any →unit transition the engine
+already covered.
+
+The target is change-gated by its callers (if it ran per-frame the gain
+event would spam while hovering), so it's a cool hook — no per-frame
+overhead.
 
 ### `UPDATE_SHAPESHIFT_FORM` event
 
