@@ -110,6 +110,8 @@ constexpr uint32_t kSettleMs = 1500;
 // ~currently-owned items rather than everything ever owned.
 constexpr int kMaxMissStreak = 4;
 
+constexpr int kMaxContainerSlots = 64;
+
 // One seen-set entry: an owned item's GUID and how many consecutive scans it
 // has been absent from the read (0 = present this scan).
 struct SeenEntry {
@@ -313,7 +315,9 @@ void AppendNonBagOwned(uint64_t *out, int *count) {
             static_cast<const uint8_t *>(Item::Location::ContainerInventory(bag));
         if (bagInvMgr == nullptr)
             continue;
-        const int bagSlots = static_cast<int>(*reinterpret_cast<const uint32_t *>(bagInvMgr));
+        int bagSlots = static_cast<int>(*reinterpret_cast<const uint32_t *>(bagInvMgr));
+        if (bagSlots > kMaxContainerSlots)
+            bagSlots = kMaxContainerSlots; // guard against a garbage count at login
         if (bagSlots > 0)
             AppendGuidArray(bagInvMgr, 0, bagSlots - 1, out, count);
     }
