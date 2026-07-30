@@ -494,6 +494,7 @@ build instructions.
 
 - [Time](#time)
   - [`GetServerTime()`](#getservertime)
+  - [`GetTimeCached()`](#gettimecached)
   - [`C_Timer.After(seconds, callback)`](#c_timeraftersseconds-callback)
   - [`C_Timer.NewTimer(seconds, callback)`](#c_timernewtimerseconds-callback)
   - [`C_Timer.NewTicker(seconds, callback, [iterations])`](#c_timernewtickerseconds-callback-iterations)
@@ -11859,6 +11860,40 @@ right call for calendar / log-timestamp / cooldown-sync use cases.
 > first minute rollover we observe, the anchor lands at the rollover
 > boundary and the timestamp is accurate to within a second of the
 > engine's clock for as long as the session continues.
+
+### `GetTimeCached()`
+
+Returns the same value as [`GetTime()`](https://warcraft.wiki.gg/wiki/API_GetTime)
+— seconds on the engine's uptime clock — but **frame-stable**: every call
+within a single frame returns the identical value, refreshed once per
+frame. Same epoch as `GetTime()`, so the two are directly comparable.
+
+Backports the retail 4.x `GetTime()` behavior (retail samples the clock
+once per frame in the main loop) under a distinct name, leaving vanilla's
+`GetTime()` untouched — 1.12's `GetTime()` is *live*, recomputing the OS
+tick on every call, so two same-frame `GetTime()` calls can differ.
+
+```lua
+-- Frame-stable: consistent timestamps across a frame's work
+local now = GetTimeCached()
+if now - lastFire >= interval then
+    lastFire = now
+    ...
+end
+```
+
+> **Not a performance feature.** The underlying tick source is cheap in
+> 1.12 (`GetTickCount`, a user-mode shared-page read, or `rdtsc`), and
+> both functions pay the same Lua→C call overhead, which dominates. So
+> `GetTimeCached()` is not meaningfully faster than `GetTime()` — its
+> only advantage is the frame-stable semantics. To actually cut cost in a
+> hot `OnUpdate`, cache the value in a Lua local
+> (`local now = GetTime()`) and reuse it; that removes the per-call Lua
+> dispatch, which a cached C function cannot.
+
+The cache is refreshed from the shared once-per-frame `Tick::WorldTick`
+hook; before the first world tick (pre-login / glue) it falls back to a
+live sample, so it never returns 0.
 
 ### `C_Timer.After(seconds, callback)`
 
