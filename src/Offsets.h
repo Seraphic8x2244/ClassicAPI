@@ -3825,6 +3825,12 @@ enum Offsets {
     // `Script_IsInInstance`).
     VAR_CURRENT_MAP_ID = 0x00B4E378,
 
+    // "In world" flag — non-zero when the player is in the world, zero while
+    // in a loading / transitioning state (initial-login load screen, zone /
+    // instance transitions). Sibling global to VAR_CURRENT_MAP_ID; used to
+    // gate work that shouldn't run behind a loading screen.
+    VAR_IN_WORLD = 0x00B4E37C,
+
 
     // Local player's current AreaTable.dbc area ID (u32 storage; only
     // the low 16 bits are used — the value is broadcast over the wire

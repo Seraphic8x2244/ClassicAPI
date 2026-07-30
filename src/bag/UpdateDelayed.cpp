@@ -127,6 +127,17 @@ unsigned __fastcall KeyringDescChange_h(void *bagDesc, void *edx,
 void OnWorldTick() {
     if (!g_pending)
         return;
+    // Bag changes aren't meaningful until the player is actually in the world.
+    // During the initial-login object burst the engine populates every bag
+    // slot (setting g_pending) while still behind the loading screen; the
+    // per-frame world tick runs there too, so firing BAG_UPDATE_DELAYED would
+    // make addons rescan bags repeatedly mid-load for no real change. Hold the
+    // pending flag — do NOT clear it — until the engine's in-world flag is set;
+    // the first in-world frame then emits a single DELAYED covering the settled
+    // login inventory (matching retail's one BAG_UPDATE_DELAYED at login). A
+    // transient clear during a later zone transition behaves the same way.
+    if (*reinterpret_cast<const volatile uint32_t *>(Offsets::VAR_IN_WORLD) == 0)
+        return;
     g_pending = false;
     const int slot = Event::Custom::Lookup(kEventName);
     if (slot >= 0)
