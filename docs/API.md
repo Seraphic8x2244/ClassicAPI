@@ -2539,9 +2539,15 @@ it: vanilla renders durability UI for equipped gear only.
 ### `HEARTHSTONE_BOUND` event
 
 Fires (with no payload) every time the player binds their
-hearthstone at an innkeeper. Polyfills modern WoW's event of the
-same name — addons listen to `HEARTHSTONE_BOUND` and re-read
-`GetBindLocation()` to refresh whatever bind-location UI they show.
+hearthstone at an innkeeper — including a rebind at the same inn.
+Polyfills modern WoW's event of the same name — addons listen to
+`HEARTHSTONE_BOUND` and re-read `GetBindLocation()` to refresh
+whatever bind-location UI they show.
+
+> Note: the server re-sends the bind packet on map/zone transitions
+> (behind the loading screen). Those resyncs are suppressed by gating
+> on the engine's in-world flag, so the event fires only for an actual
+> innkeeper bind, never on a map change.
 
 ```lua
 local f = CreateFrame("Frame")

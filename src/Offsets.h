@@ -3825,6 +3825,20 @@ enum Offsets {
     // `Script_IsInInstance`).
     VAR_CURRENT_MAP_ID = 0x00B4E378,
 
+    // "World is live" flag — 1 while the player is fully in the world, 0 during
+    // any loading screen (initial login, zone/instance transition, logout to
+    // glue). Set to 1 by the enter-world init `FUN_004908C0` (guarded
+    // `if (==0){=1;...}`) and back to 0 by the world-teardown `FUN_00490A80`
+    // (`if(!=0){=0;...}`) that runs at the start of every transition. Byte flag.
+    // The clean pollable gate for "can this happen in the world right now" —
+    // e.g. suppressing server resync packets that arrive behind a loading
+    // screen. Verified via the enter/leave pair in Ghidra.
+    //
+    // (NOTE: 0x00B4E37C is NOT this flag — an earlier note wrongly claimed it
+    // was. That address is instance grace-period state, read only by the
+    // "recently left an instance" 90-second check in `FUN_00495c90`.)
+    VAR_IN_WORLD = 0x00B4B424,
+
     // Local player's current AreaTable.dbc area ID (u32 storage; only
     // the low 16 bits are used — the value is broadcast over the wire
     // as a u16 in `SMSG_PARTY_MEMBER_STATS`). Written by the zone-change
@@ -4874,18 +4888,19 @@ enum Offsets {
     //
     // Single caller (the packet dispatcher's jump table for opcode
     // 0x155) — quiet hook target, no contention with other DLLs.
-    // Hooked by `Player::HearthstoneBound` to fire `HEARTHSTONE_BOUND`
-    // every time the user re-binds at an innkeeper. Gating off the
-    // bind-valid flag's transition distinguishes "initial sync" (the
-    // one we suppress) from "user rebound at an inn" (the one we
-    // fire on — even when the area string stays the same, since the
-    // bind ACTION is what fires the event).
+    // Hooked by `Player::HearthstoneBound` to fire `HEARTHSTONE_BOUND`.
+    // Two packets must be suppressed so the event reflects only a real
+    // innkeeper bind: (1) the initial post-login/char-switch sync
+    // (gated on VAR_BIND_POINT_VALID being 0 before the handler runs),
+    // and (2) Turtle's per-map-transition resync, which re-sends the
+    // packet behind a loading screen — gated on VAR_IN_WORLD (the
+    // player can't bind mid-load). See `Player::HearthstoneBound`.
     FUN_BINDPOINT_UPDATE_HANDLER = 0x005ED3C0,
     // "Bind point is valid" flag. Set to 1 by the BINDPOINTUPDATE
     // handler after the packet has been fully parsed. Zeroed by
     // `FUN_005E2510` (the per-character-entry init routine).
     // Reading this BEFORE the handler runs distinguishes initial
-    // sync (`== 0`) from a real re-bind (`== 1`).
+    // sync (`== 0`) from a later packet (`== 1`).
     VAR_BIND_POINT_VALID = 0x00C4D4E0,
 
     // SMSG_QUESTGIVER_QUEST_COMPLETE handler (opcode 0x191). Server
