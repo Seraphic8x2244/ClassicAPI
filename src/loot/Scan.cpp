@@ -8,16 +8,27 @@
 // WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
-// Hook-driven loot scanner. Walks the nearby-lootable-units set, opens
-// each corpse's loot session via `FUN_CMSG_LOOT_UNIT`, then *intercepts
-// the engine's loot-window response* before any visual updates happen.
-// The intercept (`FUN_LOOT_CONTROLLER`) lets the original function run
-// so `VAR_LOOT_SLOTS` populates and the link builder works — but a
+// Hook-driven loot corpse-walker. Walks the nearby-lootable-units set,
+// opens each corpse's loot session via `FUN_CMSG_LOOT_UNIT`, then
+// *intercepts the engine's loot-window response* before any visual updates
+// happen. The intercept (`FUN_LOOT_CONTROLLER`) lets the original function
+// run so `VAR_LOOT_SLOTS` populates and the link builder works — but a
 // paired hook on `FUN_FIRE_EVENT_NO_ARGS` swallows the `LOOT_OPENED` /
-// `LOOT_CLOSED` event fires while the scan is in progress. Net result:
-// the engine's state machine cycles silently for each corpse and
-// `LootFrame` never reacts. Other Lua addons listening to those events
-// also see nothing during the scan; that's deliberate.
+// `LOOT_CLOSED` event fires while the walk is in progress. Net result: the
+// engine's state machine cycles silently for each corpse and `LootFrame`
+// never reacts. Other Lua addons listening to those events also see nothing
+// during the walk; that's deliberate.
+//
+// Two Lua entry points share this one walker (and, importantly, this one
+// `FUN_LOOT_CONTROLLER` hook — MinHook allows a single hook per target, so
+// they can't be separate modules):
+//   - `C_Loot.ScanNearbyLoot()` — scrape-only: read each corpse's contents
+//     into `GetLastScanResults()` and release without looting.
+//   - `C_Loot.LootAllCorpses([max])` — the same walk but actually LOOTS
+//     each window (coin via `CMSG_LOOT_MONEY`, every item slot via
+//     `CMSG_LOOT_ITEM`) before releasing. Silent (no LootFrame flicker);
+//     the usual item-received / money chat + inventory events still fire,
+//     since only the LootFrame open/close events are swallowed.
 //
 // Compared to the older polling-driven version this also collapses the
 // state machine — we no longer need `WaitingOpen` / `WaitingClose` /
@@ -79,6 +90,7 @@ struct ScanCtx {
     uint64_t currentGuid = 0;
     int ticksSinceTransition = 0;
     bool suppressEvents = false; // read by the FireEvent hook
+    bool lootMode = false;       // LootAllCorpses (true) vs ScanNearbyLoot (false)
     std::vector<uint64_t> queue;
     std::vector<LootEntry> results;
 };
@@ -106,6 +118,12 @@ using CloseLootInner_t = void(__fastcall *)(int sendRelease,
 using LootSlotLinkBuilder_t = const char *(__fastcall *)(uint32_t userFacingSlot,
                                                           char *outBuf,
                                                           int bufSize);
+// `FUN_CMSG_LOOT_ITEM` — `__stdcall(uint8_t wireSlot)`, sends CMSG_LOOT_ITEM
+// for one slot of the open window (see the offset comment for the
+// __stdcall-vs-__fastcall stack-corruption hazard).
+using SendLootItem_t = void(__stdcall *)(uint8_t wireSlot);
+// `FUN_CMSG_LOOT_MONEY` — `__fastcall(player)`, sends the coin request.
+using LootMoney_t = void(__fastcall *)(void *player);
 // `FUN_LOOT_CONTROLLER` is `__fastcall(int, undefined4, int)` — three
 // args: lootStructPtr in ECX, coin in EDX, an extra unk on stack[0].
 // Mis-declaring as 4-arg __fastcall would push one phantom stack slot
@@ -207,6 +225,42 @@ void ScrapeCurrentLoot(LootEntry *out) {
     }
 }
 
+// Loots everything in the currently-open window: coin (if any) plus every
+// populated item slot. Called from the controller hook (loot mode) after the
+// original populated `VAR_LOOT_SLOTS`, so the slot table is fully filled in.
+//
+// Items go through `FUN_CMSG_LOOT_ITEM` directly — the same silent path
+// `C_Loot.LootUnitItem` uses, which bypasses the BoP/unique confirm dialog
+// the Lua `LootSlot` wrapper would raise (appropriate for a programmatic
+// loot-all; the server still enforces real permissions). Coin goes through
+// `FUN_CMSG_LOOT_MONEY` with `s_scan.player` — the SAME pointer we passed to
+// `FUN_CMSG_LOOT_UNIT`, whose send wrote this window's target GUID to the
+// player's `+0x1D28` guard slot, so the money send's guard passes.
+//
+// Packet order to the server is items, then coin, then the release that
+// follows (`SendCloseLoot`); the server processes loot-item / loot-money
+// before the release, so nothing is dropped.
+void LootCurrentWindow() {
+    // Coin present when `VAR_LOOT_LOOTABLE` holds a real amount (0 = none;
+    // 0xFFFFFFFF = already-looted sentinel, never seen on a fresh open).
+    const uint32_t coinRaw = *reinterpret_cast<const uint32_t *>(
+        Offsets::VAR_LOOT_LOOTABLE);
+    if (coinRaw != 0 && coinRaw != 0xFFFFFFFFu) {
+        auto LootMoney = reinterpret_cast<LootMoney_t>(Offsets::FUN_CMSG_LOOT_MONEY);
+        LootMoney(s_scan.player);
+    }
+
+    auto SendItem = reinterpret_cast<SendLootItem_t>(Offsets::FUN_CMSG_LOOT_ITEM);
+    for (int slot = 0; slot < Offsets::LOOT_MAX_SLOTS; ++slot) {
+        auto *entry = reinterpret_cast<const uint8_t *>(
+            Offsets::VAR_LOOT_SLOTS + slot * Offsets::LOOT_SLOT_STRIDE);
+        const uint32_t itemID = *reinterpret_cast<const uint32_t *>(entry);
+        if (itemID == 0)
+            continue;
+        SendItem(*(entry + Offsets::OFF_LOOT_SLOT_WIRE_INDEX));
+    }
+}
+
 // === State-machine transitions ===
 
 void StartLoot(uint64_t guid);
@@ -221,6 +275,7 @@ void Complete() {
     s_scan.state = State::Idle;
     s_scan.currentGuid = 0;
     s_scan.suppressEvents = false;
+    s_scan.lootMode = false;
     Event::Custom::Fire(Event::Custom::Lookup(kEventCompleted), "");
 }
 
@@ -315,6 +370,12 @@ void __fastcall LootController_h(int lootStructPtr, int coin, int unk) {
         ScrapeCurrentLoot(&entry);
         s_scan.results.push_back(std::move(entry));
 
+        // Loot mode: actually take everything (coin + all slots) before the
+        // release below. Scrape ran first, so `GetLastScanResults()` still
+        // reports what each corpse held.
+        if (s_scan.lootMode)
+            LootCurrentWindow();
+
         // Sends `CMSG_LOOT_RELEASE` and recursively calls this hook
         // with `arg1 == 0`. That recursive call falls into the
         // passthrough branch but still sees `suppressEvents == true`
@@ -377,46 +438,69 @@ int __fastcall EnumCallback(EnumCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
     return 1;
 }
 
-void BuildQueue(void *player) {
+void BuildQueue(void *player, size_t maxCount) {
     s_scan.queue.clear();
     auto Enum = reinterpret_cast<ClntObjMgrEnumVisibleObjects_t>(
         Offsets::FUN_CLNT_OBJ_MGR_ENUM_VISIBLE_OBJECTS);
     EnumCtx ctx{player, &s_scan.queue};
     Enum(reinterpret_cast<ClntObjMgrEnumVisibleObjectsCallback_t>(&EnumCallback),
          &ctx);
+    // Cap to `maxCount` corpses (0 = unlimited). Order is engine
+    // enumeration order, not distance-sorted, so the truncation is
+    // arbitrary among in-range corpses.
+    if (maxCount != 0 && s_scan.queue.size() > maxCount)
+        s_scan.queue.resize(maxCount);
+}
+
+// Shared starter for both entry points: resolve the player, build the
+// corpse queue, kick off the walk. Returns whether it started — `false` if a
+// walk is already in progress or there's no local player.
+bool BeginWalk(bool lootMode, size_t maxCount) {
+    if (s_scan.state != State::Idle)
+        return false;
+    if (*reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) == nullptr)
+        return false;
+    auto Resolve = reinterpret_cast<ResolveUnitToken_t>(
+        Offsets::FUN_RESOLVE_UNIT_TOKEN);
+    void *player = Resolve("player");
+    if (player == nullptr)
+        return false;
+
+    s_scan.results.clear();
+    s_scan.player = player;
+    s_scan.lootMode = lootMode;
+    BuildQueue(player, maxCount);
+
+    if (s_scan.queue.empty()) {
+        Complete(); // nothing nearby — fire LOOT_SCAN_COMPLETED immediately
+        return true;
+    }
+    TryStartNext();
+    return true;
 }
 
 // === Lua bindings ===
 
+// `C_Loot.ScanNearbyLoot()` — scrape-only walk. Returns `true` if it
+// started (a subsequent `GetLastScanResults()` holds the contents once
+// `LOOT_SCAN_COMPLETED` fires), `false` if a walk is already running or
+// there's no local player.
 int __fastcall Script_ScanNearbyLoot(void *L) {
-    if (s_scan.state != State::Idle) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
-    if (*reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) == nullptr) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
-    auto Resolve = reinterpret_cast<ResolveUnitToken_t>(
-        Offsets::FUN_RESOLVE_UNIT_TOKEN);
-    void *player = Resolve("player");
-    if (player == nullptr) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
+    Game::Lua::PushBool(L, BeginWalk(/*lootMode=*/false, /*maxCount=*/0));
+    return 1;
+}
 
-    s_scan.results.clear();
-    s_scan.player = player;
-    BuildQueue(player);
-
-    if (s_scan.queue.empty()) {
-        Complete();
-        Game::Lua::PushBool(L, true);
-        return 1;
-    }
-
-    TryStartNext();
-    Game::Lua::PushBool(L, true);
+// `C_Loot.LootAllCorpses([max])` — loots every nearby lootable corpse
+// (coin + all items) in sequence. Optional `max` caps how many corpses are
+// visited. Returns `true` if it started, `false` if a walk (scan or loot)
+// is already in progress or there's no local player. `LOOT_SCAN_COMPLETED`
+// fires when the walk finishes; `GetLastScanResults()` then reports what
+// each corpse held (i.e. what was looted).
+int __fastcall Script_LootAllCorpses(void *L) {
+    const size_t maxCount = Game::Lua::IsNumber(L, 1)
+                                ? static_cast<size_t>(Game::Lua::ToNumber(L, 1))
+                                : 0;
+    Game::Lua::PushBool(L, BeginWalk(/*lootMode=*/true, maxCount));
     return 1;
 }
 
@@ -462,6 +546,8 @@ int __fastcall Script_GetLastScanResults(void *L) {
 void Register() {
     Game::Lua::RegisterTableFunction("C_Loot", "ScanNearbyLoot",
                                      &Script_ScanNearbyLoot);
+    Game::Lua::RegisterTableFunction("C_Loot", "LootAllCorpses",
+                                     &Script_LootAllCorpses);
     Game::Lua::RegisterTableFunction("C_Loot", "IsScanInProgress",
                                      &Script_IsScanInProgress);
     Game::Lua::RegisterTableFunction("C_Loot", "GetLastScanResults",

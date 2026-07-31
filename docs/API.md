@@ -294,6 +294,7 @@ build instructions.
   - [`C_Loot.LootUnit(guid)`](#c_lootlootunitguid)
   - [`C_Loot.LootUnitItem(guid, itemID)`](#c_lootlootunititemguid-itemid)
   - [`C_Loot.ScanNearbyLoot()`](#c_lootscannearbyloot)
+  - [`C_Loot.LootAllCorpses([max])`](#c_lootlootallcorpsesmax)
   - [`C_Loot.IsScanInProgress()`](#c_lootisscaninprogress)
   - [`C_Loot.GetLastScanResults()`](#c_lootgetlastscanresults)
 
@@ -7169,6 +7170,45 @@ C_Loot.ScanNearbyLoot()
 Per-corpse step timeout is ~3-6 seconds (180 WorldTick frames) so a
 single dropped server response doesn't hang the whole scan. Failed
 corpses simply don't appear in the results.
+
+### `C_Loot.LootAllCorpses([max])`
+
+Loots **every** nearby lootable corpse in sequence — the same corpse
+walk as [`ScanNearbyLoot`](#c_lootscannearbyloot), but it actually takes
+the loot: coin (`CMSG_LOOT_MONEY`) plus every item slot (`CMSG_LOOT_ITEM`)
+from each window before releasing and advancing to the next corpse. The
+optional `max` caps how many corpses are visited (default: all in range).
+
+Returns `true` if the loot walk was queued, `false` if a walk (this or
+`ScanNearbyLoot`) is already in progress or the world isn't loaded — the
+two share one state machine, so [`IsScanInProgress`](#c_lootisscaninprogress)
+reports either, and only one runs at a time.
+
+Like the scan, the walk is **silent**: `LOOT_OPENED` / `LOOT_CLOSED` are
+suppressed so `LootFrame` never flickers open per corpse. The normal
+item-received and money events still fire (`CHAT_MSG_LOOT`,
+`CHAT_MSG_MONEY`, inventory updates), so the player sees what they got.
+
+```lua
+-- Loot everything within interact range
+C_Loot.LootAllCorpses()
+
+-- Loot at most 5 corpses
+C_Loot.LootAllCorpses(5)
+```
+
+Completion is signaled by [`LOOT_SCAN_COMPLETED`](#loot_scan_completed-event);
+afterward [`GetLastScanResults()`](#c_lootgetlastscanresults) reports what
+each corpse held — i.e. what was looted.
+
+> **Range and permissions.** Only corpses inside the engine's own
+> right-click-loot range are queued (same distance test as
+> `GetNearbyLootableUnits`), and only those the server flagged lootable
+> for you. The item sends bypass the client-side BoP/unique **confirm
+> dialog** (appropriate for a programmatic loot-all), but the server still
+> enforces every real rule — loot rights, distance, master-loot. Unlike a
+> right-click, this does **not** change your target or auto-walk you toward
+> out-of-range corpses.
 
 ### `C_Loot.IsScanInProgress()`
 

@@ -5114,6 +5114,20 @@ enum Offsets {
     // delayed crashes on unrelated vtable reads.
     FUN_CMSG_LOOT_ITEM = 0x005E1AD0,
 
+    // `__fastcall(player)` — sends `CMSG_LOOT_MONEY` (the coin/money
+    // request) for the player's currently-open loot window. Vanilla has
+    // no `LootMoney` Lua global; coin is virtual loot slot 0 and the Lua
+    // `LootSlot` handler `FUN_004C2790` routes the coin slot here (its
+    // `param_1 == 0 && VAR_LOOT_LOOTABLE != 0` branch calls this with the
+    // resolved local player). Guards internally on the player's active
+    // loot GUID at `[player + 0x1D28]` — which `FUN_CMSG_LOOT_UNIT` writes
+    // when it sends the loot request — so it silently no-ops if no window
+    // is open. Pass the SAME player pointer used for `FUN_CMSG_LOOT_UNIT`
+    // so the `+0x1D28` guard it just wrote is the one read here.
+    // `Loot::Scan`'s `LootAllCorpses` path uses it to grab coin alongside
+    // the per-slot `CMSG_LOOT_ITEM` sends.
+    FUN_CMSG_LOOT_MONEY = 0x005EA8C0,
+
     // UNIT_DYNAMIC_FLAGS within `m_objectFields`. Standard
     // server-driven dynamic-state bitmask. Empirically verified by
     // cross-referencing three `Script_*` accessors that all read
