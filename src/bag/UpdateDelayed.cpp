@@ -58,6 +58,7 @@
 #include "Offsets.h"
 #include "bag/UpdateDelayed.h"
 #include "event/Custom.h"
+#include "event/EnteringWorld.h"
 #include "tick/WorldTick.h"
 
 namespace Bag::UpdateDelayed {
@@ -132,11 +133,12 @@ void OnWorldTick() {
     // slot (setting g_pending) while still behind the loading screen; the
     // per-frame world tick runs there too, so firing BAG_UPDATE_DELAYED would
     // make addons rescan bags repeatedly mid-load for no real change. Hold the
-    // pending flag — do NOT clear it — until the engine's in-world flag is set;
-    // the first in-world frame then emits a single DELAYED covering the settled
-    // login inventory (matching retail's one BAG_UPDATE_DELAYED at login). A
-    // transient clear during a later zone transition behaves the same way.
-    if (*reinterpret_cast<const volatile uint32_t *>(Offsets::VAR_IN_WORLD) == 0)
+    // pending flag — do NOT clear it — until PLAYER_ENTERING_WORLD has fired
+    // (the loading screen is done); the first in-world frame then emits a single
+    // DELAYED covering the settled login inventory (matching retail's one
+    // BAG_UPDATE_DELAYED at login). There is no reliable pollable in-world flag
+    // in the binary — see Event::EnteringWorld::HasEnteredWorld.
+    if (!Event::EnteringWorld::HasEnteredWorld())
         return;
     g_pending = false;
     const int slot = Event::Custom::Lookup(kEventName);
