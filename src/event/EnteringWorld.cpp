@@ -38,18 +38,11 @@
 
 #include "Game.h"
 #include "event/Custom.h"
-#include "event/EnteringWorld.h"
 #include "event/SignalHook.h"
 
 namespace Event::EnteringWorld {
 
 namespace {
-
-// One-way latch: set the first time PEW fires (see HasEnteredWorld). Stays true
-// across /reload — the DLL isn't reloaded, and once the world is live it stays
-// live for the session. Consumed by modules that must idle behind the initial-
-// login loading screen (e.g. Bag::UpdateDelayed).
-bool g_enteredWorld = false;
 
 // Set on glue-screen boot; a pending latch means the next enter-world is a
 // fresh character login (from the login/char-select screen).
@@ -73,8 +66,6 @@ bool Intercept(int eventID) {
     const int pew = PewId();
     if (pew < 0 || eventID != pew)
         return false;
-
-    g_enteredWorld = true; // the loading screen is done; the world is live
 
     const bool isInitialLogin = g_atGlue;
     g_atGlue = false;
@@ -114,7 +105,5 @@ const Game::ModuleAutoRegister _inGame{&OnInGameInit};
 const Game::GlueModuleAutoRegister _glue{&OnGlueInit};
 
 } // namespace
-
-bool HasEnteredWorld() { return g_enteredWorld; }
 
 } // namespace Event::EnteringWorld
