@@ -25,8 +25,10 @@
 // mirroring the engine's registration shape exactly (bank 4, size 8). The
 // dispatcher invokes us only when a slot's item GUID actually changed
 // (per-node mirror memcmp), so there's no polling and no diff bookkeeping
-// on our side, and the nodes share the engine observers' lifetime (they
-// die with the player object; the setup re-runs each enter-world).
+// on our side. The setup re-runs each enter-world; on logout/login the
+// player object is recreated so old nodes die with it, but /reload REUSES
+// the object, so we unregister-then-register per slot to avoid stacking a
+// duplicate observer each reload (see ObserverSetup_h).
 //
 // `equipmentSlot` is the 1-based Lua inventory slot (1 = head … 19 =
 // tabard), matching modern. `hasCurrent` is 1 when the slot now holds an
@@ -126,6 +128,10 @@ int __fastcall EquipSlotChanged_cb(uint32_t fieldOffset, uint32_t /*size*/,
 using RegisterObserver_t = void(__fastcall *)(
     int bank, uint32_t fieldOffset, uint32_t guidLo, uint32_t guidHi, int size,
     const void *callback, void *userArg1, void *userArg2);
+using UnregisterObserver_t = void(__fastcall *)(int bank, uint32_t fieldOffset,
+                                                uint32_t guidLo, uint32_t guidHi,
+                                                const void *callback,
+                                                void *userArg1);
 using ObserverSetup_t = void(__fastcall *)();
 ObserverSetup_t g_origSetup = nullptr;
 
@@ -147,12 +153,26 @@ void __fastcall ObserverSetup_h() {
     const uint64_t guid = Unit::Identity::PlayerGuid();
     if (guid == 0)
         return;
+    const uint32_t lo = static_cast<uint32_t>(guid);
+    const uint32_t hi = static_cast<uint32_t>(guid >> 32);
     auto reg = reinterpret_cast<RegisterObserver_t>(
         Offsets::FUN_DESC_OBSERVER_REGISTER);
+    auto unreg = reinterpret_cast<UnregisterObserver_t>(
+        Offsets::FUN_DESC_OBSERVER_UNREGISTER);
     for (int slot = 0; slot < Offsets::DESC_PLAYER_EQUIP_SLOTS; ++slot) {
-        reg(Offsets::DESC_OBSERVER_BANK_PLAYER,
-            Offsets::OFF_DESC_PLAYER_EQUIP_FIRST + slot * 8,
-            static_cast<uint32_t>(guid), static_cast<uint32_t>(guid >> 32),
+        const uint32_t field = Offsets::OFF_DESC_PLAYER_EQUIP_FIRST + slot * 8;
+        // Drop any observer we already registered for this field before adding
+        // a fresh one. The setup re-runs on every enter-world, including
+        // /reload — but /reload does NOT destroy the CGPlayer object, so our
+        // previous nodes are still attached and the registrar always APPENDS
+        // (no dedup by callback). Without this, each /reload stacks another
+        // observer per slot → PLAYER_EQUIPMENT_CHANGED fires N times after N
+        // reloads. On logout/login the object is recreated and the old nodes
+        // died with it, so the unregister no-ops there. Same objects-survive-
+        // /reload hazard `Unit::TokenObserver` guards against for nameplates.
+        unreg(Offsets::DESC_OBSERVER_BANK_PLAYER, field, lo, hi,
+              reinterpret_cast<const void *>(&EquipSlotChanged_cb), nullptr);
+        reg(Offsets::DESC_OBSERVER_BANK_PLAYER, field, lo, hi,
             /*size*/ 8, reinterpret_cast<const void *>(&EquipSlotChanged_cb),
             nullptr, nullptr);
     }
