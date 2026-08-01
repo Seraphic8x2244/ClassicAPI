@@ -73,6 +73,7 @@
 #include "dbc/Lookup.h"
 #include "net/PacketReader.h"
 #include "spell/Lookup.h"
+#include "spell/CastEvents.h"
 #include "tick/WorldTick.h"
 #include "unit/Identity.h"
 
@@ -232,8 +233,10 @@ const char *SpellIconPath(const uint8_t *rec) {
 }
 
 // Pushes UnitCastingInfo's 11-tuple from a tracked cast, or nothing (nil)
-// if there's no active cast.
-int PushCastInfo(void *L, const TrackedSpell &c) {
+// if there's no active cast. `casterGuid` identifies whose cast this is (the
+// player's or a remote unit's) so `castID` can be pulled from Spell::CastEvents
+// — the same castGUID the cast's UNIT_SPELLCAST_* events carry.
+int PushCastInfo(void *L, const TrackedSpell &c, uint64_t casterGuid) {
     if (c.spellID == 0)
         return 0;
     // Self-expire: once the cast window has elapsed, report nothing even if
@@ -252,7 +255,12 @@ int PushCastInfo(void *L, const TrackedSpell &c) {
     PushMs(L, c.startMs);                                    // 4 startTimeMs
     PushMs(L, c.endMs);                                      // 5 endTimeMs
     Game::Lua::PushBool(L, IsTradeskill(rec));               // 6 isTradeskill
-    Game::Lua::PushNil(L);                                   // 7 castID
+    char castGuid[48];                                       // 7 castID
+    if (Spell::CastEvents::CurrentCastGuid(casterGuid, c.spellID, castGuid,
+                                           sizeof castGuid))
+        Game::Lua::PushString(L, castGuid);
+    else
+        Game::Lua::PushNil(L);
     Game::Lua::PushBool(L, false);                           // 8 notInterruptible
     Game::Lua::PushNumber(L, static_cast<double>(c.spellID)); // 9 castingSpellID
     Game::Lua::PushNil(L);                                   // 10 castBarID
@@ -469,6 +477,12 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
     const int endMs = instantChannel ? now + RemoteChannelDurationMs(rec)
                                      : now + static_cast<int>(castTime);
     StoreRemoteCast(caster, spellID, now, endMs, instantChannel);
+    // Phase 2 events: START (cast) or CHANNEL_START (channel). Skip pure
+    // instants (non-channel, castTime 0 → no bar); their SUCCEEDED still fires
+    // from the SPELL_GO hook.
+    if (castTime > 0 || instantChannel)
+        Spell::CastEvents::OnRemoteCastStart(caster, spellID, endMs,
+                                             instantChannel);
 }
 
 // Co-hook on the SMSG_SPELL_START handler. Gated on opCode 0x131 so every
@@ -561,6 +575,42 @@ const Game::HookAutoRegister _channelStartHook{
     reinterpret_cast<void *>(&ChannelStart_h),
     reinterpret_cast<void **>(&g_origChannelStart)};
 
+// MSG_CHANNEL_UPDATE (0x006e75f0) — sent to the channeling PLAYER on damage
+// pushback (vanilla channels SHORTEN when hit) and once more at the channel's
+// end (remaining == 0). Body is a single u32 = the new remaining time (ms);
+// the spell is the in-progress channel (the packet carries no spellID, same as
+// the engine's own handler). The engine fires its Lua SPELLCAST_CHANNEL_UPDATE
+// but stores the new end nowhere, so g_channel.endMs — computed once at start —
+// would keep reporting the full, un-pushed-back duration through
+// UnitChannelInfo. Re-anchor it to the server's remaining time so the query
+// (and the OnWorldTick endMs self-expiry) track pushback; on remaining == 0
+// clear the channel so CHANNEL_STOP fires promptly (ahead of the ~1 s-lagged
+// +0x228 field).
+using ChannelUpdate_t = int(__stdcall *)(uint32_t *opCode,
+                                         Net::CDataStore *packet);
+ChannelUpdate_t g_origChannelUpdate = nullptr;
+
+int __stdcall ChannelUpdate_h(uint32_t *opCode, Net::CDataStore *packet) {
+    if (packet != nullptr && g_channel.spellID != 0) {
+        const uint32_t saved = packet->m_read;
+        const uint32_t remaining = Net::Read<uint32_t>(packet);
+        packet->m_read = saved;
+        const int spellID = g_channel.spellID;
+        if (remaining == 0) {
+            g_channel.spellID = 0; // authoritative channel end
+        } else {
+            g_channel.endMs = NowMs() + static_cast<int>(remaining);
+            Spell::CastEvents::OnPlayerChannelUpdate(spellID);
+        }
+    }
+    return g_origChannelUpdate(opCode, packet);
+}
+
+const Game::HookAutoRegister _channelUpdateHook{
+    Offsets::FUN_SPELL_CHANNEL_UPDATE,
+    reinterpret_cast<void *>(&ChannelUpdate_h),
+    reinterpret_cast<void **>(&g_origChannelUpdate)};
+
 // Shared abort handling for the two sibling failure packets. Servers
 // derived from (v)mangos broadcast BOTH `SMSG_SPELL_FAILURE` and
 // `SMSG_SPELL_FAILED_OTHER` from Spell::SendInterrupted, but which one a
@@ -582,8 +632,16 @@ void HandleCastAborted(uint64_t guid, int spellID) {
     // clear it on interrupt — this packet is the only signal. Whether the
     // caster receives their own broadcast is server-dependent; if it never
     // fires, the endMs self-expiry backstop still applies.
-    if (guid == Unit::Identity::PlayerGuid() && g_cast.spellID == spellID)
-        g_cast.spellID = 0;
+    if (guid == Unit::Identity::PlayerGuid()) {
+        // Cast interrupts are surfaced by PollPlayer (g_castSucceeded). Player
+        // CHANNELS never fire INTERRUPTED (retail only fires CHANNEL_STOP for
+        // them, interrupted or not), so there's nothing to do for a channel.
+        if (g_cast.spellID == spellID)
+            g_cast.spellID = 0;
+        return;
+    }
+    // Phase 2: remote unit — the poll fires INTERRUPTED + STOP for it.
+    Spell::CastEvents::OnRemoteAborted(guid, spellID);
 }
 
 // Co-hook on the SMSG_SPELL_FAILED_OTHER handler — the server broadcasts it
@@ -714,13 +772,43 @@ void OnWorldTick() {
             else if (chan == 0 && g_channelConfirmed)
                 g_channel.spellID = 0;
         }
+        // Self-expiry backstop for the poll: the +0x228 broadcast clears ~1
+        // tick (~1s) late, so a channel that runs its full duration would
+        // otherwise linger until then — the poll's CHANNEL_STOP (and any
+        // g_channel reader) would trail the real end by ~1s. Clear at the
+        // server-computed endMs too, so the effective stop is the EARLIER of
+        // (computed end, early +0x228 clear — the summon-ritual / interrupt
+        // case). Mirrors PushChannelInfo's endMs guard, which already hides
+        // the channel from UnitChannelInfo at this same instant.
+        //
+        // Wrap-safe compare: the ms tick (rdtsc-backed, survives reboots) can
+        // sit past 2^31, where a stored endMs reads NEGATIVE as a signed int.
+        // A direct `now >= endMs` would then misfire for a channel straddling
+        // the boundary. The signed DELTA cancels the wrap (correct for any
+        // interval < ~24.8 days — a channel is always far shorter), so test
+        // `now - endMs >= 0` instead.
+        if (g_channel.spellID != 0 && g_channel.endMs != 0 &&
+            NowMs() - g_channel.endMs >= 0)
+            g_channel.spellID = 0;
     }
+
+    // Derive the player's UNIT_SPELLCAST_* events from the cast/channel
+    // state above, now that this tick's clears have been applied. Poll-
+    // based so it needs no changes to the many stamp/clear sites; ~1 frame
+    // latency is imperceptible for a cast bar, and every fire is
+    // listener-gated (near-free when no addon uses these).
+    Spell::CastEvents::PollPlayer(g_cast.spellID, g_cast.startMs, g_cast.delayMs,
+                                  g_channel.spellID, g_channel.startMs);
+    Spell::CastEvents::PollRemote();
+    Spell::CastEvents::PollReticle();
 }
 
 static const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
 // `CastingInfo()` — local player's cast, no token lookup.
-static int __fastcall Script_CastingInfo(void *L) { return PushCastInfo(L, g_cast); }
+static int __fastcall Script_CastingInfo(void *L) {
+    return PushCastInfo(L, g_cast, Unit::Identity::PlayerGuid());
+}
 
 // `UnitCastingInfo(unit)` — local player from self-tracking; other units
 // from the SMSG_SPELL_START cache (regular casts still within their cast
@@ -736,11 +824,13 @@ static int __fastcall Script_UnitCastingInfo(void *L) {
     if (u == nullptr)
         return 0;
     if (u == Resolve("player"))
-        return PushCastInfo(L, g_cast);
+        return PushCastInfo(L, g_cast, Unit::Identity::PlayerGuid());
 
-    const RemoteCast *rc = FindRemoteCast(Unit::Identity::GuidForObject(u));
+    const uint64_t guid = Unit::Identity::GuidForObject(u);
+    const RemoteCast *rc = FindRemoteCast(guid);
     if (rc != nullptr && !rc->isChannel && NowMs() < rc->endMs)
-        return PushCastInfo(L, TrackedSpell{rc->spellID, rc->startMs, rc->endMs});
+        return PushCastInfo(L, TrackedSpell{rc->spellID, rc->startMs, rc->endMs},
+                            guid);
     return 0;
 }
 

@@ -554,6 +554,24 @@ enum Offsets {
     // input it's the right primitive.
     FUN_TOKEN_TO_GUID = 0x00515970,
 
+    // `__fastcall(const uint64_t *guid /*ecx*/, int *outCount /*edx*/) ->
+    // char** tokenArray` — the engine's GUID → unit-token REVERSE map. Fills
+    // a reused static buffer array (the returned pointer) with the name
+    // string of every ENGINE-NATIVE token currently pointing at `guid` and
+    // writes the count to `*outCount`. Checks, in order: player, pet, target,
+    // party1..4, partypet1..4, raid1..40, raidpet1..40, npc, mouseover — the
+    // same slots the per-token unit-event broadcast `FUN_00515e50` fans out
+    // to (that function is just this map + a fire-per-token loop). Does NOT
+    // know ClassicAPI's synthetic `focus` / `nameplateN` tokens (the engine
+    // has no concept of them) — callers add those separately. Non-throwing:
+    // returns count 0 pre-world (resolves the active player internally and
+    // bails if absent). The returned array is a shared static reused on the
+    // next call, so snapshot the strings before doing anything that could
+    // re-enter. nampower names this `GetNamesFromGUID` (left as an unfilled
+    // TODO in its offsets.hpp). Used by `Unit::Identity::TokensForGUID` for
+    // the phase-2 `UNIT_SPELLCAST_*` remote-unit fan-out.
+    FUN_UNIT_TOKENS_FROM_GUID = 0x00515C50,
+
     // Mouseover-unit GUID globals — the `"mouseover"` token resolves to
     // these (see the token-dispatch list above). Written ONLY by
     // `FUN_SET_MOUSEOVER_UNIT`; zero when nothing is moused over. Used by
@@ -1216,6 +1234,20 @@ enum Offsets {
     // collision, per-channel-start frequency).
     FUN_SPELL_CHANNEL_START = 0x006E7550,
 
+    // `MSG_CHANNEL_UPDATE` handler (`FUN_006e75f0`) — same `int __stdcall(
+    // uint32_t *opCode, CDataStore *packet)` shape. Body: a single u32 =
+    // the channel's new REMAINING time (ms). Sent to the caster on damage
+    // pushback (which shortens a vanilla channel) and once more at the
+    // channel's end (remaining == 0). Verified at 0x006e75f0: reads the u32,
+    // then fires vanilla's `SPELLCAST_CHANNEL_UPDATE(remaining)` (event
+    // 0x157) on pushback or `SPELLCAST_CHANNEL_STOP` (0x158) at end — but
+    // stores the new end NOWHERE, so `Spell::Cast`'s g_channel.endMs
+    // (computed once at start) never reflects pushback. Co-hooked to
+    // re-anchor endMs (and fire UNIT_SPELLCAST_CHANNEL_UPDATE). nampower
+    // hooks it too (SpellChannelUpdateHandlerHook — accepted co-hook, per-
+    // pushback frequency, same as the START sibling).
+    FUN_SPELL_CHANNEL_UPDATE = 0x006E75F0,
+
     // `SMSG_SPELL_FAILED_OTHER` handler — `int __stdcall(uint32_t *opCode,
     // CDataStore *packet)`, same shape as FUN_SPELL_DELAYED. Body:
     // `casterGuid(u64, plain), spellId(u32)`. In (v)mangos cores this is
@@ -1244,6 +1276,21 @@ enum Offsets {
     // nampower calls this SpellFailedHandler (offsets.hpp) but doesn't
     // hook it.
     FUN_SPELL_FAILURE = 0x006E8D80,
+
+    // `Spell_C_SpellFailed` — the CLIENT-side cast-failure entry, distinct
+    // from the two SMSG_SPELL_FAILURE/_OTHER packet handlers above. Fires
+    // for the local player's own cast rejections (out of range, no mana,
+    // "spell not ready", LoS, interrupted, …). `__fastcall(uint32_t
+    // spellId, uint8_t spellResult /*edx*/, int unk1, int unk2, bool
+    // failedByServer)` — signature per nampower's Spell_C_SpellFailedT.
+    // Backs `UNIT_SPELLCAST_FAILED` (`Spell::CastEvents`). Not hooked
+    // elsewhere in this project (we hook the packet handlers, not this).
+    FUN_SPELL_C_SPELL_FAILED = 0x006E1A00,
+
+    // `Spell_C_SpellFailed` result code for a fake/suppressed failure
+    // (Unleashed Potential and similar) — the engine's SPELL_FAILED_DONT_
+    // REPORT. nampower filters it out of its failure event; so do we.
+    SPELL_FAILED_DONT_REPORT = 23,
 
     // `CGUnit_C::ClearCastingSpell` — `__thiscall void(CGUnit *unit,
     // int spellID, char notify, char cleanup)` (nampower names the offset
@@ -3518,6 +3565,23 @@ enum Offsets {
     // `FUN_006E3D10`. Non-zero means "the cast bar is showing this
     // spell"; cleared to 0 when the cast finishes or is cancelled.
     VAR_CURRENT_CAST_SPELL = 0x00CECA88,
+
+    // Ground/reticle-targeting flags — non-zero while a spell is awaiting a
+    // target click (the AoE reticle / target cursor). `SpellIsTargeting()`
+    // (`0x006E6CD0`) returns true iff this != 0 (via its predicate
+    // `FUN_006E48A0`, `return DAT_00CECAC0 != 0`); `Spell_C_TargetSpell`
+    // (`0x006E5250`) sets the flag bits from the spell's target type, and the
+    // clear helper `FUN_006E4900` (from `SpellStopTargeting`) / a ground
+    // placement zeroes it. Polled by `Spell::CastEvents::PollReticle` to fire
+    // UNIT_SPELLCAST_RETICLE_TARGET / _CLEAR.
+    VAR_SPELL_TARGETING_FLAGS = 0x00CECAC0,
+    // The pending cast spellID — written by `Spell_C_CastSpell` (`0x006E4B60`)
+    // to the spell being cast, and used elsewhere as a `Spell.dbc` index (e.g.
+    // `CancelSpell`'s `records[this]`). While `VAR_SPELL_TARGETING_FLAGS` is
+    // set it's the spell whose reticle is up, so the RETICLE events read the
+    // spellID from here.
+    VAR_PENDING_CAST_SPELL = 0x00CEAC58,
+
     // The cast-start state writer — `__fastcall(int spellID, int
     // targetState)`. Sets `VAR_CURRENT_CAST_SPELL` (pushing any current
     // spell into `VAR_QUEUED_CAST_SPELL`; `spellID == 0` restores the queued

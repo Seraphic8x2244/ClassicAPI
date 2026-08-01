@@ -155,6 +155,19 @@ when launching with `-console`), not as Lua functions. See the
 | `QUEST_DATA_LOAD_RESULT` | `questID, success` |
 | `QUEST_REMOVED` | `questID` |
 | `QUEST_TURNED_IN` | `questID, xpReward, moneyReward` |
+| `UNIT_SPELLCAST_SENT` | `"player", target, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_START` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_STOP` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_DELAYED` | `"player", castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_SUCCEEDED` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_INTERRUPTED` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_FAILED` | `"player", castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_FAILED_QUIET` | `"player", castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_CHANNEL_START` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_CHANNEL_UPDATE` | `"player", castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_CHANNEL_STOP` | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_RETICLE_TARGET` | `"player", "", spellID, spellName, rank` |
+| `UNIT_SPELLCAST_RETICLE_CLEAR` | `"player", "", spellID, spellName, rank` |
 | `UPDATE_INVENTORY_DURABILITY` | *(none)* |
 | `UPDATE_SHAPESHIFT_FORM` | *(none)* |
 | `VOICE_CHAT_TTS_PLAYBACK_STARTED` | `numConsumers, utteranceID, durationMS, destination` |
