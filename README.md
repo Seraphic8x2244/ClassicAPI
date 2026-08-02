@@ -239,22 +239,10 @@ The Lua-side companion library lives in
 [`AddOns/!!!ClassicAPI/`](AddOns/!!!ClassicAPI/). It's a 1.12.1 /
 Lua 5.0 backport of the modern Blizzard helpers that aren't engine
 functions but that consumer code still expects to find as globals —
-`Mixin` / `CreateFromMixins`, `CallbackRegistryMixin`, `EventRegistry`,
-`ColorMixin` + `CreateColor`, `Item` / `ItemLocation`, `MathUtil`
-(`Lerp` / `Clamp` / `CreateCounter`), `TableUtil` (`tCompare`,
-`MergeTable`, `SafePack`, etc.), and `EventUtil`
+`CallbackRegistryMixin`, `EventRegistry`, `ColorMixin` + `CreateColor`,
+`Item` / `ItemLocation`, `MathUtil`(`Lerp` / `Clamp` / `CreateCounter`),
+`TableUtil` (`tCompare`, `MergeTable`, `SafePack`, etc.), and `EventUtil`
 (`ContinueOnAddOnLoaded` etc.).
-
-Some of the addon's surface depends on engine functions ClassicAPI
-provides (`C_UIColor.GetColors` populates the modern color globals,
-`C_Item.GetItemInfoInstant` powers `ItemMixin`, the
-`ITEM_DATA_LOAD_RESULT` event drives `ContinueOnItemLoad`); the rest
-is pure Lua and would work standalone. Without the DLL the addon
-still loads, but those features no-op.
-
-The triple-`!` prefix is **load-order-significant** — WoW loads
-addons alphabetically, so `!!!ClassicAPI` is guaranteed to run before
-any consumer that depends on its globals. Don't rename the folder.
 
 **You don't have to install the addon manually** — the DLL embeds
 the contents of [`AddOns/!!!ClassicAPI/`](AddOns/!!!ClassicAPI/) and
