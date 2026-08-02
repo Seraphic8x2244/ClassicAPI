@@ -4006,6 +4006,17 @@ enum Offsets {
     VAR_PARTY_MEMBER_GUIDS = 0x00BC6F48,
     VAR_RAID_MEMBER_PTRS = 0x00B712A8,
 
+    // Raid-target-marker GUID table — 8 contiguous `uint64` slots, one
+    // per raid icon (slot 0 = mark1/star … slot 7 = mark8/skull), `0`
+    // when that marker is unassigned. Written by the
+    // `SMSG_RAID_TARGET_UPDATE` handler cluster (`FUN_004ba0b0` /
+    // `FUN_004ba220` / `FUN_004ba550`); the reverse lookup
+    // `FUN_004bb190(guidLo, guidHi)` walks it as `(&table)[i*2]` for
+    // `i` in 0..7 and returns the mark index or 8. `Unit::RaidTarget`
+    // reads it to resolve the `markN` token and to drive the per-mark
+    // unit-event observers. Matches nampower's `CGRaidInfo_m_raidtargets`.
+    VAR_RAID_TARGET_GUIDS = 0x00B71368,
+
     VAR_LOCALE_INDEX = 0x00C0E080,             // 0..8, picks one of the 9 localized strings
 
     LUA_IS_NUMBER = 0x6F34D0,

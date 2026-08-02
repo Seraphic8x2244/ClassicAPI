@@ -368,6 +368,7 @@ build instructions.
   - [`C_NamePlate.GetNamePlateForUnit(unitToken)`](#c_nameplategetnameplateforunitunittoken)
   - [`C_NamePlate.GetNamePlateForGUID(guidString)`](#c_nameplategetnameplateforguidguidstring)
   - [Unit tokens (`nameplateN`)](#unit-tokens-nameplaten)
+  - [Unit tokens (`markN`)](#unit-tokens-markn)
 
 - [NameCache](#namecache)
   - [`GetPlayerInfoByGUID(guid)`](#getplayerinfobyguidguid)
@@ -8709,6 +8710,49 @@ prefix check against `"nameplate"`; non-nameplate tokens
 the unmodified resolver. The ordered list is maintained alongside
 the existing `NAME_PLATE_UNIT_ADDED` / `_REMOVED` diff in the
 per-tick nameplate walker.
+
+### Unit tokens (`markN`)
+
+`"mark1"` … `"mark8"` work as unit tokens against every `UnitX`
+function, resolving to whichever unit currently wears that raid-target
+marker (`mark1` = star, `mark2` = circle, … `mark8` = skull — the same
+1–8 order as `SetRaidTarget` / `GetRaidTargetIndex`):
+
+```lua
+if UnitExists("mark8") then                       -- something is skull-marked
+    print(UnitName("mark8"), UnitHealth("mark8"))
+end
+```
+
+`UnitExists("markN")` returns `false` when that marker is unset, when the
+marked unit is out of range / not synced, or when the marker is on a
+non-unit (a marked corpse, gameobject, or loot). Token chains compose —
+`"mark1target"`, `"mark1targettarget"` — via the same suffix walker as the
+other families.
+
+**Unit events fire for `"markN"`.** `UNIT_HEALTH` / `UNIT_MANA` /
+`UNIT_AURA` / `UNIT_LEVEL` / … fire with `arg1 == "markN"` when the marked
+unit's descriptor field changes — vanilla only watched its own
+target/party/raid units, so a marked mob that isn't otherwise one of those
+fired nothing:
+
+```lua
+local f = CreateFrame("Frame")
+f:RegisterEvent("UNIT_HEALTH")
+f:SetScript("OnEvent", function()
+    if arg1 == "mark8" then
+        -- skull's health changed; UnitHealth("mark8") is fresh here
+    end
+end)
+```
+
+Backed by `Unit::TokenObserver` (the same mechanism as `focus` /
+`nameplateN`). A per-frame watcher diffs the engine's 8-slot marker table
+and attaches/detaches an observer per marked *unit* — deferring until the
+unit is in range, since observers can only bind to a live object and a
+marked unit may be marked while out of range and enter later. The idle
+case (no markers set) costs a handful of comparisons per frame and no
+object lookups. A marker on a non-unit is simply never observed.
 
 ### Unit tokens (GUID literals)
 

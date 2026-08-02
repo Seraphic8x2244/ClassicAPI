@@ -27,6 +27,11 @@
 //   See `unit/Focus.cpp` for the storage + `PLAYER_FOCUS_CHANGED`
 //   event firing.
 //
+// - `mark1`..`mark8` — raid-target markers (star … skull), resolved
+//   from the engine's marker table via `Unit::RaidTarget`. That module
+//   also fires per-`markN` unit events (`UNIT_HEALTH`, …) through the
+//   same `TokenObserver` path as `focus`/`nameplateN`.
+//
 // - `0x<hex>` — a raw 64-bit GUID literal (SuperWoW's format:
 //   `"0x"` + up to 16 hex digits). Lets every `Unit*` accept a GUID
 //   in place of a token, which is SuperWoW's headline "hard
@@ -49,6 +54,7 @@
 #include "Offsets.h"
 #include "nameplate/Walk.h"
 #include "unit/Focus.h"
+#include "unit/RaidTarget.h"
 
 #include <cstdint>
 
@@ -97,6 +103,8 @@ constexpr const char kNamePlatePrefix[] = "nameplate";
 constexpr int kNamePlatePrefixLen = static_cast<int>(sizeof(kNamePlatePrefix) - 1);
 constexpr const char kFocusPrefix[] = "focus";
 constexpr int kFocusPrefixLen = static_cast<int>(sizeof(kFocusPrefix) - 1);
+constexpr const char kMarkPrefix[] = "mark";
+constexpr int kMarkPrefixLen = static_cast<int>(sizeof(kMarkPrefix) - 1);
 constexpr const char kSuffixTarget[] = "target";
 constexpr int kSuffixTargetLen = static_cast<int>(sizeof(kSuffixTarget) - 1);
 
@@ -186,6 +194,22 @@ uint64_t __fastcall Hook_h(const char *token) {
                 ++p;
             }
             const uint64_t guid = NamePlate::Events::GetGUIDByIndex(index);
+            if (guid == 0)
+                return 0;
+            return WalkSuffix(guid, p);
+        }
+    }
+
+    // `markN` / `mark1target*`. Raid-target markers, one digit `1`..`8`
+    // after the prefix (`mark1` = star … `mark8` = skull). Anything else
+    // (`mark`, `mark0`, `mark9`) falls through to the engine. Single
+    // digit only, so `mark1target` leaves `p` at "target" for the walker.
+    if (sstrcmpi(token, kMarkPrefix, kMarkPrefixLen) == 0) {
+        const char *p = token + kMarkPrefixLen;
+        if (*p >= '1' && *p <= '8') {
+            const int mark = *p - '0';
+            ++p;
+            const uint64_t guid = Unit::RaidTarget::GetGUIDByMark(mark);
             if (guid == 0)
                 return 0;
             return WalkSuffix(guid, p);
