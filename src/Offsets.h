@@ -4712,6 +4712,22 @@ enum Offsets {
     FUN_ADDON_CAN_LOAD = 0x0051E780,
     FUN_ADDON_GET_SECURITY_INDEX = 0x0051E990,
 
+    // Per-character enable-state resolver — the inner check
+    // `FUN_ADDON_CAN_LOAD` (`0x0051E780`) consults to decide whether an
+    // addon is enabled: `__fastcall(const char *name /*ecx*/,
+    // const char *account /*edx*/, char resolveAll /*stack*/) -> uint`.
+    // Returns 0 = disabled (load pass then skips the addon, reason
+    // DISABLED), non-zero = enabled (2 = "enabled for all"). Walks the
+    // per-character override list at `0x00BE1BD8`; with no override it
+    // falls back to the entry's DefaultState byte (`+0x2b`):
+    // `-(uint)(entry[+0x2b] != 0) & 2`. `Addons::Embedded` co-hooks this
+    // to force-enable the embedded `!!!ClassicAPI` unconditionally — so a
+    // stale WTF disable-override (from back when the addon was still
+    // shown in the character-select list) can't leave it hidden AND
+    // unloaded. Cold: runs only during the login/reload load pass, once
+    // per addon.
+    FUN_ADDON_ENABLE_RESOLVE = 0x0051E470,
+
     // Returns a pointer to the inline-stored login account name buffer
     // at `0x00C27D88`, or NULL if no character is logged in yet.
     // `Script_GetAddOnInfo` feeds this into the loadable + enabled

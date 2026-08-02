@@ -258,16 +258,30 @@ any consumer that depends on its globals. Don't rename the folder.
 **You don't have to install the addon manually** — the DLL embeds
 the contents of [`AddOns/!!!ClassicAPI/`](AddOns/!!!ClassicAPI/) and
 registers them with the engine as a synthetic addon on startup, so
-the library is always available when the DLL is loaded. The engine
-sees it as a normal addon: it appears in `GetAddOnInfo`, fires
-`ADDON_LOADED`, supports `SavedVariables`, the works.
+the library is always available when the DLL is loaded. It fires
+`ADDON_LOADED`, supports `SavedVariables`, and is resolvable by name —
+`IsAddOnLoaded("!!!ClassicAPI")`, `GetAddOnInfo("!!!ClassicAPI")`, and
+`## Dependencies: !!!ClassicAPI` all work as usual.
 
-If you do drop the folder into your `Interface/AddOns/` directory,
-**that copy wins** — the DLL's embedded version is only registered
-when the engine's normal scan doesn't already have an entry under
-that name. Useful for editing the Lua locally without rebuilding the
-DLL. The dispatch is transparent: addons consuming `Mixin`,
-`ColorMixin`, `TableUtil`, etc. behave identically in both cases.
+**It is intentionally always-on and cannot be disabled.** The library
+provides FrameXML-compat fixes that other addons and the DLL's own
+features rely on, so leaving it toggleable would let a user (or a
+one-off character-select uncheck) silently break them. The DLL
+therefore hides it from the character-select AddOns list and
+force-enables it every login — so it never appears as a checkbox and
+can't be switched off. Being hidden means it's omitted from the
+index-based `GetNumAddOns()` / `GetAddOnInfo(i)` enumeration, but every
+by-name lookup and dependency reference still resolves normally.
+
+If you drop the folder into your `Interface/AddOns/` directory, **that
+copy's files win** — the DLL's embedded version only serves files when
+the engine's normal scan doesn't already have a newer entry under that
+name. Useful for editing the Lua locally without rebuilding the DLL.
+The hidden + force-enabled treatment applies either way (it's keyed to
+the addon name, not to which copy serves the files), so the local copy
+is also absent from the AddOns list. The dispatch is transparent:
+addons consuming `Mixin`, `ColorMixin`, `TableUtil`, etc. behave
+identically in both cases.
 
 ## Bundled addon: DebugTools
 

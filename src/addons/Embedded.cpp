@@ -336,7 +336,32 @@ using ListInsert_t = void(__thiscall *)(void *listCtrl, void *entry,
 constexpr uintptr_t VAR_ADDON_LIST_HEAD = 0x00BE1B6C;
 constexpr int OFF_ADDON_ENTRY_NAME_PTR = 0x14;
 
-void MoveEmbeddedToListHead() {
+// `entry+0x29` — the "filter-out" byte. The flat display-array builder
+// `FUN_0051da70` walks the linked list and copies an entry into
+// `GetNumAddOns`/`GetAddOnInfo`'s array ONLY when this byte is 0, so
+// setting it hides `!!!ClassicAPI` from the character-select AddOns
+// list — there's no checkbox, so it can't be toggled off. The builder
+// only ever *writes* this byte on the secure/SMSG path (`entry+0x28 !=
+// 0`); our entry is non-secure, so a manual `1` here is stable across
+// rebuilds. Hiding does NOT stop loading (the load pass `FUN_0051f600`
+// never reads `+0x29`) and does NOT break dependency resolution or
+// by-name queries (those use the addon hash table, which keeps the
+// entry regardless).
+constexpr int OFF_ADDON_ENTRY_FILTER_OUT = 0x29;
+
+// `entry+0x2b` — DefaultState (`## DefaultState: enabled/disabled`).
+// The enable resolver `FUN_ADDON_ENABLE_RESOLVE` falls back to this
+// when the player has no per-character override. Belt-and-suspenders
+// alongside the resolver co-hook below (which forces enabled anyway).
+constexpr int OFF_ADDON_ENTRY_DEFAULT_STATE = 0x2b;
+
+// Post-registration finalize for the embedded entry: move it to the
+// head of the load-order list (so consumers that read our globals from
+// their main chunk see them — see the block comment above the offsets),
+// hide it from the addon list, and mark it default-enabled. Combined
+// with the `FUN_ADDON_ENABLE_RESOLVE` co-hook, `!!!ClassicAPI` always
+// loads and never appears as a toggleable entry.
+void FinalizeEmbeddedEntry() {
     uintptr_t entry = *reinterpret_cast<uintptr_t *>(VAR_ADDON_LIST_HEAD);
     const int linkOffset = *reinterpret_cast<const int *>(
         static_cast<uintptr_t>(Offsets::VAR_ADDON_LIST_CTRL));
@@ -344,6 +369,11 @@ void MoveEmbeddedToListHead() {
         const char *name = *reinterpret_cast<const char *const *>(
             entry + OFF_ADDON_ENTRY_NAME_PTR);
         if (name != nullptr && std::strcmp(name, kAddonName) == 0) {
+            // Hide from the character-select AddOns list and default it
+            // to enabled.
+            *reinterpret_cast<uint8_t *>(entry + OFF_ADDON_ENTRY_FILTER_OUT) = 1;
+            *reinterpret_cast<uint8_t *>(entry + OFF_ADDON_ENTRY_DEFAULT_STATE) = 1;
+
             auto fn = reinterpret_cast<ListInsert_t>(
                 Offsets::FUN_INTRUSIVE_LIST_INSERT);
             fn(reinterpret_cast<void *>(
@@ -361,7 +391,24 @@ void __fastcall AddonInit_h(const char *accountName) {
     AddonInit_o(accountName);
     auto TocParser = reinterpret_cast<TocParser_t>(Offsets::FUN_TOC_PARSER);
     TocParser(kAddonName);
-    MoveEmbeddedToListHead();
+    FinalizeEmbeddedEntry();
+}
+
+// `FUN_ADDON_ENABLE_RESOLVE` — per-character enable resolver. We
+// co-hook it to force-enable `!!!ClassicAPI` regardless of DefaultState
+// or any stale WTF disable-override, so hiding it from the addon list
+// can never leave it stuck off. Returns 2 ("enabled for all"); the
+// load-pass gate only tests `!= 0`. Every other addon falls through to
+// the original untouched. See the Offsets.h note for the ABI.
+using AddonEnableResolve_t =
+    uint32_t(__fastcall *)(const char *name, const char *account, char resolveAll);
+AddonEnableResolve_t AddonEnableResolve_o = nullptr;
+
+uint32_t __fastcall AddonEnableResolve_h(const char *name, const char *account,
+                                         char resolveAll) {
+    if (name != nullptr && PathEqualsCI(name, kAddonName))
+        return 2;
+    return AddonEnableResolve_o(name, account, resolveAll);
 }
 
 const Game::HookAutoRegister _hookFileRead{
@@ -373,6 +420,11 @@ const Game::HookAutoRegister _hookAddonInit{
     Offsets::FUN_ADDON_INIT,
     reinterpret_cast<void *>(&AddonInit_h),
     reinterpret_cast<void **>(&AddonInit_o)};
+
+const Game::HookAutoRegister _hookEnableResolve{
+    Offsets::FUN_ADDON_ENABLE_RESOLVE,
+    reinterpret_cast<void *>(&AddonEnableResolve_h),
+    reinterpret_cast<void **>(&AddonEnableResolve_o)};
 
 } // namespace
 
