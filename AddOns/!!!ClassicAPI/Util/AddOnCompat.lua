@@ -43,3 +43,18 @@ end
 if C_AddOns.DoesAddOnExist("SpecialTalentUI") then
     EventUtil.ContinueOnAddOnLoaded("SpecialTalentUI", CAPI_ApplyStandardColorGlobals)
 end
+
+-- ShaguTweaks libpredict register's TBC events that ClassicAPI backports.
+if C_AddOns.DoesAddOnExist("ShaguTweaks") then
+    EventUtil.ContinueOnAddOnLoaded("ShaguTweaks", function()
+        local libp = ShaguTweaks.libpredict
+        if libp then
+            libp.sender:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            libp.sender:UnregisterEvent("UNIT_SPELLCAST_START")
+            libp.sender:UnregisterEvent("UNIT_SPELLCAST_STOP")
+            libp.sender:UnregisterEvent("UNIT_SPELLCAST_FAILED")
+            libp.sender:UnregisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+            libp.sender:UnregisterEvent("UNIT_SPELLCAST_SENT")
+        end
+    end)
+end
