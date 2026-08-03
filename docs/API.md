@@ -165,6 +165,7 @@ build instructions.
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
   - [`frame:GetEffectiveAlpha()`](#framegeteffectivealpha)
   - [`frame:SetAttribute` / `SetAttributeNoHandler` / `ClearAttribute` / `GetAttribute` (+ unit-frame mouseover)](#framesetattributename-value--framesetattributenohandlername-value--frameclearattributename--framegetattribute)
+  - [`SetModernScriptArgs(enable)` / `GetModernScriptArgs()`](#setmodernscriptargsenable--getmodernscriptargs)
 
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
@@ -3922,6 +3923,40 @@ co-hook on the base-frame script-name resolver that hands out an external
 per-frame handler slot for this one name (1.12 frames are never destroyed, so
 the slot never goes stale). Recursion-guarded, so a handler may itself call
 `SetAttribute`.
+
+### `SetModernScriptArgs(enable)` / `GetModernScriptArgs()`
+
+Global toggle (not a frame method) for **modern positional script arguments**.
+Vanilla always invokes a frame-script handler with **zero** Lua arguments — the
+handler reads `this` / `arg1..argN` / `event` as globals. With this enabled, every
+handler additionally receives its values as real positional arguments, so modern
+addon ports written as `function(self, delta) … end` work unmodified:
+
+- most scripts: `(self, arg1..argN)` — e.g. `OnMouseWheel(self, delta)`,
+  `OnClick(self, button)`, `OnValueChanged(self, value)`, `OnUpdate(self, elapsed)`.
+- `OnEvent`: `(self, event, arg1..argN)`.
+
+It's purely **additive** — the `this` / `arg1` / `event` globals are still set, so
+vanilla-style handlers keep working; a handler declaring no parameters just ignores
+the extras. `SetModernScriptArgs(enable)` sets the state and returns it;
+`GetModernScriptArgs()` returns the current state.
+
+**Default OFF (opt-in).** It reimplements the tail of the engine's hottest Lua
+path (the runner that fires for every `OnUpdate`, every frame), so it stays off
+unless you ask for it; while off the dispatch path is exactly vanilla. Enable it
+once at load if your addon relies on the modern handler signature.
+
+```lua
+SetModernScriptArgs(true)   -- returns true
+
+local f = CreateFrame("Frame")
+f:EnableMouseWheel(true)
+f:SetScript("OnMouseWheel", function(self, delta)
+    -- `self` and `delta` are bound; `this` / `arg1` still work too
+end)
+
+GetModernScriptArgs()       -- true
+```
 
 ## FriendList
 
