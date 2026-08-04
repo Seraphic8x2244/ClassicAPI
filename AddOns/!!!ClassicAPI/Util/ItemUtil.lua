@@ -216,8 +216,7 @@ function ItemMixin:GetItemLink() -- requires item data to be loaded
     end
 
     if self.itemID then
-        local _, link = GetItemInfo(self.itemID)
-        return link
+        return (select(2, C_Item.GetItemInfo(self.itemID)));
     end
 
     if not self:IsItemEmpty() then
@@ -299,9 +298,7 @@ end
 
 function ItemMixin:GetInventoryTypeName()
     if not self:IsItemEmpty() then
-        -- GetItemInfoInstant returns: itemID, itemType, itemSubType, equipLoc, ...
-        local _, _, _, equipLoc = C_Item.GetItemInfoInstant(self:GetItemID())
-        return equipLoc
+        return select(4, C_Item.GetItemInfoInstant(self:GetItemID()));
     end
 end
 
