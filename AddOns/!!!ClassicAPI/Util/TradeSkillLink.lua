@@ -496,6 +496,11 @@ local function CreateFrame_TradeSkillLink()
 				GameTooltip:Show();
 			end
 		end);
+		btn:SetScript("OnClick", function()
+			if this.itemLink and IsShiftKeyDown() and ChatFrameEditBox:IsVisible() then
+				ChatFrameEditBox:Insert(this.itemLink);
+			end
+		end);
 		btn:SetScript("OnLeave", GameTooltip_Hide);
 		f.reagents[i] = btn;
 		return btn;
