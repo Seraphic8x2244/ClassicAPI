@@ -22,6 +22,18 @@ function EventRegistry:OnLoad()
         -- Lua-5.0 varargs, so we forward through a small wrapper.
         self:DispatchGameEvent(event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
     end)
+
+    -- Stop delivering events once logout begins: a callback firing during the
+    -- engine's teardown can touch state that's already gone. A dedicated frame
+    -- owns PLAYER_LOGOUT so this fires regardless of what consumers registered
+    -- — folding the check into frameEventFrame's OnEvent would depend on the
+    -- ref-counted event set still holding PLAYER_LOGOUT at logout time.
+    self.logoutFrame = CreateFrame("Frame")
+    self.logoutFrame:RegisterEvent("PLAYER_LOGOUT")
+    self.logoutFrame:SetScript("OnEvent", function()
+        self.frameEventFrame:UnregisterAllEvents()
+        self.frameEventFrame:SetScript("OnEvent", nil)
+    end)
 end
 
 -- Helper so we can forward up to nine event args (the most any vanilla
