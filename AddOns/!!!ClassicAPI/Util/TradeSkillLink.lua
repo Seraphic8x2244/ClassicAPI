@@ -448,8 +448,8 @@ local function CreateFrame_TradeSkillLink()
 
 	prodIcon:SetScript("OnEnter", function()
 		GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
-		if this.itemLink then
-			GameTooltip:SetHyperlink(this.itemLink);
+		if this.itemID then
+			GameTooltip:SetHyperlink("item:"..this.itemID);
 		elseif this.spellID then
 			GameTooltip:SetSpellByID(this.spellID);
 		end
@@ -490,9 +490,9 @@ local function CreateFrame_TradeSkillLink()
 		nm:SetJustifyV("MIDDLE");
 		btn.nameText = nm;
 		btn:SetScript("OnEnter", function()
-			if this.itemLink then
+			if this.itemID then
 				GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
-				GameTooltip:SetHyperlink(this.itemLink);
+				GameTooltip:SetHyperlink("item:"..this.itemID);
 				GameTooltip:Show();
 			end
 		end);
@@ -564,6 +564,7 @@ local function CreateFrame_TradeSkillLink()
 			local name, tex, link = itemInfo(reagent.itemID);
 			btn:SetNormalTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark");
 			btn.itemLink = link;
+			btn.itemID = reagent.itemID
 			btn.nameText:SetText(name or ("item:" .. reagent.itemID));
 			local need = reagent.count or 1;
 			local have = C_Item.GetItemCount(reagent.itemID) or 0;
@@ -582,6 +583,7 @@ local function CreateFrame_TradeSkillLink()
 		end
 		for i = total + 1, table.getn(self.reagents) do
 			self.reagents[i].itemLink = nil;
+			self.reagents[i].itemID = nil;
 			self.reagents[i]:Hide();
 		end
 
@@ -630,6 +632,7 @@ local function CreateFrame_TradeSkillLink()
 		self.prodDesc:SetText("");
 		for i = 1, table.getn(self.reagents) do
 			self.reagents[i].itemLink = nil;
+			self.reagents[i].itemID = nil;
 			self.reagents[i]:Hide();
 		end
 		self.detailChild:SetHeight(LO.detail[4]);
@@ -726,7 +729,7 @@ local function ShowTradeSkillLink(link, text)
 		local r = recipes[i];
 		if r.isKnown then
 			r.band = DifficultyBand(cur or 0, r.trivialLevel, r.greenLevel);
-			r.name = GetSpellInfo(r.spellID) or ("spell:" .. r.spellID);
+			r.name = C_Spell.GetSpellName(r.spellID) or ("spell:" .. r.spellID);
 			table.insert(knownList, r);
 		end
 	end
