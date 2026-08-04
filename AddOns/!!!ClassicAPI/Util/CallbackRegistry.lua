@@ -26,17 +26,17 @@ local function GenerateClosure(func, ...)
     for i = 1, boundN do bound[i] = arg[i] end
     return function(...)
         local callN = arg.n
-        -- Pass the first bound arg (the owner, always bound[1] here) explicitly
-        -- and everything else as the unpacked tail. Merging bound + call into
-        -- one table and unpacking THAT collapses the vararg count on this Lua
-        -- 5.0 build when a hole lands right after a present element — same trap
-        -- fixed in TriggerEvent's Function branch. Keeping owner out of the
-        -- unpacked table keeps a leading-nil payload inside the vararg tail.
-        local rest = {}
-        local restN = 0
-        for i = 2, boundN do restN = restN + 1; rest[restN] = bound[i] end
-        for i = 1, callN do restN = restN + 1; rest[restN] = arg[i] end
-        return func(bound[1], unpack(rest, 1, restN))
+        -- Forward bound + call args faithfully, embedded/leading nils and all.
+        -- The ONLY thing that makes unpack span holes on this Lua 5.0 build is
+        -- a `.n` field: unpack takes its count from getn (which returns t.n)
+        -- and ignores any explicit i/j, so a `.n`-less table stops dead at the
+        -- first hole (verified: unpack({1, 1, nil, 1}, 1, 4) yields just 1, 1).
+        local all = {}
+        local n = 0
+        for i = 1, boundN do n = n + 1; all[n] = bound[i] end
+        for i = 1, callN do n = n + 1; all[n] = arg[i] end
+        all.n = n
+        return func(unpack(all))
     end
 end
 
@@ -152,14 +152,14 @@ function CallbackRegistryMixin:TriggerEvent(event, ...)
     if funcs then
         for owner, func in pairs(funcs) do
             -- Stock 3.3.5 passes the owner as the first arg so callers can
-            -- distinguish multiple registrations of the same function. Pass it
-            -- explicitly with the payload as the unpacked tail. Do NOT build a
-            -- { owner, ... } table and unpack THAT: on this Lua 5.0 build,
-            -- unpacking a table whose hole lands right after a present element
-            -- (owner) into a `func(first, ...)` collapses the vararg count to 0,
-            -- silently dropping a leading-nil event payload (verified in-game
-            -- with reload's PLAYER_ENTERING_WORLD, arg1=nil arg2=1).
-            func(owner, unpack(arg, 1, arg.n))
+            -- distinguish multiple registrations of the same function. `arg`
+            -- carries its own `.n`, so unpack(arg) forwards the payload with
+            -- leading/embedded nils intact. Do NOT instead merge into a
+            -- `{ owner, ... }` table and unpack that WITHOUT setting `.n`: this
+            -- build's unpack counts via getn, so a `.n`-less table collapses at
+            -- the first hole (verified in-game: reload's PLAYER_ENTERING_WORLD,
+            -- arg1=nil arg2=1, dropped the payload).
+            func(owner, unpack(arg))
         end
     end
 end

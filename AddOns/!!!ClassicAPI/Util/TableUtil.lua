@@ -431,7 +431,7 @@ function SafePack(...)
 end
 
 function SafeUnpack(tbl)
-    return unpack(tbl, 1, tbl.n)
+    return unpack(tbl)
 end
 
 -- Returns the length of a table, accounting for the possibility of a table constructed using SafePack.

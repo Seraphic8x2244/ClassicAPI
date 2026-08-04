@@ -2,7 +2,9 @@
 --
 -- Implementation differences from the modern source:
 --   - Lua 5.0 has no select() and no `...` as expression; use the
---     implicit `arg` table (arg.n + arg[i]) and unpack(arg, 1, arg.n).
+--     implicit `arg` table (arg.n + arg[i]). unpack(arg) already spans
+--     arg[1..arg.n] via getn — this build's unpack ignores explicit i/j
+--     args, so the count must live in the table's `.n`.
 --   - Lua 5.0 has no `#` operator; use table.getn().
 --   - 5.0's xpcall is strictly (f, handler) — no trailing args. We wrap
 --     the script call in a local closure that captures frame + arg.
@@ -32,7 +34,7 @@ function ExecuteFrameScript(frame, scriptName, ...)
 	if script then
 		local args = arg;
 		local function invoke()
-			return script(frame, unpack(args, 1, args.n));
+			return script(frame, unpack(args));
 		end
 		xpcall(invoke, CallErrorHandler);
 	end
@@ -45,7 +47,7 @@ function CallMethodOnNearestAncestor(self, methodName, ...)
 	end
 
 	if ancestor then
-		return true, ancestor[methodName](ancestor, unpack(arg, 1, arg.n));
+		return true, ancestor[methodName](ancestor, unpack(arg));
 	end
 
 	return false;
@@ -58,7 +60,7 @@ function GetValueOrCallFunction(tbl, key, ...)
 
 	local value = tbl[key];
 	if type(value) == "function" then
-		return value(unpack(arg, 1, arg.n));
+		return value(unpack(arg));
 	else
 		return value;
 	end
@@ -117,12 +119,12 @@ function IterateTables(iteratorFunction, ...)
 end
 
 local s_passThroughClosureGenerators = {
-	function(f) return function(...) return f(unpack(arg, 1, arg.n)); end; end,
-	function(f, a) return function(...) return f(a, unpack(arg, 1, arg.n)); end; end,
-	function(f, a, b) return function(...) return f(a, b, unpack(arg, 1, arg.n)); end; end,
-	function(f, a, b, c) return function(...) return f(a, b, c, unpack(arg, 1, arg.n)); end; end,
-	function(f, a, b, c, d) return function(...) return f(a, b, c, d, unpack(arg, 1, arg.n)); end; end,
-	function(f, a, b, c, d, e) return function(...) return f(a, b, c, d, e, unpack(arg, 1, arg.n)); end; end,
+	function(f) return function(...) return f(unpack(arg)); end; end,
+	function(f, a) return function(...) return f(a, unpack(arg)); end; end,
+	function(f, a, b) return function(...) return f(a, b, unpack(arg)); end; end,
+	function(f, a, b, c) return function(...) return f(a, b, c, unpack(arg)); end; end,
+	function(f, a, b, c, d) return function(...) return f(a, b, c, d, unpack(arg)); end; end,
+	function(f, a, b, c, d, e) return function(...) return f(a, b, c, d, e, unpack(arg)); end; end,
 };
 
 local s_flatClosureGenerators = {
@@ -138,7 +140,7 @@ local function GenerateClosureInternal(generatorArray, f, ...)
 	local count = arg.n;
 	local generator = generatorArray[count + 1];
 	if generator then
-		return generator(f, unpack(arg, 1, count));
+		return generator(f, unpack(arg));
 	end
 
 	assertsafe(false, "Closure generation does not support more than " .. (table.getn(generatorArray) - 1) .. " parameters");
@@ -147,14 +149,14 @@ end
 
 -- Syntactic sugar for function(...) return f(a, b, c, ...); end
 function GenerateClosure(f, ...)
-	return GenerateClosureInternal(s_passThroughClosureGenerators, f, unpack(arg, 1, arg.n));
+	return GenerateClosureInternal(s_passThroughClosureGenerators, f, unpack(arg));
 end
 
 -- Generates a closure with the specified arguments that will ignore extra arguments when called later. Useful for passing
 -- through callbacks to APIs where we don't want extra arguments to be passed through, i.e. simple OnClick scripts.
 -- This is equivalent to: function() return f(a, b, c); end INSTEAD OF function(...) return f(a, b, c, ...); end
 function GenerateFlatClosure(f, ...)
-	return GenerateClosureInternal(s_flatClosureGenerators, f, unpack(arg, 1, arg.n));
+	return GenerateClosureInternal(s_flatClosureGenerators, f, unpack(arg));
 end
 
 function RunNextFrame(callback)
@@ -166,7 +168,7 @@ FunctionUtil = {};
 function FunctionUtil.SafeInvokeMethod(table, methodName, ...)
 	local method = table[methodName];
 	if method then
-		return method(table, unpack(arg, 1, arg.n));
+		return method(table, unpack(arg));
 	end
 
 	return nil;

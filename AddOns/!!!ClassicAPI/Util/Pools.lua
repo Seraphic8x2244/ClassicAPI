@@ -14,7 +14,8 @@
 --     consumer addons doesn't fail; they'll error at Acquire() time
 --     if anything actually invokes them.
 --   - Lua 5.0 has no `...` as expression; the converter mixins use
---     `unpack(arg, 1, arg.n)` to forward varargs.
+--     `unpack(arg)` to forward varargs (spans arg[1..arg.n] via getn;
+--     this build's unpack ignores explicit i/j — the count lives in `.n`).
 --   - assertsafe / nop aren't globals in stock 1.12; defined as local
 --     fallbacks (same pattern as FunctionUtil.lua).
 
@@ -381,12 +382,12 @@ function FramePoolCollectionConverterMixin:CreatePoolKeyFromPoolArgs(args)
 end
 
 function FramePoolCollectionConverterMixin:GetOrCreatePool(...)
-	local args = FramePoolCollection_ArgsToTable(unpack(arg, 1, arg.n));
+	local args = FramePoolCollection_ArgsToTable(unpack(arg));
 	return self:GetOrCreatePoolWithArgs(args);
 end
 
 function FramePoolCollectionConverterMixin:CreatePool(...)
-	local args = FramePoolCollection_ArgsToTable(unpack(arg, 1, arg.n));
+	local args = FramePoolCollection_ArgsToTable(unpack(arg));
 	return self:CreatePoolWithArgs(args);
 end
 
@@ -432,12 +433,12 @@ local function FontStringPoolCollection_ArgsToTable(parent, layer, subLayer, tem
 end
 
 function FontStringPoolCollectionMixin:GetOrCreatePool(...)
-	local args = FontStringPoolCollection_ArgsToTable(unpack(arg, 1, arg.n));
+	local args = FontStringPoolCollection_ArgsToTable(unpack(arg));
 	return self:GetOrCreatePoolWithArgs(args);
 end
 
 function FontStringPoolCollectionMixin:CreatePool(...)
-	local args = FontStringPoolCollection_ArgsToTable(unpack(arg, 1, arg.n));
+	local args = FontStringPoolCollection_ArgsToTable(unpack(arg));
 	return self:CreatePoolWithArgs(args);
 end
 
