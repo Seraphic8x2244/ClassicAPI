@@ -3407,6 +3407,54 @@ enum Offsets {
     // without re-parsing the body. See `Macro::Spell::Script_GetMacroSpell`.
     FUN_MACRO_SLOT_TO_ENTRY = 0x004F0E40,
 
+    // Macro create/edit workers — back `C_Macro.CreateMacro` /
+    // `C_Macro.EditMacro` (see [[src/macro/Edit.cpp]]). Both store the
+    // icon as a BARE basename at `entry + OFF_MACRO_ICON` (256 bytes,
+    // no validation); `Script_GetMacroInfo` re-prefixes it as
+    // `Interface\Icons\%s` on read, which is why any texture that lives
+    // under `Interface\Icons\` — including index-less `INV_*` item icons
+    // — round-trips even though vanilla's index-based UI can't pick it.
+    //
+    // Create — `__fastcall(char *name /*ECX*/, char *iconBasename /*EDX,
+    // may be null*/, char *body /*may be null*/, uint local, int
+    // perCharacter) -> uint macroID`. SStrCopys name→`+0x24` (0x40),
+    // icon→`+0x64` (0x100) when non-null, body via `FUN_004f1550`
+    // (`+0x164`), runs the primary-spell parser `FUN_004EFE00`, sets the
+    // dirty flag `DAT_00bdcbf8=1`, and refreshes the UI. Returns 0 on
+    // failure (empty name, or the 18-per-scope list is full). Pass
+    // `local=0` to match the legacy `CreateMacro` default.
+    FUN_MACRO_CREATE = 0x004F1010,
+
+    // Edit — `__fastcall(uint macroID, char *name, char *iconBasename,
+    // char *body, uint flag)`. Hash-finds the entry by macroID (no-op if
+    // absent); each of name/icon/body is written only when its pointer is
+    // non-null (so nil = leave that field unchanged), then reparse + dirty
+    // flag + UI refresh, exactly like the create worker. It ALWAYS writes
+    // `entry + OFF_MACRO_LOCAL_FLAG = flag`, so read the current flag and
+    // pass it back to leave it unchanged. Chosen over replicating the
+    // field writes because it also fires the action-button refresh
+    // (`FUN_004e5cc0`/`FUN_004e5c00`) that direct writes would miss.
+    FUN_MACRO_EDIT = 0x004F1280,
+
+    // macroID → 0-based slot (linear scan of VAR_MACRO_SLOT_MAP);
+    // `0xFFFFFFFF` on miss. `slot = FUN_MACRO_ID_TO_SLOT(macroID) + 1`
+    // is how the legacy `CreateMacro` wrapper turns the worker's return
+    // into the 1-based index it hands back to Lua.
+    FUN_MACRO_ID_TO_SLOT = 0x004F0EC0,
+
+    // Macro name → 0-based slot; `0xFFFFFFFF` on miss (the resolver
+    // behind `GetMacroIndexByName`). Feeding its miss value straight to
+    // `FUN_MACRO_SLOT_TO_ENTRY` yields NULL (bounds-rejected), so the
+    // by-name and by-index EditMacro paths share one validation.
+    FUN_MACRO_NAME_TO_SLOT = 0x004F0FA0,
+
+    // MacroEntry field offsets. Name/body are handled by the workers; the
+    // icon offset is documentation, and the local flag must be read to be
+    // preserved across an EditMacro that doesn't mean to change it.
+    OFF_MACRO_NAME = 0x24,        // char[0x40] inline
+    OFF_MACRO_ICON = 0x64,        // char[0x100] inline bare basename
+    OFF_MACRO_LOCAL_FLAG = 0x20,  // uint32 `local` flag (echoed by GetMacroInfo)
+
     // Macro-icon database. Populated lazily by `FUN_LOAD_MACRO_ICONS`
     // on the first `GetNumMacroIcons` call — enumerates `Interface\Icons\`
     // for `*.blp` files plus a wildcard match, sorts, and de-dupes. Each

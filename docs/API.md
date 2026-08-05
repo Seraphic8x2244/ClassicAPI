@@ -335,6 +335,7 @@ build instructions.
   - [`CastSpellNoToggle` as a macro cast line](#castspellnotoggle-as-a-macro-cast-line)
   - [`GetMacroSpell(macroSlot)`](#getmacrospellmacroslot)
   - [`GetMacroIcons` / `GetMacroItemIcons` / `GetLooseMacroIcons` / `GetLooseMacroItemIcons`](#getmacroicons--getmacroitemicons--getloosemacroicons--getloosemacroitemicons)
+  - [`C_Macro.CreateMacro` / `C_Macro.EditMacro`](#c_macrocreatemacro--c_macroeditmacro)
 
 - [Mail](#mail)
   - [`GetSendMailItemLink([attachmentIndex])`](#getsendmailitemlinkattachmentindex)
@@ -8116,6 +8117,60 @@ MPQ will appear in both the loose and mpq lists).
 
 The vanilla legacy globals `GetNumMacroIcons` / `GetMacroIconInfo`
 remain available unchanged.
+
+### `C_Macro.CreateMacro` / `C_Macro.EditMacro`
+
+These functions create or edit a macro. You give the icon as a texture
+string — a full `Interface\Icons\<name>` path or a bare `<name>`
+basename — instead of a `GetMacroIconInfo` index.
+
+```lua
+C_Macro.CreateMacro(name, iconTexture, body, isCharacterMacro) -> index
+C_Macro.EditMacro(index, name, iconTexture, body) -> index
+```
+
+Why this exists: the vanilla `CreateMacro` / `EditMacro` globals take an
+icon index into the `GetMacroIconInfo` list. That list does not include
+`INV_*` item icons. As a result, the stock API cannot set an item icon,
+even though the engine stores and shows it correctly. These two functions
+write the icon basename directly. Any texture under `Interface\Icons\`,
+including an item icon, can be saved.
+
+`CreateMacro(name, iconTexture, body, isCharacterMacro)`:
+- `name` — the macro name. This argument is necessary.
+- `iconTexture` — a string, for example `"INV_Sword_25"` or
+  `"Interface\\Icons\\INV_Sword_25"`. The function removes the
+  `Interface\Icons\` prefix, and adds it again when a caller reads the
+  icon. A nil value sets no icon.
+- `body` — the macro text. A nil value sets an empty body.
+- `isCharacterMacro` — a true value puts the macro in the per-character
+  tab. A false or nil value uses the general tab.
+- The function returns the 1-based index of the new macro. It returns nil
+  when the list is full (18 macros per tab).
+
+`EditMacro(index, name, iconTexture, body)`:
+- `index` — a 1-based slot number or a macro name.
+- `name` / `iconTexture` / `body` — a nil argument keeps that field
+  unchanged.
+- The function returns the 1-based index of the macro. It returns nil when
+  `index` does not match a macro that exists.
+
+```lua
+-- item icon that legacy CreateMacro cannot set:
+local i = C_Macro.CreateMacro("Bag", "INV_Misc_Bag_08", "/say hi", false)
+-- change only the icon; name and body stay:
+C_Macro.EditMacro(i, nil, "INV_Potion_51", nil)
+-- edit by name:
+C_Macro.EditMacro("Bag", nil, nil, "/wave")
+```
+
+The `iconTexture` argument must be a string. `CreateMacro` reads a number
+as no icon. `EditMacro` reads a number as no change. For the numeric-index
+path, use the legacy globals.
+
+The legacy `CreateMacro` / `EditMacro` globals do not change. They stay
+index-only. String-icon callers use the `C_Macro` namespace instead.
+Edits persist across sessions, the same as edits in the Macro UI.
 
 ## Mail
 
