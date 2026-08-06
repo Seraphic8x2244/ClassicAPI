@@ -17,6 +17,7 @@ extern "C" {
 #include <cbor.h>
 }
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -76,6 +77,27 @@ int CountTablePairs(void *L, int idx) {
     return n;
 }
 
+// Encode a single Lua value at `idx` into a standalone byte vector,
+// reusing the same grow-and-retry contract as Script_SerializeCBOR.
+// Used to obtain a map key's encoded bytes for canonical sorting; the
+// Lua stack is left untouched (EncodeValue reads but never pops).
+bool EncodeValueToVector(void *L, int idx, int depth, std::vector<uint8_t> &out) {
+    out.assign(64, 0);
+    for (;;) {
+        CborEncoder enc;
+        cbor_encoder_init(&enc, out.data(), out.size(), 0);
+        if (!EncodeValue(L, idx, &enc, depth))
+            return false;
+        const size_t extra = cbor_encoder_get_extra_bytes_needed(&enc);
+        if (extra > 0) {
+            out.resize(out.size() + extra);
+            continue;
+        }
+        out.resize(cbor_encoder_get_buffer_size(&enc, out.data()));
+        return true;
+    }
+}
+
 bool EncodeTable(void *L, int idx, CborEncoder *enc, int depth) {
     if (depth >= kMaxDepth) return false;
     if (idx < 0) idx = Game::Lua::GetTop(L) + idx + 1;
@@ -102,15 +124,63 @@ bool EncodeTable(void *L, int idx, CborEncoder *enc, int depth) {
     CborEncoder map;
     if (!EncOk(cbor_encoder_create_map(enc, &map, static_cast<size_t>(pairs))))
         return false;
+
+    // Canonical CBOR (RFC 7049 §3.9): emit map entries sorted by their
+    // encoded-key bytes (shorter key first, then bytewise). Lua gives no
+    // stable iteration order for string-keyed tables, so without this the
+    // same config serializes to different byte orders each call. We stash
+    // the keys in a holding array table (`hold`), remember each key's
+    // encoded bytes + slot, sort, then re-fetch key/value in sorted order.
+    struct Entry {
+        std::vector<uint8_t> key;
+        int slot;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(static_cast<size_t>(pairs));
+
+    Game::Lua::NewTable(L);
+    const int hold = Game::Lua::GetTop(L);
+    int slot = 0;
     Game::Lua::PushNil(L);
     while (Game::Lua::Next(L, idx) != 0) {
-        if (!EncodeValue(L, -2, &map, depth + 1) ||
-            !EncodeValue(L, -1, &map, depth + 1)) {
-            Game::Lua::SetTop(L, -3);
+        // key @ -2, value @ -1
+        std::vector<uint8_t> keyBytes;
+        if (!EncodeValueToVector(L, -2, depth + 1, keyBytes)) {
+            Game::Lua::SetTop(L, hold - 1); // drop hold + key + value
             return false;
         }
-        Game::Lua::SetTop(L, -2);
+        ++slot;
+        Game::Lua::PushNumber(L, static_cast<double>(slot));
+        Game::Lua::PushValue(L, -3);        // copy key to top
+        Game::Lua::RawSet(L, hold);         // hold[slot] = key
+        entries.push_back(Entry{std::move(keyBytes), slot});
+        Game::Lua::SetTop(L, -2);           // pop value, keep key for Next
     }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry &a, const Entry &b) {
+                  if (a.key.size() != b.key.size())
+                      return a.key.size() < b.key.size();
+                  return std::lexicographical_compare(
+                      a.key.begin(), a.key.end(), b.key.begin(), b.key.end());
+              });
+
+    for (const Entry &e : entries) {
+        Game::Lua::PushNumber(L, static_cast<double>(e.slot));
+        Game::Lua::RawGet(L, hold);         // push key = hold[slot]
+        if (!EncodeValue(L, -1, &map, depth + 1)) {
+            Game::Lua::SetTop(L, hold - 1);
+            return false;
+        }
+        Game::Lua::RawGet(L, idx);          // key -> value = table[key]
+        if (!EncodeValue(L, -1, &map, depth + 1)) {
+            Game::Lua::SetTop(L, hold - 1);
+            return false;
+        }
+        Game::Lua::SetTop(L, -2);           // pop value
+    }
+
+    Game::Lua::SetTop(L, hold - 1);         // drop holding table
     return EncOk(cbor_encoder_close_container(enc, &map));
 }
 
