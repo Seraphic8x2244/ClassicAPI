@@ -130,6 +130,7 @@ struct Entry {
     uint32_t spellId;
     uint32_t expirationMs; // 0 = infinite / unknown duration
     uint32_t durationMs;   // applied duration (incl. caster mods); 0 = none
+    uint32_t stampMs;      // last write time; EvictAbsent grace (see below)
     int8_t kind;           // Kind; descriptor-slot-derived, KIND_UNKNOWN if only seen via SpellGo
     bool used;
 };
@@ -137,6 +138,16 @@ struct Entry {
 constexpr int kCacheSize = 256;
 Entry g_cache[kCacheSize];
 int g_writeCursor = 0;
+
+// SMSG_SPELL_GO arrives before the SMSG_UPDATE_OBJECT that adds the aura to
+// the target's descriptor, so for a brief window a just-captured entry names
+// an aura the descriptor doesn't list yet. `EvictAbsent` (run from a query's
+// ReconcileCache) must not drop such a fresh entry — doing so discards the
+// caster we just captured, which OnAuraAdded then recreates caster-less
+// (verified: druid buff → sourceGUID lost). Entries younger than this window
+// are exempt from EvictAbsent; a genuinely-removed aura is far older and still
+// gets dropped (and OnAuraRemoved evicts real removals directly regardless).
+constexpr uint32_t kEvictGraceMs = 2000;
 
 // `fromCast` true: the SpellGo hook — authoritative caster + caster-modified
 // (talented) timing. False: the OnAuraAdded application hook — timing only,
@@ -149,9 +160,12 @@ void Store(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
     if (targetGuid == 0 || spellId == 0)
         return;
 
+    const uint32_t now = NowMs();
+
     // Update an existing entry for this exact aura instance.
     for (auto &e : g_cache) {
         if (e.used && e.targetGuid == targetGuid && e.spellId == spellId) {
+            e.stampMs = now; // refresh EvictAbsent grace on any touch
             // Learn the classification whenever a slot-derived kind arrives —
             // independent of caster/timing ownership, and never downgrade a
             // known kind back to unknown.
@@ -167,18 +181,17 @@ void Store(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
         }
     }
     // Take a free slot, else an expired one, else evict round-robin.
-    const uint32_t now = NowMs();
     for (auto &e : g_cache) {
         if (!e.used || (e.expirationMs != 0 && now >= e.expirationMs)) {
             e = {targetGuid, casterGuid, spellId, expirationMs, durationMs,
-                 kind, true};
+                 now, kind, true};
             return;
         }
     }
     Entry &slot = g_cache[g_writeCursor];
     g_writeCursor = (g_writeCursor + 1) % kCacheSize;
-    slot = {targetGuid, casterGuid, spellId, expirationMs, durationMs, kind,
-            true};
+    slot = {targetGuid, casterGuid, spellId, expirationMs, durationMs, now,
+            kind, true};
 }
 
 // ---- Out-of-range group-member aura snapshots ---------------------------
@@ -775,8 +788,13 @@ bool Get(uint64_t unitGuid, uint32_t spellId, uint64_t *outCaster,
 void EvictAbsent(uint64_t unitGuid, const uint32_t *presentSpellIds, int count) {
     if (unitGuid == 0 || presentSpellIds == nullptr || count <= 0)
         return;
+    const uint32_t now = NowMs();
     for (auto &e : g_cache) {
         if (!e.used || e.targetGuid != unitGuid)
+            continue;
+        // Fresh SpellGo capture the descriptor hasn't synced yet — see
+        // kEvictGraceMs. Don't evict it; that's the sourceGUID-loss race.
+        if (now - e.stampMs < kEvictGraceMs)
             continue;
         bool present = false;
         for (int i = 0; i < count; ++i)
