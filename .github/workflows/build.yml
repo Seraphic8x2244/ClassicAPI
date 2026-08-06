@@ -4,6 +4,18 @@ on:
   push:
     branches: ['**']
     tags: ['v*']
+  # Manual escape hatch (e.g. when push webhooks are throttled during a
+  # GitHub Actions incident). Run from the Actions UI:
+  #   - select a `vX.Y.Z` tag ref  -> release build of that tag, OR
+  #   - run from a branch and pass `tag: vX.Y.Z` -> release build that
+  #     creates/attaches the release to that tag.
+  # Leave `tag` blank on a branch run for a plain dev build (artifact).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v2.0.0). Blank = dev build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -16,30 +28,52 @@ jobs:
         with:
           submodules: recursive
 
-      # The embedded addon's `## Version:` is stamped from CLASSICAPI_TAG
-      # at embed time (see cmake/embed_addon.cmake) — no source edit here.
+      # Resolve the effective version once so every step below agrees.
+      # is_release=true when a vX.Y.Z tag is in play (pushed tag,
+      # dispatched-from-tag, or a `tag` input); the embedded addon's
+      # `## Version:` and the compiled CLASSIC_API_VERSION are both
+      # stamped from it at embed/compile time (see cmake/embed_addon.cmake)
+      # — no source edit.
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            tag=""
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ -n "$tag" ]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Configure (tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: cmake -B build -A Win32 "-DCLASSICAPI_TAG=${{ github.ref_name }}"
+      - name: Configure (release)
+        if: steps.ver.outputs.is_release == 'true'
+        run: cmake -B build -A Win32 "-DCLASSICAPI_TAG=${{ steps.ver.outputs.tag }}"
 
-      - name: Configure (branch)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+      - name: Configure (dev)
+        if: steps.ver.outputs.is_release != 'true'
         run: cmake -B build -A Win32
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Upload artifact
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+        if: steps.ver.outputs.is_release != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ClassicAPI-${{ github.sha }}
           path: build/Release/ClassicAPI.dll
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.ver.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: build/Release/ClassicAPI.dll
           generate_release_notes: true
