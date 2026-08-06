@@ -60,6 +60,13 @@ namespace {
 constexpr const char *kAddonName = "!!!ClassicAPI";
 constexpr const char *kAddonTocFile = "!!!ClassicAPI.toc";
 
+// Developer marker. When this file exists in the on-disk addon folder,
+// the disk copy wins unconditionally (see `DiskHasDevMarker` /
+// `DecideSource`). It is gitignored, excluded from the embed, and the
+// release ships only the DLL — so it can only exist where a developer
+// deliberately created it, never in a normal user's install.
+constexpr const char *kDevMarkerFile = ".classicapi-dev";
+
 // `Interface\AddOns\!!!ClassicAPI\` — the prefix the engine
 // constructs for any of our addon's files. Comparing case-
 // insensitively because the TOC parser uses `Interface\AddOns\%s\…`
@@ -156,17 +163,20 @@ bool ExtractTocVersion(const char *content, size_t size,
     return false;
 }
 
-// Returns -1/0/+1 for `a < b` / `a == b` / `a > b`. "DEV" is a
-// sentinel meaning "newer than any real release" — local dev builds
-// always win against installed-on-disk versions. Otherwise the two
-// strings are walked as dot-separated numeric semver components
+// Returns -1/0/+1 for `a < b` / `a == b` / `a > b`. "DEV" is the
+// local-build sentinel: two DEV builds are equal, but a DEV build sorts
+// BELOW any real release. Dev-over-release precedence is signalled
+// explicitly by the `.classicapi-dev` marker now — NOT by the toc
+// version — so a stray `## Version: DEV` disk copy (repo clone / old
+// bundle) never silently shadows a newer embedded release. Otherwise
+// the two strings are walked as dot-separated numeric semver components
 // (`1.2` < `1.10`).
 int CompareVersions(const char *a, const char *b) {
     const bool aDev = std::strcmp(a, "DEV") == 0;
     const bool bDev = std::strcmp(b, "DEV") == 0;
     if (aDev && bDev) return 0;
-    if (aDev) return 1;
-    if (bDev) return -1;
+    if (aDev) return -1;
+    if (bDev) return 1;
     while (*a || *b) {
         int va = 0, vb = 0;
         while (*a >= '0' && *a <= '9') { va = va * 10 + (*a - '0'); ++a; }
@@ -203,15 +213,47 @@ void EnsureEmbeddedVersionExtracted() {
     }
 }
 
+// True iff the on-disk addon folder contains the `.classicapi-dev`
+// marker. Read via the ORIGINAL `FUN_FILE_READ` (bypassing our embed
+// hook), so it reflects a real file on disk / in an MPQ — never an
+// embedded copy. That makes it a clean "is this a developer working
+// tree" signal: the marker is gitignored + excluded from the embed and
+// the release ships only the DLL, so a normal user's install can't
+// carry it.
+bool DiskHasDevMarker() {
+    char fullPath[256];
+    std::snprintf(fullPath, sizeof(fullPath), "%s%s",
+                  kAddonPathPrefix, kDevMarkerFile);
+    void *buf = nullptr;
+    size_t size = 0;
+    const int ok = FileRead_o(0, fullPath, &buf, &size, 1, 1, 0);
+    if (ok == 0 || buf == nullptr)
+        return false;
+    auto SMemFree = reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE);
+    SMemFree(buf, __FILE__, __LINE__, 0);
+    return true;
+}
+
 // Decide whether disk or embedded should serve all reads for this
 // addon. Called on the first FileRead_h call with a matching prefix.
-// Reads the on-disk TOC via the original `FUN_FILE_READ` (bypassing
-// our hook), parses its version, compares to the embedded version,
-// and caches the winner. If disk has no TOC at all, embedded wins by
-// default.
+// The `.classicapi-dev` marker forces disk unconditionally (explicit
+// developer override). Otherwise reads the on-disk TOC via the original
+// `FUN_FILE_READ` (bypassing our hook), parses its version, compares to
+// the embedded version, and caches the newer. If disk has no TOC at
+// all, embedded wins by default.
 void DecideSource() {
     if (g_source != Source::Undecided) return;
     EnsureEmbeddedVersionExtracted();
+
+    // Explicit developer override: disk wins regardless of version. This
+    // is how a dev keeps disk precedence when running local Lua against a
+    // *released* DLL (where the embedded version would otherwise be newer
+    // and win). Dev intent lives in this marker, decoupled from the toc
+    // version — so users never get silently shadowed by a stray copy.
+    if (DiskHasDevMarker()) {
+        g_source = Source::Disk;
+        return;
+    }
 
     char fullPath[256];
     std::snprintf(fullPath, sizeof(fullPath), "%s%s",

@@ -16,14 +16,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Stamp embedded TOC version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $version = '${{ github.ref_name }}' -replace '^v',''
-          $toc = 'AddOns/!!!ClassicAPI/!!!ClassicAPI.toc'
-          (Get-Content $toc) -replace '^## Version:.*', "## Version: $version" |
-            Set-Content $toc
+      # The embedded addon's `## Version:` is stamped from CLASSICAPI_TAG
+      # at embed time (see cmake/embed_addon.cmake) — no source edit here.
 
       - name: Configure (tag)
         if: startsWith(github.ref, 'refs/tags/v')

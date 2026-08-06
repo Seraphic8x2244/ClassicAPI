@@ -25,6 +25,39 @@ set(TINYCBOR_SOURCES
     external/tinycbor/src/cborparser_float.c
     external/tinycbor/src/cborerrorstrings.c)
 
+# Version derivation. Dev builds use a sentinel "newer than every
+# plausible release" so addon-side `CLASSIC_API_VERSION >= X` gates
+# always pass locally. CI release builds pass `-DCLASSICAPI_TAG=vX.Y.Z`,
+# which drives BOTH the compiled `CLASSIC_API_VERSION` int AND the
+# embedded addon's `## Version:` toc line (substituted in
+# embed_addon.cmake). The on-disk source toc stays `## Version: DEV`;
+# only the embedded copy is stamped, so a release build needs nothing
+# but the flag — no source edit.
+set(CLASSICAPI_VERSION_VALUE 99999999)
+set(CLASSICAPI_VER_MAJOR 9999)
+set(CLASSICAPI_VER_MINOR 99)
+set(CLASSICAPI_VER_PATCH 99)
+set(CLASSICAPI_TOC_VERSION "DEV")
+
+set(CLASSICAPI_TAG
+    ""
+    CACHE STRING "Release tag like v1.2.3")
+
+if(CLASSICAPI_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+  set(CLASSICAPI_VER_MAJOR "${CMAKE_MATCH_1}")
+  set(CLASSICAPI_VER_MINOR "${CMAKE_MATCH_2}")
+  set(CLASSICAPI_VER_PATCH "${CMAKE_MATCH_3}")
+  math(EXPR CLASSICAPI_VERSION_VALUE
+       "${CLASSICAPI_VER_MAJOR} * 10000 + ${CLASSICAPI_VER_MINOR} * 100 + ${CLASSICAPI_VER_PATCH}")
+  set(CLASSICAPI_TOC_VERSION
+      "${CLASSICAPI_VER_MAJOR}.${CLASSICAPI_VER_MINOR}.${CLASSICAPI_VER_PATCH}")
+elseif(CLASSICAPI_TAG)
+  message(
+    FATAL_ERROR
+      "Invalid CLASSICAPI_TAG: ${CLASSICAPI_TAG} (expected vMAJOR.MINOR.PATCH)"
+  )
+endif()
+
 # Bundle `AddOns/!!!ClassicAPI/` into a generated header so the DLL can
 # surface the addon to the engine even when the user doesn't have it
 # installed on disk. The file-read hook in `src/addons/Embedded.cpp`
@@ -34,12 +67,16 @@ set(EMBEDDED_CLASSICAPI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/AddOns/!!!ClassicAPI")
 set(EMBEDDED_CLASSICAPI_HEADER "${CMAKE_BINARY_DIR}/generated/embedded_classicapi.h")
 file(GLOB_RECURSE EMBEDDED_CLASSICAPI_FILES CONFIGURE_DEPENDS
      "${EMBEDDED_CLASSICAPI_SRC}/*")
+# The `.classicapi-dev` marker is a disk-only developer signal — keep it
+# out of the embed inputs (embed_addon.cmake filters it too).
+list(FILTER EMBEDDED_CLASSICAPI_FILES EXCLUDE REGEX "/\\.classicapi-dev$")
 add_custom_command(
     OUTPUT "${EMBEDDED_CLASSICAPI_HEADER}"
     COMMAND ${CMAKE_COMMAND}
         -DSRC_DIR=${EMBEDDED_CLASSICAPI_SRC}
         -DOUT_HEADER=${EMBEDDED_CLASSICAPI_HEADER}
         -DADDON_NAME=ClassicAPI
+        -DADDON_VERSION=${CLASSICAPI_TOC_VERSION}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_addon.cmake"
     DEPENDS
         ${EMBEDDED_CLASSICAPI_FILES}
@@ -70,33 +107,6 @@ add_library(${PROJECT_NAME} SHARED
     ${SOURCES} ${HEADERS} ${TINYCBOR_SOURCES}
     ${EMBEDDED_CLASSICAPI_HEADER}
     ${EMBEDDED_BINDINGS_HEADER})
-
-# Dev-build sentinel — represents "newer than every plausible
-# release". Encoded as v9999.99.99 = 9999 * 10000 + 99 * 100 + 99 =
-# 99,999,999. Picked so addon-side feature gates of the form
-# `CLASSIC_API_VERSION >= X` always pass during local development;
-# CI release builds overwrite it via `-DCLASSICAPI_TAG=vX.Y.Z`.
-set(CLASSICAPI_VERSION_VALUE 99999999)
-set(CLASSICAPI_VER_MAJOR 9999)
-set(CLASSICAPI_VER_MINOR 99)
-set(CLASSICAPI_VER_PATCH 99)
-
-set(CLASSICAPI_TAG
-    ""
-    CACHE STRING "Release tag like v1.2.3")
-
-if(CLASSICAPI_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-  set(CLASSICAPI_VER_MAJOR "${CMAKE_MATCH_1}")
-  set(CLASSICAPI_VER_MINOR "${CMAKE_MATCH_2}")
-  set(CLASSICAPI_VER_PATCH "${CMAKE_MATCH_3}")
-  math(EXPR CLASSICAPI_VERSION_VALUE
-       "${CLASSICAPI_VER_MAJOR} * 10000 + ${CLASSICAPI_VER_MINOR} * 100 + ${CLASSICAPI_VER_PATCH}")
-elseif(CLASSICAPI_TAG)
-  message(
-    FATAL_ERROR
-      "Invalid CLASSICAPI_TAG: ${CLASSICAPI_TAG} (expected vMAJOR.MINOR.PATCH)"
-  )
-endif()
 
 target_compile_definitions(
   ${PROJECT_NAME}

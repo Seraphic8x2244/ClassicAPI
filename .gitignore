@@ -46,3 +46,5 @@
 *.dwo
 
 CLAUDE.md
+
+/AddOns/!!!ClassicAPI/.classicapi-dev

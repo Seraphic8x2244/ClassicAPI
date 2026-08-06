@@ -34,6 +34,10 @@ if(NOT ADDON_NAME)
 endif()
 
 file(GLOB_RECURSE INPUT_FILES RELATIVE "${SRC_DIR}" "${SRC_DIR}/*")
+# Never embed the developer marker — it must reflect on-disk presence
+# only (see src/addons/Embedded.cpp DiskHasDevMarker), and it is
+# gitignored so it only exists in a developer working tree anyway.
+list(FILTER INPUT_FILES EXCLUDE REGEX "(^|/)\\.classicapi-dev$")
 list(SORT INPUT_FILES) # deterministic codegen
 
 set(BODY "")
@@ -41,7 +45,26 @@ set(MANIFEST "")
 set(INDEX 0)
 foreach(REL_PATH ${INPUT_FILES})
     set(ABS_PATH "${SRC_DIR}/${REL_PATH}")
-    file(READ "${ABS_PATH}" CONTENT_HEX HEX)
+
+    # Stamp the addon's `## Version:` line from the build flag rather
+    # than the committed source (which stays `DEV`). This is what makes
+    # a release build a pure function of `-DCLASSICAPI_TAG` — the source
+    # toc is never edited. Only the `.toc` file is rewritten, in-memory,
+    # before hex-encoding; every other file is embedded verbatim.
+    if(ADDON_VERSION AND REL_PATH MATCHES "\\.toc$")
+        file(READ "${ABS_PATH}" TOC_TEXT)
+        string(REGEX REPLACE "## Version:[^\n\r]*"
+               "## Version: ${ADDON_VERSION}" TOC_TEXT "${TOC_TEXT}")
+        # Round-trip through a temp file to hex-encode the modified text
+        # (portable to CMake 3.10; avoids requiring string(HEX), 3.18+).
+        set(TOC_TMP "${OUT_HEADER}.toc.tmp")
+        file(WRITE "${TOC_TMP}" "${TOC_TEXT}")
+        file(READ "${TOC_TMP}" CONTENT_HEX HEX)
+        file(REMOVE "${TOC_TMP}")
+    else()
+        file(READ "${ABS_PATH}" CONTENT_HEX HEX)
+    endif()
+
     string(LENGTH "${CONTENT_HEX}" HEX_LEN)
     math(EXPR FILE_SIZE "${HEX_LEN} / 2")
 
