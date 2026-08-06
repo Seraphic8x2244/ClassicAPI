@@ -17,7 +17,9 @@ namespace Spell::Tooltip {
 
 // Resolves the `GameTooltip` self at Lua stack[1] (via the
 // engine's `FrameScript_PushObject`/`FrameScript_GetObject` chain)
-// and dispatches the engine's spell-tooltip builder for `spellID`.
+// and dispatches the engine's spell-tooltip builder for `spellID`,
+// with the spell's rank shown in the top-right corner of the title
+// line (matching `SetAction`/`SetPetAction`; native `SetSpell` omits it).
 // Silent no-op if `spellID <= 0` or stack[1] isn't a frame object.
 //
 // Used by `GameTooltip:SetSpellByID` directly, and by

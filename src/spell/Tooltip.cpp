@@ -28,7 +28,7 @@ static constexpr int OFF_SPELL_NAME = 0x1E0; // localized char *[9]
 static constexpr int OFF_SPELL_RANK = 0x204; // localized char *[9]
 
 using BuildSpellTooltip_t = void(__thiscall *)(void *thisObj, int spellID, int arg2, int arg3,
-                                               int isPet, int arg5, int arg6, int arg7);
+                                               int isPet, int showRank, int arg6, int arg7);
 
 void ShowByID(void *L, int spellID) {
     if (spellID <= 0)
@@ -38,7 +38,7 @@ void ShowByID(void *L, int spellID) {
         return;
     auto BuildSpellTooltip =
         reinterpret_cast<BuildSpellTooltip_t>(Offsets::FUN_GAMETOOLTIP_BUILD_SPELL_TOOLTIP);
-    BuildSpellTooltip(tooltipObj, spellID, 0, 0, 0, 0, 0, 0);
+    BuildSpellTooltip(tooltipObj, spellID, 0, 0, 0, /*showRank=*/1, 0, 0);
 }
 
 static int __fastcall Script_GameTooltipSetSpellByID(void *L) {
