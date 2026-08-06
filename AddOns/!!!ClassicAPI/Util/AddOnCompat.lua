@@ -59,18 +59,25 @@ if C_AddOns.DoesAddOnExist("ShaguTweaks") then
     end)
 end
 
+-- Guard UPDATE_MOUSEOVER_UNIT handlers (issue #12).
+function CAPI_MouseoverClearedCompat(frame)
+    if not frame then return end
+    local originalOnEvent = frame:GetScript("OnEvent")
+    frame:SetScript("OnEvent", function()
+        if event == "UPDATE_MOUSEOVER_UNIT" and not UnitExists("mouseover") then
+            return
+        end
+
+        if originalOnEvent then
+            originalOnEvent()
+        end
+    end)
+end
+
+CAPI_MouseoverClearedCompat(GameTooltip)
+
 if C_AddOns.DoesAddOnExist("Puppeteer") then
     EventUtil.ContinueOnAddOnLoaded("Puppeteer", function()
-        if not PTEnemyUpdater then return end
-        local originalOnEvent = PTEnemyUpdater:GetScript("OnEvent")
-        PTEnemyUpdater:SetScript("OnEvent", function()
-            if ( event == "UPDATE_MOUSEOVER_UNIT" and not UnitExists("mouseover") ) then
-                return;
-            end
-
-            if ( originalOnEvent ) then
-                originalOnEvent();
-            end
-        end)
+        CAPI_MouseoverClearedCompat(PTEnemyUpdater)
     end)
 end

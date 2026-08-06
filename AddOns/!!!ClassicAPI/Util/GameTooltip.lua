@@ -90,31 +90,3 @@ function GameTooltip_ShowCompareItem(self, shift)
 		end
 	end
 end
-
--- Guard the stock GameTooltip UPDATE_MOUSEOVER_UNIT handler (issue #12).
---
--- ClassicAPI's DLL now fires UPDATE_MOUSEOVER_UNIT on mouseover LOSS too (retail
--- parity), not just on gain. The stock inline handler in FrameXML/GameTooltip.xml
--- recolors the name unconditionally:
---     _G[this:GetName().."TextLeft1"]:SetTextColor(GameTooltip_UnitColor("mouseover"))
--- and GameTooltip_UnitColor returns white (1,1,1) when "mouseover" doesn't exist.
--- So the loss fire (and the transient clear that happens when clicking a unit)
--- repaints the still-visible/fading name white before it disappears -- reported
--- as NPC and PvP-flagged-player names flashing white.
---
--- We wrap the stock handler instead of replacing its body: swallow the event
--- only when there is no mouseover unit to color, otherwise delegate to the
--- original untouched. During the loss window the name simply keeps its last
--- color instead of going white; when a mouseover resolves again it recolors
--- normally. (1.12 OnEvent handlers read the `event`/`this` globals the engine
--- sets before invoking us, so calling the original as a plain function works.)
-local originalOnEvent = GameTooltip:GetScript("OnEvent")
-GameTooltip:SetScript("OnEvent", function()
-	if ( event == "UPDATE_MOUSEOVER_UNIT" and not UnitExists("mouseover") ) then
-		return;
-	end
-
-	if ( originalOnEvent ) then
-		originalOnEvent();
-	end
-end)
