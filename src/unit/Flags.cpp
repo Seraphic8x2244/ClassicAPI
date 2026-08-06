@@ -34,14 +34,23 @@ bool IsPlayerControlled(const uint8_t *unit) {
     return (unitFlags & Offsets::UNIT_FLAG_PLAYER_CONTROLLED) != 0;
 }
 
+bool IsPlayerObject(const uint8_t *unit) {
+    if (unit == nullptr)
+        return false;
+    return *reinterpret_cast<const int *>(unit + Offsets::OFF_CGOBJECT_TYPE_ID) ==
+           Offsets::OBJECT_TYPE_PLAYER;
+}
+
 namespace {
 
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 
-// Reads a PLAYER_FLAGS bit for any player-controlled unit. Path:
-//   - Resolve unit; gate on `UNIT_FLAG_PLAYER_CONTROLLED` to avoid
-//     reading the +0xE68 pointer on a creature/NPC (it's uninitialized
-//     for non-player units).
+// Reads a PLAYER_FLAGS bit for a player. Path:
+//   - Resolve unit; gate on the object actually being a player
+//     (`OBJECT_TYPE_PLAYER`) so we never read the +0xE68 CGPlayer
+//     sub-struct on a non-player object. UNIT_FLAG_PLAYER_CONTROLLED is
+//     insufficient — pets/totems/MC'd creatures set it but have no
+//     sub-struct there.
 //   - Read `[unit + 0xE68] + 0x08` — the unit's CGPlayer-side info
 //     struct, where byte +0x08 is PLAYER_FLAGS. Same struct
 //     `Script_IsResting` reads at +0x05 bit (RESTING = 0x20) for the
@@ -64,7 +73,10 @@ bool TestPlayerFlag(void *L, uint32_t flagMask) {
 
     auto resolve = reinterpret_cast<ResolveUnitToken_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN);
     auto *unit = static_cast<const uint8_t *>(resolve(token));
-    if (!IsPlayerControlled(unit))
+    // PLAYER_FLAGS lives in the CGPlayer sub-struct — gate on the object
+    // actually being a player, not merely player-controlled (pets/totems
+    // set that flag but have no sub-struct → garbage +0xE68 deref).
+    if (!IsPlayerObject(unit))
         return false;
 
     auto *playerInfo = *reinterpret_cast<const uint8_t *const *>(
@@ -134,7 +146,12 @@ int __fastcall Script_UnitIsFeignDeath(void *L) {
 // Returns 0 if the unit isn't player-controlled, isn't a player, or
 // hasn't had its guild data synced.
 uint32_t ReadGuildKey(const uint8_t *unit) {
-    if (!IsPlayerControlled(unit))
+    // The guild key lives in the CGPlayer sub-struct at +0xE68, which
+    // only exists on real player objects. A player-controlled *creature*
+    // (pet, totem, MC'd mob) has UNIT_FLAG_PLAYER_CONTROLLED set but no
+    // sub-struct, so gating on IsPlayerControlled here would deref garbage
+    // and crash (issue: UnitIsInMyGuild on a nameplate pet/totem).
+    if (!IsPlayerObject(unit))
         return 0;
     auto *info = *reinterpret_cast<const uint8_t *const *>(
         unit + Offsets::OFF_CGPLAYER_INFO);

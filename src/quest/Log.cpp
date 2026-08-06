@@ -27,7 +27,13 @@ using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 // 0xC) and returns true on first match. Mirrors the engine's loop in
 // `Script_IsUnitOnQuest` (`0x004DFE10`).
 bool UnitHasQuest(const uint8_t *unit, int target) {
-    if (target <= 0 || !Unit::Flags::IsPlayerControlled(unit))
+    // The quest list lives in the CGPlayer sub-struct at +0xE68, which
+    // only exists on real player objects. Gate on the object being a
+    // player, not merely player-controlled — a pet/totem/MC'd creature
+    // sets UNIT_FLAG_PLAYER_CONTROLLED but has no sub-struct there, so
+    // IsPlayerControlled would deref garbage and crash (same root cause
+    // as pfUI issue #34).
+    if (target <= 0 || !Unit::Flags::IsPlayerObject(unit))
         return false;
 
     auto *info = *reinterpret_cast<const uint8_t *const *>(

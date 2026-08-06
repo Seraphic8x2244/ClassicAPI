@@ -106,14 +106,17 @@ static int __fastcall Script_GetInventoryItemID(void *L) {
     int itemID = 0;
     if (unitPtr == playerPtr) {
         itemID = ItemIDForLocalPlayer(playerPtr, slot);
-    } else if (Unit::Flags::IsPlayerControlled(
+    } else if (Unit::Flags::IsPlayerObject(
                    static_cast<const uint8_t *>(unitPtr))) {
         itemID = ItemIDForOtherUnit(unitPtr, slot);
     } else {
-        // NPC / creature — no visible-items array. Returning nil here
-        // also matches `GetInventoryItemLink`'s practical behavior on
-        // NPCs (it crashes the client without this gate; addons that
-        // don't pre-filter the unit don't typically reach this path).
+        // Non-player object — no CGPlayer visible-items array at +0xE68.
+        // Gate on the object being a player, not merely player-controlled:
+        // a pet/totem/MC'd creature sets UNIT_FLAG_PLAYER_CONTROLLED but
+        // has no sub-struct there, so IsPlayerControlled would let it
+        // through and `ItemIDForOtherUnit` would deref garbage and crash
+        // (same root cause as pfUI issue #34). Returning nil also matches
+        // `GetInventoryItemLink`'s practical behavior on non-players.
         return 0;
     }
     if (itemID == 0)
