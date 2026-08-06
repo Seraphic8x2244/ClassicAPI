@@ -1498,6 +1498,16 @@ enum Offsets {
     // cursor is over no mouse-enabled frame. `Frame::Attributes` polls this to
     // drive the `mouseover` override from the hovered frame's `unit` attribute.
     OFF_UI_CONTEXT_MOUSE_FOCUS = 0x7C,
+    // Head of the engine's frame list (`*(*VAR_UI_CONTEXT_PTR + 0xCC4)`),
+    // and each frame CObject's next-in-enumeration pointer at +0x308 — the
+    // list `Script_EnumerateFrames` (0x00705F60) walks. A node with its low
+    // bit set (or null) is the end sentinel. `Frame::MouseFoci` walks it to
+    // build the GetMouseFoci stack.
+    OFF_UI_CONTEXT_FRAME_LIST_HEAD = 0xCC4,
+    OFF_FRAME_ENUM_NEXT = 0x308,
+    // Frame level, a plain int at CObject +0xC4 (the value `Script_GetFrameLevel`
+    // at 0x007744A0 pushes as `frame[0x31]`). Read directly for stack ordering.
+    OFF_FRAME_LEVEL = 0xC4,
     FUN_SCRIPT_FRAME_SHOW = 0x00775750,
     FUN_SCRIPT_FRAME_HIDE = 0x00775810,
     FUN_SCRIPT_FRAME_SETMINRESIZE = 0x00776020,
@@ -1508,6 +1518,14 @@ enum Offsets {
     // it so a unit-attributed frame registers as the mouse-focus (bare frames
     // otherwise never hover). Standard `int __fastcall(void *L)` Script_* shape.
     FUN_SCRIPT_FRAME_ENABLEMOUSE = 0x00777070,
+    // Frame predicates used by `Frame::MouseFoci` to filter the enumeration to
+    // the interactive stack (visible + mouse-enabled). Standard Script_* shape
+    // `int __fastcall(void *L)`, self at Lua idx 1, result pushed at idx 2.
+    FUN_SCRIPT_FRAME_IS_VISIBLE = 0x007758D0,
+    FUN_SCRIPT_FRAME_IS_MOUSE_ENABLED = 0x00777130,
+    // `frame:GetFrameStrata()` — pushes the strata name string; ranked for
+    // stack ordering (`Frame::MouseFoci`).
+    FUN_SCRIPT_FRAME_GET_STRATA = 0x007742A0,
     // Button OnClick dispatcher — `__thiscall(button, buttonCode)` at
     // 0x00779540, invoking the button's OnClick slot `[button+0x4CC]`. NOTE: do
     // NOT MinHook it — SuperWoW's click-casting inline-hooks the same prologue

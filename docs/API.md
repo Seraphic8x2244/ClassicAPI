@@ -159,6 +159,7 @@ build instructions.
   - [`region:IsMouseOver([topOffset, bottomOffset, leftOffset, rightOffset])`](#regionismouseovertopoffset-bottomoffset-leftoffset-rightoffset)
   - [`region:GetRect()`](#regiongetrect)
   - [`region:IsDragging()`](#regionisdragging)
+  - [`GetMouseFoci()`](#getmousefoci)
   - [`frame:SetShown(shown)`](#framesetshownshown)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
@@ -3717,6 +3718,20 @@ fontstrings) always report `false`, since only frames can be dragged.
 ```lua
 -- in a frame's OnUpdate while the user drags it:
 if self:IsDragging() then ... end
+```
+
+### `GetMouseFoci()`
+
+Returns a table of the mouse-enabled frames under the cursor, from top
+to bottom. Index 1 is the frame that `GetMouseFocus()` returns, so
+`GetMouseFocus() == GetMouseFoci()[1]` is always true.
+
+```lua
+local foci = GetMouseFoci()
+-- foci[1] == GetMouseFocus()
+for i = 1, table.getn(foci) do
+    print(foci[i]:GetName() or "<anonymous>")
+end
 ```
 
 ### `frame:SetShown(shown)`
