@@ -58,3 +58,19 @@ if C_AddOns.DoesAddOnExist("ShaguTweaks") then
         end
     end)
 end
+
+if C_AddOns.DoesAddOnExist("Puppeteer") then
+    EventUtil.ContinueOnAddOnLoaded("Puppeteer", function()
+        if not PTEnemyUpdater then return end
+        local originalOnEvent = PTEnemyUpdater:GetScript("OnEvent")
+        PTEnemyUpdater:SetScript("OnEvent", function()
+            if ( event == "UPDATE_MOUSEOVER_UNIT" and not UnitExists("mouseover") ) then
+                return;
+            end
+
+            if ( originalOnEvent ) then
+                originalOnEvent();
+            end
+        end)
+    end)
+end
