@@ -30,11 +30,6 @@ namespace Aura::Data {
 
 namespace {
 
-// SpellIcon.dbc record's path field (char* at +0x04). This is a
-// SpellIcon.dbc offset, not a Spell.dbc record field — the Spell.dbc
-// offsets are all in `Offsets.h` as OFF_SPELL_RECORD_*.
-constexpr int OFF_SPELLICON_PATH = 0x04;
-
 const uint8_t *Descriptor(const uint8_t *unit) {
     if (unit == nullptr)
         return nullptr;
@@ -78,7 +73,7 @@ const char *SpellIconPath(const uint8_t *spellRecord) {
     return DBC::StringField(Offsets::VAR_SPELL_ICON_RECORDS,
                             Offsets::VAR_SPELL_ICON_COUNT,
                             static_cast<uint32_t>(iconID),
-                            OFF_SPELLICON_PATH);
+                            Offsets::OFF_SPELLICON_PATH);
 }
 
 using ResolveUnitToken_t = void *(__fastcall *)(const char *);

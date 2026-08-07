@@ -56,10 +56,6 @@ namespace Totem::Tracker {
 
 namespace {
 
-// Spell.dbc record field offsets (see spell/Info.cpp for the shared set).
-constexpr int OFF_TOTEM_TOOL = 0xA0;  // int32[2] — Totem (required tool item IDs)
-constexpr int OFF_MISC_VALUE = 0x1A8; // int32[3] — EffectMiscValue
-
 // SUMMON_TOTEM_SLOT1..4 spell effects (verified against Spell.dbc: Searing
 // 87/Fire, Stoneskin 88/Earth, Healing Stream 89/Water, Windfury 90/Air).
 constexpr int kEffectSummonTotemSlot1 = 87;
@@ -98,7 +94,7 @@ uint32_t NowMs() {
 
 // The totem tool item a spell requires (`Totem[0]`), or 0.
 uint32_t TotemToolItem(const uint8_t *rec) {
-    const int32_t t = *reinterpret_cast<const int32_t *>(rec + OFF_TOTEM_TOOL);
+    const int32_t t = *reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_TOTEM);
     return t > 0 ? static_cast<uint32_t>(t) : 0;
 }
 
@@ -628,7 +624,7 @@ void OnPlayerSpellGo(uint32_t spellID) {
         return;
 
     const auto *effects = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT);
-    const auto *misc = reinterpret_cast<const int32_t *>(rec + OFF_MISC_VALUE);
+    const auto *misc = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT_MISC_VALUE);
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
         const int eff = effects[i];
         if (eff < kEffectSummonTotemSlot1 || eff > kEffectSummonTotemSlot4)

@@ -139,7 +139,7 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
     const int iconID = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_ICON_ID);
     if (auto *iconRec = LookupSubRecord(Offsets::VAR_SPELL_ICON_RECORDS,
                                         Offsets::VAR_SPELL_ICON_COUNT, iconID)) {
-        out.iconPath = *reinterpret_cast<const char *const *>(iconRec + 4);
+        out.iconPath = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
     }
 
     out.cost = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_MANA_COST);
@@ -297,7 +297,7 @@ static int __fastcall Script_C_GetSpellTexture(void *L) {
                                     Offsets::VAR_SPELL_ICON_COUNT, iconID);
     if (iconRec == nullptr)
         return 0;
-    const char *path = *reinterpret_cast<const char *const *>(iconRec + 4);
+    const char *path = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
     if (path == nullptr || *path == '\0')
         return 0;
     Game::Lua::PushString(L, path);

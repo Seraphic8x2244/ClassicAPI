@@ -89,9 +89,6 @@ using TickMs_t = uint32_t(__fastcall *)();
 using GetCastTime_t = uint32_t(__fastcall *)(int spellID, int unit, int flag);
 using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, int skipMod);
 
-// Spell.dbc record field offsets (mirrors Spell::Info's locals).
-constexpr int OFF_SUBRECORD_VALUE = 0x04;  // SpellIcon path field
-
 // SPELL_ATTR_TRADESPELL — set on profession recipe casts (enchant,
 // cooking with a cast, etc.). The version-stable `isTradeskill` source:
 // 3.3.5's Script_UnitCastingInfo reads bit 0x20 of Attributes (at +0x10
@@ -226,7 +223,7 @@ const char *SpellIconPath(const uint8_t *rec) {
                                          static_cast<uint32_t>(iconID));
     if (iconRec == nullptr)
         return "";
-    const char *path = *reinterpret_cast<const char *const *>(iconRec + OFF_SUBRECORD_VALUE);
+    const char *path = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
     return (path != nullptr) ? path : "";
 }
 

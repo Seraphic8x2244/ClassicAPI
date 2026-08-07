@@ -5789,6 +5789,11 @@ enum Offsets {
     OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B = 0x154,// i32[3] implicit target B
     OFF_SPELL_RECORD_MANA_COST_PERCENT = 0x270,       // i32 % of base resource (0 = flat)
     OFF_SPELL_RECORD_RANK = 0x204,                    // char*[9] localized rank text
+    OFF_SPELL_RECORD_TOTEM = 0xA0,                    // i32[2] required totem/tool item IDs
+
+    // SpellIcon.dbc record's path string field (char* at +0x04). Distinct
+    // struct from Spell.dbc — reached via SpellIcon.dbc[Spell.SpellIconID].
+    OFF_SPELLICON_PATH = 0x04,
 
     // Spell.dbc Mechanic field — the spell-level SpellMechanic ID (→
     // SpellMechanic.dbc), 0 = none. Field 5 of the record
