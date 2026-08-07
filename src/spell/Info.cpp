@@ -22,15 +22,6 @@
 
 namespace Spell::Info {
 
-// Spell.dbc record offsets (from BuildSpellTooltip / Script_GetSpellName / Script_GetSpellTexture).
-static constexpr int OFF_CASTING_TIME_INDEX = 0x48;
-static constexpr int OFF_POWER_TYPE = 0x7C;
-static constexpr int OFF_MANA_COST = 0x80;
-static constexpr int OFF_RANGE_INDEX = 0x90;
-static constexpr int OFF_ICON_ID = 0x1D4;
-static constexpr int OFF_NAME = 0x1E0;
-static constexpr int OFF_RANK = 0x204;
-
 // Attributes (+0x18) bit 6 = SPELL_ATTR_PASSIVE — passive spell (no cast
 // bar, applies its effect as soon as learned/equipped).
 static constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;
@@ -50,9 +41,6 @@ static constexpr uint32_t SPELL_ATTR_EX2_HEALTH_FUNNEL = 0x800;
 // have it), so we classify by walking effect targets and checking
 // whether any falls into a known hostile-target or friendly-target
 // set. Same algorithm CMaNGOS uses in `SpellMgr::IsPositiveSpell`.
-static constexpr int OFF_EFFECT_IMPLICIT_TARGET_A = 0x148; // uint32[3]
-static constexpr int OFF_EFFECT_IMPLICIT_TARGET_B = 0x154; // uint32[3]
-
 // Target IDs from vanilla 1.12's `SpellTarget` enum that mark a
 // spell as hostile-targeted (covers single-target damage,
 // debuffs, AoE damage, etc.). List is conservative — anything not
@@ -144,26 +132,26 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
 
     out.spellID = spellID;
-    out.name = *reinterpret_cast<const char *const *>(record + OFF_NAME + locale * 4);
-    out.rank = *reinterpret_cast<const char *const *>(record + OFF_RANK + locale * 4);
+    out.name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
+    out.rank = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
 
     out.iconPath = nullptr;
-    const int iconID = *reinterpret_cast<const int *>(record + OFF_ICON_ID);
+    const int iconID = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_ICON_ID);
     if (auto *iconRec = LookupSubRecord(Offsets::VAR_SPELL_ICON_RECORDS,
                                         Offsets::VAR_SPELL_ICON_COUNT, iconID)) {
         out.iconPath = *reinterpret_cast<const char *const *>(iconRec + 4);
     }
 
-    out.cost = *reinterpret_cast<const int *>(record + OFF_MANA_COST);
+    out.cost = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_MANA_COST);
 
     const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
         record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
     out.isFunnel = (attrEx2 & SPELL_ATTR_EX2_HEALTH_FUNNEL) != 0;
 
-    out.powerType = *reinterpret_cast<const int *>(record + OFF_POWER_TYPE);
+    out.powerType = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_POWER_TYPE);
 
     out.castTimeMs = 0;
-    const int castIndex = *reinterpret_cast<const int *>(record + OFF_CASTING_TIME_INDEX);
+    const int castIndex = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_CASTING_TIME_INDEX);
     if (auto *castRec = LookupSubRecord(Offsets::VAR_SPELL_CAST_TIMES_RECORDS,
                                         Offsets::VAR_SPELL_CAST_TIMES_COUNT, castIndex)) {
         out.castTimeMs = *reinterpret_cast<const int *>(castRec + 4);
@@ -171,7 +159,7 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
 
     out.minRange = 0.0f;
     out.maxRange = 0.0f;
-    const int rangeIndex = *reinterpret_cast<const int *>(record + OFF_RANGE_INDEX);
+    const int rangeIndex = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_RANGE_INDEX);
     if (auto *rangeRec = LookupSubRecord(Offsets::VAR_SPELL_RANGE_RECORDS,
                                          Offsets::VAR_SPELL_RANGE_COUNT, rangeIndex)) {
         out.minRange = *reinterpret_cast<const float *>(rangeRec + 4);
@@ -291,7 +279,7 @@ static int __fastcall Script_C_GetSpellName(void *L) {
         return 0; // nil for unknown spellID
 
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(record + OFF_NAME + locale * 4);
+    const char *name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || *name == '\0')
         return 0; // empty / no name in current locale → nil
     Game::Lua::PushString(L, name);
@@ -304,7 +292,7 @@ static int __fastcall Script_C_GetSpellTexture(void *L) {
     if (record == nullptr)
         return 0;
 
-    const int iconID = *reinterpret_cast<const int *>(record + OFF_ICON_ID);
+    const int iconID = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_ICON_ID);
     auto *iconRec = LookupSubRecord(Offsets::VAR_SPELL_ICON_RECORDS,
                                     Offsets::VAR_SPELL_ICON_COUNT, iconID);
     if (iconRec == nullptr)
@@ -330,7 +318,7 @@ static bool BuildSpellLink(int spellID, char *out, size_t outLen) {
     if (record == nullptr)
         return false;
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(record + OFF_NAME + locale * 4);
+    const char *name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || *name == '\0')
         return false;
     const int n = std::snprintf(out, outLen, "|cff71d5ff|Hspell:%d:0|h[%s]|h|r",
@@ -538,9 +526,9 @@ static bool AnyEffectTarget(const uint8_t *record, Pred pred) {
     if (record == nullptr)
         return false;
     auto *targetsA = reinterpret_cast<const uint32_t *>(
-        record + OFF_EFFECT_IMPLICIT_TARGET_A);
+        record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
     auto *targetsB = reinterpret_cast<const uint32_t *>(
-        record + OFF_EFFECT_IMPLICIT_TARGET_B);
+        record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B);
     for (int i = 0; i < 3; ++i) {
         if (pred(targetsA[i]) || pred(targetsB[i]))
             return true;

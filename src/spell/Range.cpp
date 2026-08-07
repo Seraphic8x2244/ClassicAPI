@@ -23,7 +23,6 @@ namespace {
 
 // Spell.dbc RangeIndex + SpellRange.dbc min/max offsets (verified,
 // documented in CLAUDE.md under "Sub-DBC record layouts").
-constexpr int OFF_SPELL_RANGE_INDEX = 0x90;
 constexpr int OFF_SPELLRANGE_MIN = 0x04;
 constexpr int OFF_SPELLRANGE_MAX = 0x08;
 
@@ -42,7 +41,7 @@ bool SpellIDHasRange(int spellID) {
     if (rec == nullptr)
         return false;
     const uint32_t rangeIdx =
-        *reinterpret_cast<const uint32_t *>(rec + OFF_SPELL_RANGE_INDEX);
+        *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_RANGE_INDEX);
     if (rangeIdx == 0)
         return false;
     const uint8_t *rangeRec = DBC::Record(Offsets::VAR_SPELL_RANGE_RECORDS,

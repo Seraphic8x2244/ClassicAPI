@@ -29,9 +29,6 @@ namespace Spell::CastEvents {
 
 namespace {
 
-// Spell.dbc localized string arrays (9 locale slots, 4 bytes each).
-constexpr int OFF_NAME = 0x1E0; // Name[9]
-constexpr int OFF_RANK = 0x204; // Rank[9]
 
 constexpr const char *kStart = "UNIT_SPELLCAST_START";
 constexpr const char *kStop = "UNIT_SPELLCAST_STOP";
@@ -120,8 +117,8 @@ void Fire(const char *eventName, int spellID, int guidNum, int type = 3) {
     char castGuid[48];
     BuildCastGuid(castGuid, sizeof(castGuid), type, spellID, guidNum);
     Event::Custom::Fire(slot, "%s%s%d%s%s", "player", castGuid, spellID,
-                        LocalizedField(rec, OFF_NAME),
-                        LocalizedField(rec, OFF_RANK));
+                        LocalizedField(rec, Offsets::OFF_SPELL_NAMES),
+                        LocalizedField(rec, Offsets::OFF_SPELL_RECORD_RANK));
 }
 
 // SENT is the one event whose shape differs from the rest, matching modern:
@@ -138,8 +135,8 @@ void FireSent(int spellID, int guidNum, const char *target) {
     char castGuid[48];
     BuildCastGuid(castGuid, sizeof(castGuid), /*type=*/3, spellID, guidNum);
     Event::Custom::Fire(slot, "%s%s%s%d%s%s", "player", target ? target : "",
-                        castGuid, spellID, LocalizedField(rec, OFF_NAME),
-                        LocalizedField(rec, OFF_RANK));
+                        castGuid, spellID, LocalizedField(rec, Offsets::OFF_SPELL_NAMES),
+                        LocalizedField(rec, Offsets::OFF_SPELL_RECORD_RANK));
 }
 
 // Fire a RETICLE event `(unitTarget, castGUID, spellID, spellName, rank)`.
@@ -158,8 +155,8 @@ void FireReticle(const char *eventName, int spellID) {
     if (rec == nullptr)
         return;
     Event::Custom::Fire(slot, "%s%s%d%s%s", "player", "", spellID,
-                        LocalizedField(rec, OFF_NAME),
-                        LocalizedField(rec, OFF_RANK));
+                        LocalizedField(rec, Offsets::OFF_SPELL_NAMES),
+                        LocalizedField(rec, Offsets::OFF_SPELL_RECORD_RANK));
 }
 
 // spellID whose reticle we last reported active (0 = no reticle up).
@@ -389,8 +386,8 @@ void FireRemote(const char *eventName, uint64_t casterGuid, int spellID,
         return;
     char castGuid[48];
     BuildCastGuid(castGuid, sizeof(castGuid), /*type=*/3, spellID, guidNum);
-    const char *name = LocalizedField(rec, OFF_NAME);
-    const char *rank = LocalizedField(rec, OFF_RANK);
+    const char *name = LocalizedField(rec, Offsets::OFF_SPELL_NAMES);
+    const char *rank = LocalizedField(rec, Offsets::OFF_SPELL_RECORD_RANK);
     for (int i = 0; i < n; ++i)
         Event::Custom::Fire(slot, "%s%s%d%s%s", tokens[i], castGuid, spellID,
                             name, rank);

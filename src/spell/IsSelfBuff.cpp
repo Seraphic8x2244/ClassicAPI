@@ -35,9 +35,6 @@ namespace {
 // Spell.dbc per-effect arrays. Each is an int32[3] in the record.
 // Field-index derivation against the known `EffectApplyAuraName` at
 // field 91 / +0x16C — the implicit-target pair sits at field 82/85.
-constexpr int OFF_SPELL_EFFECT = 0xF4;            // SPELL_EFFECT_* code
-constexpr int OFF_SPELL_EFFECT_TARGET_A = 0x148;
-constexpr int OFF_SPELL_EFFECT_TARGET_B = 0x154;
 constexpr int EFFECT_COUNT = 3;
 
 // Vanilla 1.12 implicit-target codes (CMaNGOS `Targets` enum).
@@ -61,14 +58,14 @@ bool IsSelfBuff(uint32_t spellID) {
     bool sawEffect = false;
     for (int i = 0; i < EFFECT_COUNT; ++i) {
         const int effect = *reinterpret_cast<const int *>(
-            rec + OFF_SPELL_EFFECT + i * 4);
+            rec + Offsets::OFF_SPELL_RECORD_EFFECT + i * 4);
         if (effect == 0)
             continue;
         sawEffect = true;
         const int targetA = *reinterpret_cast<const int *>(
-            rec + OFF_SPELL_EFFECT_TARGET_A + i * 4);
+            rec + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A + i * 4);
         const int targetB = *reinterpret_cast<const int *>(
-            rec + OFF_SPELL_EFFECT_TARGET_B + i * 4);
+            rec + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B + i * 4);
         if (!IsSelfOnlyTarget(targetA) || !IsSelfOnlyTarget(targetB))
             return false;
     }

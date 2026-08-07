@@ -30,11 +30,9 @@ namespace Aura::Data {
 
 namespace {
 
-// Spell.dbc record field offsets used locally. `spell/Info.cpp` has
-// the same set of locals for `Script_GetSpellInfo`; promoting them
-// to `Offsets.h` is a future refactor — for now we mirror its
-// convention so both files stay in sync.
-constexpr int OFF_SPELL_ICON_ID = 0x1D4;
+// SpellIcon.dbc record's path field (char* at +0x04). This is a
+// SpellIcon.dbc offset, not a Spell.dbc record field — the Spell.dbc
+// offsets are all in `Offsets.h` as OFF_SPELL_RECORD_*.
 constexpr int OFF_SPELLICON_PATH = 0x04;
 
 const uint8_t *Descriptor(const uint8_t *unit) {
@@ -74,7 +72,7 @@ const char *SpellIconPath(const uint8_t *spellRecord) {
     if (spellRecord == nullptr)
         return nullptr;
     const int iconID = *reinterpret_cast<const int *>(
-        spellRecord + OFF_SPELL_ICON_ID);
+        spellRecord + Offsets::OFF_SPELL_RECORD_ICON_ID);
     if (iconID <= 0)
         return nullptr;
     return DBC::StringField(Offsets::VAR_SPELL_ICON_RECORDS,

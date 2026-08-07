@@ -19,8 +19,6 @@
 
 namespace Spell::CastByID {
 
-// Offset of the locale-resolved Name[9] table inside a Spell.dbc record.
-static constexpr int OFF_NAME = 0x1E0;
 
 using NameToSlot_t = int(__fastcall *)(const char *name, void *out);
 static NameToSlot_t NameToSlot_o = nullptr;
@@ -48,7 +46,7 @@ static const char *LocaleNameForID(int spellID) {
         return nullptr;
     const int locale = *reinterpret_cast<const int *>(
         static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
-    return *reinterpret_cast<const char *const *>(record + OFF_NAME + locale * 4);
+    return *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
 }
 
 // Hook on the single name → spellbook-slot resolver

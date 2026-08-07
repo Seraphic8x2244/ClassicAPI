@@ -49,8 +49,6 @@ namespace {
 
 using GetSpellCost_t = uint32_t(__fastcall *)(int spellID, int unit);
 
-constexpr int OFF_POWER_TYPE = 0x7C;        // int PowerType
-constexpr int OFF_MANA_COST_PERCENT = 0x270; // int, % of base resource (0 = flat)
 
 uint32_t EffectiveCost(int spellID) {
     return reinterpret_cast<GetSpellCost_t>(Offsets::FUN_GET_SPELL_COST)(spellID, 0);
@@ -66,8 +64,8 @@ int __fastcall Script_GetSpellPowerCost(void *L) {
     if (cost == 0xFFFFFFFF)
         return 0; // engine error (no player context, etc.)
 
-    const int powerType = *reinterpret_cast<const int *>(rec + OFF_POWER_TYPE);
-    const int costPercent = *reinterpret_cast<const int *>(rec + OFF_MANA_COST_PERCENT);
+    const int powerType = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_POWER_TYPE);
+    const int costPercent = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_MANA_COST_PERCENT);
     if (cost == 0 && costPercent == 0)
         return 0; // nil — no resource cost
 

@@ -57,11 +57,8 @@ namespace Totem::Tracker {
 namespace {
 
 // Spell.dbc record field offsets (see spell/Info.cpp for the shared set).
-constexpr int OFF_EFFECT = 0xF4;      // int32[3] — SPELL_EFFECT_*
 constexpr int OFF_TOTEM_TOOL = 0xA0;  // int32[2] — Totem (required tool item IDs)
 constexpr int OFF_MISC_VALUE = 0x1A8; // int32[3] — EffectMiscValue
-constexpr int OFF_ICON_ID = 0x1D4;    // int32 — SpellIconID
-constexpr int OFF_NAME = 0x1E0;       // char*[9] locale array
 
 // SUMMON_TOTEM_SLOT1..4 spell effects (verified against Spell.dbc: Searing
 // 87/Fire, Stoneskin 88/Earth, Healing Stream 89/Water, Windfury 90/Air).
@@ -131,7 +128,7 @@ void ScanTools() {
         const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
         if (rec == nullptr)
             continue;
-        const auto *eff = reinterpret_cast<const int32_t *>(rec + OFF_EFFECT);
+        const auto *eff = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT);
         for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
             const int e = eff[i];
             if (e < kEffectSummonTotemSlot1 || e > kEffectSummonTotemSlot4)
@@ -413,10 +410,10 @@ int __fastcall Script_GetTotemInfo(void *L) {
             *reinterpret_cast<const int *>(static_cast<uintptr_t>(
                 Offsets::VAR_LOCALE_INDEX));
         const char *n = *reinterpret_cast<const char *const *>(
-            rec + OFF_NAME + locale * 4);
+            rec + Offsets::OFF_SPELL_NAMES + locale * 4);
         if (n != nullptr)
             name = n;
-        icon = IconPath(*reinterpret_cast<const int *>(rec + OFF_ICON_ID));
+        icon = IconPath(*reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID));
     }
 
     Game::Lua::PushBool(L, haveTotem);
@@ -563,7 +560,7 @@ int __fastcall Script_GameTooltipSetTotem(void *L) {
     const int locale =
         *reinterpret_cast<const int *>(static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
     const char *name =
-        *reinterpret_cast<const char *const *>(rec + OFF_NAME + locale * 4);
+        *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || name[0] == '\0')
         return 0;
 
@@ -630,7 +627,7 @@ void OnPlayerSpellGo(uint32_t spellID) {
     if (rec == nullptr)
         return;
 
-    const auto *effects = reinterpret_cast<const int32_t *>(rec + OFF_EFFECT);
+    const auto *effects = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT);
     const auto *misc = reinterpret_cast<const int32_t *>(rec + OFF_MISC_VALUE);
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
         const int eff = effects[i];

@@ -130,11 +130,6 @@ bool SpellHiddenFromSpellbook(int spellID) {
 // checks are NOT in the 1.12 client's Spell.dbc — server-only columns — so
 // the spellLevel rule is the only client-readable target-level mechanism.)
 
-constexpr int OFF_SPELL_MAX_LEVEL = 0x6C;         // uint32 (scaling cap level)
-constexpr int OFF_SPELL_SPELL_LEVEL = 0x74;       // uint32 (rank's effective level)
-constexpr int OFF_SPELL_EFFECT = 0xF4;            // uint32[3] effect type
-constexpr int OFF_SPELL_EFFECT_TARGET_A = 0x148;  // uint32[3] implicit target A
-constexpr int OFF_SPELL_RANK = 0x204;             // char*[9] localized rank text
 constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;                    // Attributes bit
 constexpr uint32_t SPELL_EFFECT_APPLY_AURA = 6;
 constexpr uint32_t SPELL_EFFECT_APPLY_AREA_AURA_PARTY = 35;
@@ -176,7 +171,7 @@ bool IsPositiveRankTarget(uint32_t t) {
 // empty Rank and un-gated) vs ranked ones (Divine Spirit / Fortitude).
 bool HasRankString(const uint8_t *record) {
     const char *rank = *reinterpret_cast<const char *const *>(
-        record + OFF_SPELL_RANK + LocaleIndex() * 4);
+        record + Offsets::OFF_SPELL_RECORD_RANK + LocaleIndex() * 4);
     return rank != nullptr && *rank != '\0';
 }
 
@@ -184,7 +179,7 @@ bool HasRankString(const uint8_t *record) {
 // the spell isn't subject to the ranked-positive-aura target-level rule.
 int RequiredTargetLevel(const uint8_t *record) {
     const int spellLevel =
-        *reinterpret_cast<const int *>(record + OFF_SPELL_SPELL_LEVEL);
+        *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_SPELL_LEVEL);
     if (spellLevel <= 10) // targetLevel + 10 >= spellLevel holds for any level
         return 0;
     const uint32_t attr =
@@ -194,9 +189,9 @@ int RequiredTargetLevel(const uint8_t *record) {
     if (!HasRankString(record)) // single-rank spell → not gated
         return 0;
 
-    auto *effect = reinterpret_cast<const uint32_t *>(record + OFF_SPELL_EFFECT);
+    auto *effect = reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_EFFECT);
     auto *targetA =
-        reinterpret_cast<const uint32_t *>(record + OFF_SPELL_EFFECT_TARGET_A);
+        reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
     bool positiveAura = false;
     for (int i = 0; i < 3; ++i) {
         if ((effect[i] == SPELL_EFFECT_APPLY_AURA &&
@@ -227,13 +222,13 @@ int __fastcall Script_GetSpellLevelInfo(void *L) {
         return 0;
     Game::Lua::PushNumber(
         L, static_cast<double>(
-               *reinterpret_cast<const int *>(record + OFF_SPELL_SPELL_LEVEL)));
+               *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_SPELL_LEVEL)));
     Game::Lua::PushNumber(
         L, static_cast<double>(
                *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_BASE_LEVEL)));
     Game::Lua::PushNumber(
         L, static_cast<double>(
-               *reinterpret_cast<const int *>(record + OFF_SPELL_MAX_LEVEL)));
+               *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_MAX_LEVEL)));
     return 3;
 }
 

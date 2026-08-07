@@ -29,8 +29,6 @@ using GetSpellCost_t = uint32_t(__fastcall *)(int spellID, int unit);
 
 // Spell.dbc record field offsets we read for usability. Fully documented
 // in CLAUDE.md.
-constexpr int OFF_SPELL_POWER_TYPE = 0x7C; // int8: 0=mana, 1=rage, 2=focus, 3=energy, 4=happiness
-constexpr int OFF_SPELL_MANA_COST = 0x80;  // u32 base cost (fallback only)
 
 // Returns true if the player knows `spellID` per the engine's spell-
 // knowledge bitmap at `[VAR_PLAYER_SPELL_BITMAP]`. Same check
@@ -179,12 +177,12 @@ Usability ComputeUsability(void *L, int spellID) {
     // resolve a cost (shouldn't happen here: the player descriptor
     // resolved above, so it has a player context).
     const int powerType = static_cast<int>(*reinterpret_cast<const int8_t *>(
-        record + OFF_SPELL_POWER_TYPE));
+        record + Offsets::OFF_SPELL_RECORD_POWER_TYPE));
     if (powerType >= 0 && powerType <= 4) {
         auto getCost = reinterpret_cast<GetSpellCost_t>(Offsets::FUN_GET_SPELL_COST);
         uint32_t cost = getCost(spellID, 0 /* local player */);
         if (cost == 0xFFFFFFFF)
-            cost = *reinterpret_cast<const uint32_t *>(record + OFF_SPELL_MANA_COST);
+            cost = *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_MANA_COST);
         if (cost > 0) {
             const int currentPower = *reinterpret_cast<const int *>(
                 desc + Offsets::OFF_UNIT_FIELD_POWER1 + powerType * 4);

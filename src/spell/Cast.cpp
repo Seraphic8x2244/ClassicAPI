@@ -90,8 +90,6 @@ using GetCastTime_t = uint32_t(__fastcall *)(int spellID, int unit, int flag);
 using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, int skipMod);
 
 // Spell.dbc record field offsets (mirrors Spell::Info's locals).
-constexpr int OFF_NAME = 0x1E0;            // localized name[9]
-constexpr int OFF_ICON_ID = 0x1D4;         // -> SpellIcon.dbc
 constexpr int OFF_SUBRECORD_VALUE = 0x04;  // SpellIcon path field
 
 // SPELL_ATTR_TRADESPELL — set on profession recipe casts (enchant,
@@ -210,7 +208,7 @@ int ChannelDurationMs(int spellID) {
 
 const char *SpellName(const uint8_t *rec) {
     const int locale = *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
-    return *reinterpret_cast<const char *const *>(rec + OFF_NAME + locale * 4);
+    return *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
 }
 
 bool IsTradeskill(const uint8_t *rec) {
@@ -222,7 +220,7 @@ bool IsTradeskill(const uint8_t *rec) {
 // already stores the full "Interface\Icons\..." path (unlike item icons,
 // which are bare filenames) — so it's used verbatim, no prefix.
 const char *SpellIconPath(const uint8_t *rec) {
-    const int iconID = *reinterpret_cast<const int *>(rec + OFF_ICON_ID);
+    const int iconID = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID);
     const uint8_t *iconRec = DBC::Record(Offsets::VAR_SPELL_ICON_RECORDS,
                                          Offsets::VAR_SPELL_ICON_COUNT,
                                          static_cast<uint32_t>(iconID));

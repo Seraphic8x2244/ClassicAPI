@@ -46,7 +46,6 @@ namespace Macro::Spell {
 
 namespace {
 
-constexpr int OFF_SPELL_RANK = 0x204; // 9-locale char *[9] in Spell.dbc
 
 using MacroSlotToEntry_t = const uint8_t *(__fastcall *)(unsigned slot0Based);
 
@@ -88,7 +87,7 @@ int __fastcall Script_GetMacroSpell(void *L) {
     if (name == nullptr)
         return 0;
     const char *rank = *reinterpret_cast<const char *const *>(
-        record + OFF_SPELL_RANK + locale * 4);
+        record + Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
 
     Game::Lua::PushString(L, name);
     // Rank slot is empty for most non-class spells (racials, procs,

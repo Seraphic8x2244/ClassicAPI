@@ -52,10 +52,6 @@ namespace Spell::CastNoToggle {
 
 namespace {
 
-// Offset of the locale-resolved Name[9] table inside a Spell.dbc record
-// (same value used by `Spell::Info`; duplicated here to keep this module
-// header-free).
-constexpr int OFF_NAME = 0x1E0;
 
 using CastSpellByName_t = int(__fastcall *)(void *L);
 using NameToSlot_t = int(__fastcall *)(const char *name, int *outBookType);
@@ -75,7 +71,7 @@ const char *LocaleName(int spellID) {
         return nullptr;
     const int locale = *reinterpret_cast<const int *>(
         static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
-    return *reinterpret_cast<const char *const *>(record + OFF_NAME + locale * 4);
+    return *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
 }
 
 // Case-insensitive name match for the auto-repeat-name gate. Walks

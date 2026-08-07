@@ -62,19 +62,15 @@ int NowMs() {
         reinterpret_cast<TickMs_t>(Offsets::FUN_OS_TICKCOUNT_MS)());
 }
 
-// Spell.dbc field readers (mirrors the small locals in Spell::Cast).
-constexpr int OFF_NAME = 0x1E0;    // localized name[9]
-constexpr int OFF_ICON_ID = 0x1D4; // -> SpellIcon.dbc
-
 const char *SpellName(const uint8_t *rec) {
     const int locale = *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
     const char *n =
-        *reinterpret_cast<const char *const *>(rec + OFF_NAME + locale * 4);
+        *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
     return (n != nullptr) ? n : "";
 }
 
 const char *SpellIconPath(const uint8_t *rec) {
-    const int iconID = *reinterpret_cast<const int *>(rec + OFF_ICON_ID);
+    const int iconID = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID);
     const uint8_t *iconRec = DBC::Record(Offsets::VAR_SPELL_ICON_RECORDS,
                                          Offsets::VAR_SPELL_ICON_COUNT,
                                          static_cast<uint32_t>(iconID));

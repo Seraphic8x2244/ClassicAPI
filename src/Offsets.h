@@ -5776,6 +5776,20 @@ enum Offsets {
     SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS = 0x20000000,
     OFF_SPELL_RECORD_INTERRUPT_FLAGS = 0x54,          // u32 (column 21)
 
+    // Remaining Spell.dbc record fields — the single source of truth for the
+    // record layout (byte = column * 4). Modules must use these rather than
+    // redefining local copies.
+    OFF_SPELL_RECORD_CASTING_TIME_INDEX = 0x48,       // u32 → SpellCastTimes.dbc
+    OFF_SPELL_RECORD_MAX_LEVEL = 0x6C,                // u32 (scaling cap level)
+    OFF_SPELL_RECORD_SPELL_LEVEL = 0x74,              // u32 (this rank's effective level)
+    OFF_SPELL_RECORD_POWER_TYPE = 0x7C,               // i32 (0=mana,1=rage,2=focus,3=energy,4=happiness)
+    OFF_SPELL_RECORD_MANA_COST = 0x80,                // u32 base cost
+    OFF_SPELL_RECORD_RANGE_INDEX = 0x90,              // u32 → SpellRange.dbc
+    OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A = 0x148,// i32[3] implicit target A
+    OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B = 0x154,// i32[3] implicit target B
+    OFF_SPELL_RECORD_MANA_COST_PERCENT = 0x270,       // i32 % of base resource (0 = flat)
+    OFF_SPELL_RECORD_RANK = 0x204,                    // char*[9] localized rank text
+
     // Spell.dbc Mechanic field — the spell-level SpellMechanic ID (→
     // SpellMechanic.dbc), 0 = none. Field 5 of the record
     // (ID, School, Category, castUI, Dispel, Mechanic), which lands at

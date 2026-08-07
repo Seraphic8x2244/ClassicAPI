@@ -24,8 +24,6 @@ namespace Spell::Tooltip {
 // pulled from Spell::Info — that module keeps these as `static
 // constexpr` privates and exposing them just for two readers here
 // would force a header change.
-static constexpr int OFF_SPELL_NAME = 0x1E0; // localized char *[9]
-static constexpr int OFF_SPELL_RANK = 0x204; // localized char *[9]
 
 using BuildSpellTooltip_t = void(__thiscall *)(void *thisObj, int spellID, int arg2, int arg3,
                                                int isPet, int showRank, int arg6, int arg7);
@@ -94,7 +92,7 @@ void AppendByID(void *L, int spellID) {
         return;
     const int locale = *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
     const char *name = *reinterpret_cast<const char *const *>(
-        record + OFF_SPELL_NAME + locale * 4);
+        record + Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || name[0] == '\0')
         return;
 
@@ -154,9 +152,9 @@ static int __fastcall Script_GameTooltipGetSpell(void *L) {
 
     const int locale = *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
     const char *name = *reinterpret_cast<const char *const *>(
-        record + OFF_SPELL_NAME + locale * 4);
+        record + Offsets::OFF_SPELL_NAMES + locale * 4);
     const char *rank = *reinterpret_cast<const char *const *>(
-        record + OFF_SPELL_RANK + locale * 4);
+        record + Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
 
     if (name == nullptr)
         return 0;
