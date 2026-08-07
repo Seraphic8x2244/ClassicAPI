@@ -21,8 +21,38 @@ permissions:
   contents: write
 
 jobs:
+  # Decide which runner the build lands on. `runs-on` is fixed before a job
+  # starts and a job pointed at an offline self-hosted runner queues forever
+  # instead of failing over — so we probe first and hand the label down.
+  pick-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.pick.outputs.label }}
+    steps:
+      - name: Probe for an online self-hosted runner
+        id: pick
+        env:
+          # Listing runners needs repo-admin access; the default GITHUB_TOKEN
+          # does NOT have it. Create a PAT (classic: `repo`; fine-grained:
+          # Administration → read) and store it as the RUNNER_CHECK_TOKEN
+          # secret. If the secret is missing, we fall back to windows-latest.
+          GH_TOKEN: ${{ secrets.RUNNER_CHECK_TOKEN }}
+        run: |
+          label=windows-latest
+          if [ -n "$GH_TOKEN" ]; then
+            online=$(gh api "repos/${{ github.repository }}/actions/runners" \
+              --jq '[.runners[] | select(.status=="online") | select([.labels[].name] | index("self-hosted"))] | length' \
+              2>/dev/null || echo 0)
+            if [ "${online:-0}" -gt 0 ]; then
+              label=self-hosted
+            fi
+          fi
+          echo "Selected runner: $label"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
   build:
-    runs-on: windows-latest
+    needs: pick-runner
+    runs-on: ${{ needs.pick-runner.outputs.label }}
     steps:
       - uses: actions/checkout@v4
         with:
