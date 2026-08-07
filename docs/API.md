@@ -13717,7 +13717,7 @@ end
 
 **Filter tokens.** `filter` uses the modern AuraFilters format: tokens
 separated by `|` or spaces, each token optionally negated with a
-leading `!`. This build honors two:
+leading `!`. This build honors:
 
 - `HELPFUL` / `HARMFUL` — buffs / debuffs. With neither token the
   query returns both (the indexed getter defaults to helpful).
@@ -13725,8 +13725,12 @@ leading `!`. This build honors two:
   auras the player did not cast. Caster data comes from casts this
   session, so an aura present before you saw it cast has no caster and
   counts as not-player.
+- `DISPELLABLE` / `!DISPELLABLE` — only auras that can be dispelled,
+  purged, or stolen (dispel type Magic, Curse, Disease, or Poison), or
+  only auras that cannot. This is "can it be removed at all", not "can
+  you remove it".
 
-All other AuraFilters tokens (`RAID`, `CANCELABLE`, `DISPELLABLE`,
+All other AuraFilters tokens (`RAID`, `CANCELABLE`,
 `INCLUDE_NAME_PLATE_ONLY`, `MAW`, and the rest) are accepted and
 ignored — vanilla has no data for them. Token matching is whole-token,
 so `RAID_PLAYER_DISPELLABLE` is not read as `PLAYER`.
