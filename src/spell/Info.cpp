@@ -22,9 +22,6 @@
 
 namespace Spell::Info {
 
-// Attributes (+0x18) bit 6 = SPELL_ATTR_PASSIVE — passive spell (no cast
-// bar, applies its effect as soon as learned/equipped).
-static constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;
 // GetSpellInfo's isFunnel means a health-funnel spell — AttributesEx2 (+0x20)
 // bit 11 = SPELL_ATTR_EX2_HEALTH_FUNNEL. Verified from Spell.dbc: Health
 // Funnel (755) Ex2=0x808 and Hellfire (1949) Ex2=0x800 carry it, while
@@ -397,7 +394,7 @@ static int PushIsPassive(void *L, int spellID) {
         return 0;
     const uint32_t attr = *reinterpret_cast<const uint32_t *>(
         record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
-    Game::Lua::PushBool(L, (attr & SPELL_ATTR_PASSIVE) != 0);
+    Game::Lua::PushBool(L, (attr & Offsets::SPELL_ATTR_PASSIVE) != 0);
     return 1;
 }
 

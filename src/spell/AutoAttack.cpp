@@ -42,7 +42,6 @@ namespace Spell::AutoAttack {
 namespace {
 
 constexpr int SPELL_AUTO_ATTACK = 6603;
-constexpr uint32_t SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x00000020;
 
 bool IsMelee(int spellID) {
     return spellID == SPELL_AUTO_ATTACK;
@@ -58,7 +57,7 @@ bool IsRanged(int spellID) {
         return false;
     const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
         rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
-    return (attrEx2 & SPELL_ATTR_EX2_AUTOREPEAT_FLAG) != 0;
+    return (attrEx2 & Offsets::SPELL_ATTR_EX2_AUTOREPEAT_FLAG) != 0;
 }
 
 int ReadSpellID(void *L) {

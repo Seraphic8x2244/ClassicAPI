@@ -254,14 +254,11 @@ int g_pendingChanSuccSpell = 0;
 int g_pendingChanSuccTMs = 0;
 constexpr int kChanSuccDeferMs = 500;
 
-// Spell.dbc AttributesEx channel bits — same test Spell::Cast uses.
-constexpr uint32_t SPELL_ATTR_EX_CHANNELED = 0x4 | 0x40; // IS_CHANNELED | SELF
-
 bool IsChanneledSpell(int spellID) {
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
     return rec != nullptr &&
            (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
-            SPELL_ATTR_EX_CHANNELED) != 0;
+            Offsets::SPELL_ATTR_EX_CHANNELED) != 0;
 }
 
 int NowMs() {

@@ -130,7 +130,6 @@ bool SpellHiddenFromSpellbook(int spellID) {
 // checks are NOT in the 1.12 client's Spell.dbc — server-only columns — so
 // the spellLevel rule is the only client-readable target-level mechanism.)
 
-constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;                    // Attributes bit
 constexpr uint32_t SPELL_EFFECT_APPLY_AURA = 6;
 constexpr uint32_t SPELL_EFFECT_APPLY_AREA_AURA_PARTY = 35;
 
@@ -184,7 +183,7 @@ int RequiredTargetLevel(const uint8_t *record) {
         return 0;
     const uint32_t attr =
         *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
-    if (attr & SPELL_ATTR_PASSIVE)
+    if (attr & Offsets::SPELL_ATTR_PASSIVE)
         return 0;
     if (!HasRankString(record)) // single-rank spell → not gated
         return 0;

@@ -99,7 +99,6 @@ constexpr uint32_t SPELL_ATTR_TRADESPELL = 0x20;
 // flat +500ms "aim time" to these (SpellEntry::GetCastTime). Auto-repeat
 // shots (Auto Shot / Shoot, AttributesEx2 bit 0x20) are the one exclusion.
 constexpr uint32_t SPELL_ATTR_RANGED = 0x2;
-constexpr uint32_t SPELL_ATTR_EX2_AUTOREPEAT = 0x20;
 
 struct TrackedSpell {
     int spellID; // 0 = not casting / channeling
@@ -184,7 +183,7 @@ int CastTimeMs(int spellID) {
                 *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
             const uint32_t attrEx2 =
                 *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
-            if ((attr & SPELL_ATTR_RANGED) && !(attrEx2 & SPELL_ATTR_EX2_AUTOREPEAT))
+            if ((attr & SPELL_ATTR_RANGED) && !(attrEx2 & Offsets::SPELL_ATTR_EX2_AUTOREPEAT_FLAG))
                 ms += 500;
         }
     }
@@ -334,11 +333,9 @@ const Game::HookAutoRegister _castStartHook{
 // thing at a time). Regular casts back `UnitCastingInfo`; channels add real
 // times to `UnitChannelInfo` (validated against the live +0x228 field).
 
-constexpr uint32_t SPELL_ATTR_EX_CHANNELED = 0x4 | 0x40; // IS_CHANNELED | SELF
-
 bool IsChannelSpell(const uint8_t *rec) {
     return (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
-            SPELL_ATTR_EX_CHANNELED) != 0;
+            Offsets::SPELL_ATTR_EX_CHANNELED) != 0;
 }
 
 // Channel duration for a non-player caster — base (skipMod=1), since we

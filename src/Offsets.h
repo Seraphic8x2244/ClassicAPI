@@ -5774,6 +5774,11 @@ enum Offsets {
     // SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS (verified via disassembly; the
     // server enum agrees). NOT AttributesEx2's bit 29 (that's CANT_CRIT).
     SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS = 0x20000000,
+    // AttributesEx channel bits (CHANNELED_1 0x4 | CHANNELED_2 0x40) and the
+    // AttributesEx2 autorepeat flag (bit 5, Auto Shot / Shoot) — each shared
+    // by more than one module, so kept here rather than redefined locally.
+    SPELL_ATTR_EX_CHANNELED = 0x4 | 0x40,
+    SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x20,
     OFF_SPELL_RECORD_INTERRUPT_FLAGS = 0x54,          // u32 (column 21)
 
     // Remaining Spell.dbc record fields — the single source of truth for the
