@@ -53,6 +53,12 @@ jobs:
   build:
     needs: pick-runner
     runs-on: ${{ needs.pick-runner.outputs.label }}
+    # Windows PowerShell 5.1 is always present; the runner's default `pwsh`
+    # (PowerShell Core) is not installed by default, and `shell: bash` on a
+    # self-hosted box resolves to the WSL launcher in System32.
+    defaults:
+      run:
+        shell: powershell
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,21 +72,19 @@ jobs:
       # — no source edit.
       - name: Resolve version
         id: ver
-        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            tag="${{ github.ref_name }}"
-          else
-            tag=""
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [ -n "$tag" ]; then
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-          fi
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG
+          } elseif ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $tag = $env:GITHUB_REF_NAME
+          } else {
+            $tag = ''
+          }
+          $isRelease = if ($tag) { 'true' } else { 'false' }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$tag" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "is_release=$isRelease" -Encoding utf8
 
       - name: Configure (release)
         if: steps.ver.outputs.is_release == 'true'
