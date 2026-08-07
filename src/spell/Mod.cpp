@@ -51,9 +51,10 @@ float Apply(const uint8_t *spellRecord, int op, float base) {
 
     const uint32_t familyName = *reinterpret_cast<const uint32_t *>(
         spellRecord + Offsets::OFF_SPELL_RECORD_FAMILY_NAME);
-    const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
-        spellRecord + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
-    if (familyName == 0 || (attrEx2 & Offsets::SPELL_ATTR_EX2_NO_SPELL_MODS) != 0)
+    const uint32_t attrEx3 = *reinterpret_cast<const uint32_t *>(
+        spellRecord + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3);
+    if (familyName == 0 ||
+        (attrEx3 & Offsets::SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) != 0)
         return base;
     if (familyName != PlayerSpellFamily())
         return base;

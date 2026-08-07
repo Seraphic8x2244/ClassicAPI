@@ -93,14 +93,17 @@ int SpellBaseLevel(int spellID) {
 //                 a user-visible spell (Defensive Stance, 71) and
 //                 never appear in the spellbook. Skip these.
 //
-//   AttributesEx2 (+0x20)
-//     bit 0x02000000 = HIDE_FROM_AUTOLEARN — the same gate Cata's
-//                       GetCurrentLevelSpells checks
-//                       (FUN_00911c60's `(spellData[+0x24] &
-//                       0x02000000) == 0`). Catches proc-only and
-//                       engine-internal spells with a BaseLevel.
+//   AttributesEx3 (+0x24), bit 0x02000000
+//     Ported from Cata's GetCurrentLevelSpells gate
+//     (FUN_00911c60's `(spellData[+0x24] & 0x02000000) == 0`) to catch
+//     proc-only / engine-internal spells with a BaseLevel. UNVERIFIED for
+//     1.12: FUN_00911c60 is outside 1.12's .text, and the 1.12 server enum
+//     names AttributesEx3 bit 25 TREAT_AS_PERIODIC, not an auto-learn flag —
+//     Cata's flat-by-column record layout differs from 1.12's, so the byte
+//     offset may not carry the same meaning. Kept at the original +0x24 read
+//     (a 1.12-client auto-learn/spellbook-hide path still needs confirming).
 constexpr uint32_t SPELL_ATTR_HIDDEN_CLIENTSIDE = 0x80;
-constexpr uint32_t SPELL_ATTR_EX2_HIDE_FROM_AUTOLEARN = 0x02000000;
+constexpr uint32_t SPELL_ATTR_EX3_AUTOLEARN_HIDE_UNVERIFIED = 0x02000000;
 
 bool SpellHiddenFromAutoLearn(int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
@@ -110,9 +113,9 @@ bool SpellHiddenFromAutoLearn(int spellID) {
         record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     if ((attributes & SPELL_ATTR_HIDDEN_CLIENTSIDE) != 0)
         return true;
-    const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
-    return (attrEx2 & SPELL_ATTR_EX2_HIDE_FROM_AUTOLEARN) != 0;
+    const uint32_t attrEx3 = *reinterpret_cast<const uint32_t *>(
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3);
+    return (attrEx3 & SPELL_ATTR_EX3_AUTOLEARN_HIDE_UNVERIFIED) != 0;
 }
 
 // ---- Target-level gate for ranked beneficial auras ----------------------

@@ -5759,15 +5759,21 @@ enum Offsets {
     // VAR_SPELLMOD_*). Verified from FUN_006e6b30: SpellFamilyName at
     // +0x280 (gates whether the player's class mods apply), 64-bit
     // SpellFamilyFlags at +0x284 (selects which familyFlagBit rows to
-    // sum). AttributesEx2 (+0x20) bit 0x20000000 disables spell mods.
+    // sum). AttributesEx3 (+0x24) bit 0x20000000 (IGNORE_CASTER_MODIFIERS)
+    // disables spell mods — the client reads [record + 0x24] in FUN_006e6b30.
     OFF_SPELL_RECORD_FAMILY_NAME = 0x280,             // u32
     OFF_SPELL_RECORD_FAMILY_FLAGS = 0x284,            // u64
     OFF_SPELL_RECORD_ICON_ID = 0x1D4,                 // u32 SpellIconID (→ SpellIcon.dbc)
     OFF_SPELL_RECORD_ATTRIBUTES = 0x18,               // u32 (column 6, base Attributes)
     SPELL_ATTR_PASSIVE = 0x40,                        // bit 6 — always-on aura
     OFF_SPELL_RECORD_ATTRIBUTES_EX = 0x1C,            // u32 (column 7)
-    OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x20,           // u32 (column 8; 0x24 is AttributesEx3)
-    SPELL_ATTR_EX2_NO_SPELL_MODS = 0x20000000,
+    OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x20,           // u32 (column 8)
+    OFF_SPELL_RECORD_ATTRIBUTES_EX3 = 0x24,           // u32 (column 9)
+    // The client's spell-mod core (FUN_006e6b30) skips all mods when this bit
+    // is set: it reads [record + 0x24] & 0x20000000 — AttributesEx3 bit 29,
+    // SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS (verified via disassembly; the
+    // server enum agrees). NOT AttributesEx2's bit 29 (that's CANT_CRIT).
+    SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS = 0x20000000,
     OFF_SPELL_RECORD_INTERRUPT_FLAGS = 0x54,          // u32 (column 21)
 
     // Spell.dbc Mechanic field — the spell-level SpellMechanic ID (→
