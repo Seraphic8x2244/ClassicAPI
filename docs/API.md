@@ -13715,6 +13715,22 @@ if d then
 end
 ```
 
+**Filter tokens.** `filter` uses the modern AuraFilters format: tokens
+separated by `|` or spaces, each token optionally negated with a
+leading `!`. This build honors two:
+
+- `HELPFUL` / `HARMFUL` — buffs / debuffs. With neither token the
+  query returns both (the indexed getter defaults to helpful).
+- `PLAYER` / `!PLAYER` — only auras the local player cast, or only
+  auras the player did not cast. Caster data comes from casts this
+  session, so an aura present before you saw it cast has no caster and
+  counts as not-player.
+
+All other AuraFilters tokens (`RAID`, `CANCELABLE`, `DISPELLABLE`,
+`INCLUDE_NAME_PLATE_ONLY`, `MAW`, and the rest) are accepted and
+ignored — vanilla has no data for them. Token matching is whole-token,
+so `RAID_PLAYER_DISPELLABLE` is not read as `PLAYER`.
+
 ### `C_UnitAuras.GetBuffDataByIndex(unit, index)` / `GetDebuffDataByIndex(unit, index)`
 
 Convenience wrappers locking the filter to `HELPFUL` or `HARMFUL`

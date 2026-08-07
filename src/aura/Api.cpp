@@ -17,12 +17,15 @@
 // nameplate flags, etc.) are populated with vanilla-truthful
 // defaults so consumers reading those keys get sensible values.
 //
-// Filter parsing here mirrors what most modern addons actually pass:
-// "HELPFUL" / "HARMFUL" are honored, every other modern filter
-// (`PLAYER` / `RAID` / `CANCELABLE` / `INCLUDE_NAME_PLATE_ONLY`) is
-// accepted but no-ops — they'd require either source-GUID tracking
-// (`PLAYER`), class-dispel-matrix infra (`RAID`), or systems
-// vanilla doesn't have at all.
+// Filter parsing (`ParseFilters`) tokenizes the modern AuraFilters string:
+// tokens separated by `|` and/or whitespace, each optionally negated with a
+// leading `!`. Whole-token matching, so `RAID_PLAYER_DISPELLABLE` is not
+// mistaken for `PLAYER` and `!PLAYER` is a negation rather than a match.
+// Honored: `HELPFUL` / `HARMFUL` (descriptor slot ranges) and `PLAYER` /
+// `!PLAYER` (caster == / != the local player, from the Aura::Source cache).
+// Every other modern token (`RAID`, `CANCELABLE`, `DISPELLABLE`,
+// `INCLUDE_NAME_PLATE_ONLY`, `MAW`, …) is accepted and ignored — they need a
+// class-dispel matrix or systems vanilla has no data for.
 
 #include "Data.h"
 
@@ -60,24 +63,62 @@ uint64_t GuidForOutOfRange(const char *token) {
     return Unit::Identity::GuidForToken(token);
 }
 
-// Parses the filter string. Returns Helpful by default; Harmful if
-// the string contains the substring "HARMFUL". Case-sensitive — the
-// modern API documents the filter tokens as upper-case constants
-// (`"HELPFUL"` etc.) and addons that pass them through case-changing
-// transforms are already broken on modern too.
-Data::Filter ParseFilter(const char *filter) {
-    if (filter == nullptr)
-        return Data::Filter::Helpful;
-    if (strstr(filter, "HARMFUL") != nullptr)
-        return Data::Filter::Harmful;
-    return Data::Filter::Helpful;
+// Parsed AuraFilters string. `helpful`/`harmful` record which range tokens
+// were present (neither → both, matching modern's default); `caster` carries
+// the PLAYER / !PLAYER restriction.
+struct ParsedFilter {
+    bool helpful = false;
+    bool harmful = false;
+    Data::CasterMode caster = Data::CasterMode::Any;
+};
+
+// Reduces the parsed range tokens to the single `Data::Filter` the indexed /
+// by-id / by-name getters take: Harmful when HARMFUL was given, else Helpful
+// (the modern default). HELPFUL wins ties are irrelevant here — an indexed
+// getter reads one range.
+Data::Filter RangeFilter(const ParsedFilter &pf) {
+    return pf.harmful && !pf.helpful ? Data::Filter::Harmful
+                                     : Data::Filter::Helpful;
 }
 
-// The `PLAYER` filter token restricts results to auras the local player
-// cast. No other modern token contains the substring "PLAYER", so a plain
-// substring test is safe.
-bool HasPlayerFilter(const char *filter) {
-    return filter != nullptr && strstr(filter, "PLAYER") != nullptr;
+// Tokenizes the filter string. Case-sensitive (modern documents the tokens as
+// upper-case constants). `HELPFUL`/`HARMFUL` are positive range selectors;
+// negating them is meaningless for our slot-based ranges, so a leading `!` is
+// ignored on those. `PLAYER` honors negation (`!PLAYER` → NotPlayer). Any
+// unrecognized token is accepted and skipped.
+ParsedFilter ParseFilters(const char *filter) {
+    ParsedFilter out;
+    if (filter == nullptr)
+        return out;
+    for (const char *p = filter; *p != '\0';) {
+        while (*p == '|' || *p == ' ' || *p == '\t')
+            ++p;
+        if (*p == '\0')
+            break;
+        bool negate = false;
+        if (*p == '!') {
+            negate = true;
+            ++p;
+        }
+        char tok[64];
+        size_t n = 0;
+        while (*p != '\0' && *p != '|' && *p != ' ' && *p != '\t') {
+            if (n + 1 < sizeof(tok))
+                tok[n++] = *p;
+            ++p;
+        }
+        tok[n] = '\0';
+
+        if (strcmp(tok, "HELPFUL") == 0)
+            out.helpful = true;
+        else if (strcmp(tok, "HARMFUL") == 0)
+            out.harmful = true;
+        else if (strcmp(tok, "PLAYER") == 0)
+            out.caster = negate ? Data::CasterMode::NotPlayer
+                                : Data::CasterMode::PlayerOnly;
+        // else: accepted and ignored (retail-only / unimplemented token).
+    }
+    return out;
 }
 
 const char *ArgUnit(void *L, int idx) {
@@ -102,10 +143,11 @@ const char *ArgOptString(void *L, int idx) {
 // or nil if no such aura. Used by `GetAuraDataByIndex` and the
 // filter-locked aliases.
 int PushAuraByIndex(void *L, const char *unitToken, int index,
-                    Data::Filter filter, bool playerOnly = false) {
+                    Data::Filter filter,
+                    Data::CasterMode caster = Data::CasterMode::Any) {
     const uint8_t *unit = ResolveUnit(unitToken);
     if (unit != nullptr) {
-        const int slot = Data::FindNthSlot(unit, index, filter, playerOnly);
+        const int slot = Data::FindNthSlot(unit, index, filter, caster);
         if (slot >= 0) {
             Data::Push(L, unit, slot);
             return 1;
@@ -113,14 +155,14 @@ int PushAuraByIndex(void *L, const char *unitToken, int index,
         // Descriptor exhausted — an aura the engine dropped from the slot array
         // (rogue stealth, nearby party range fluctuation) may still be live in
         // the Aura::Source cache. Surface it after the descriptor entries.
-        if (Data::PushNthCacheFallback(L, unit, index, filter, playerOnly))
+        if (Data::PushNthCacheFallback(L, unit, index, filter, caster))
             return 1;
     } else {
         // No live CGUnit — an out-of-range / cross-map groupmate. The server
         // still sends their aura spell IDs via SMSG_PARTY_MEMBER_STATS; read
         // them the same way the built-in UnitBuff/UnitDebuff do.
         if (Data::PushNthGroupAura(L, GuidForOutOfRange(unitToken), index,
-                                   filter, playerOnly))
+                                   filter, caster))
             return 1;
     }
     Game::Lua::PushNil(L);
@@ -135,8 +177,8 @@ int __fastcall Script_GetAuraDataByIndex(void *L) {
         Game::Lua::PushNil(L);
         return 1;
     }
-    return PushAuraByIndex(L, unit, index, ParseFilter(filterStr),
-                           HasPlayerFilter(filterStr));
+    const ParsedFilter pf = ParseFilters(filterStr);
+    return PushAuraByIndex(L, unit, index, RangeFilter(pf), pf.caster);
 }
 
 int __fastcall Script_GetBuffDataByIndex(void *L) {
@@ -168,23 +210,19 @@ int __fastcall Script_GetUnitAuraBySpellID(void *L) {
         return 1;
     }
     const uint8_t *unit = ResolveUnit(unitToken);
-    Data::Filter f;
-    const Data::Filter *fp = nullptr;
-    if (filterStr != nullptr) {
-        f = ParseFilter(filterStr);
-        fp = &f;
-    }
-    const bool playerOnly = HasPlayerFilter(filterStr);
+    const ParsedFilter pf = ParseFilters(filterStr);
+    Data::Filter f = RangeFilter(pf);
+    const Data::Filter *fp = (pf.helpful || pf.harmful) ? &f : nullptr;
     if (unit != nullptr) {
         const int slot = Data::FindSlotBySpellID(
-            unit, static_cast<uint32_t>(spellID), fp, playerOnly);
+            unit, static_cast<uint32_t>(spellID), fp, pf.caster);
         if (slot >= 0) {
             Data::Push(L, unit, slot);
             return 1;
         }
     } else if (Data::PushGroupAuraBySpellID(L, GuidForOutOfRange(unitToken),
                                             static_cast<uint32_t>(spellID), fp,
-                                            playerOnly)) {
+                                            pf.caster)) {
         // Out-of-range groupmate — read from the group-member aura array.
         return 1;
     }
@@ -201,21 +239,17 @@ int __fastcall Script_GetAuraDataBySpellName(void *L) {
         return 1;
     }
     const uint8_t *unit = ResolveUnit(unitToken);
-    Data::Filter f;
-    const Data::Filter *fp = nullptr;
-    if (filterStr != nullptr) {
-        f = ParseFilter(filterStr);
-        fp = &f;
-    }
-    const bool playerOnly = HasPlayerFilter(filterStr);
+    const ParsedFilter pf = ParseFilters(filterStr);
+    Data::Filter f = RangeFilter(pf);
+    const Data::Filter *fp = (pf.helpful || pf.harmful) ? &f : nullptr;
     if (unit != nullptr) {
-        const int slot = Data::FindSlotBySpellName(unit, spellName, fp, playerOnly);
+        const int slot = Data::FindSlotBySpellName(unit, spellName, fp, pf.caster);
         if (slot >= 0) {
             Data::Push(L, unit, slot);
             return 1;
         }
     } else if (Data::PushGroupAuraBySpellName(L, GuidForOutOfRange(unitToken),
-                                              spellName, fp, playerOnly)) {
+                                              spellName, fp, pf.caster)) {
         // Out-of-range groupmate — read from the group-member aura array.
         return 1;
     }
@@ -243,7 +277,8 @@ int __fastcall Script_GetPlayerAuraBySpellID(void *L) {
 // sequential keys starting from `nextKey`. Updates `nextKey` so a
 // follow-up call can append to the same outer table.
 void AppendRangeToArray(void *L, const uint8_t *unit, int outerIdx,
-                       Data::Filter filter, int &nextKey, bool playerOnly) {
+                       Data::Filter filter, int &nextKey,
+                       Data::CasterMode caster) {
     const int start = (filter == Data::Filter::Harmful)
                           ? Offsets::UNIT_AURA_BUFF_COUNT
                           : 0;
@@ -253,14 +288,14 @@ void AppendRangeToArray(void *L, const uint8_t *unit, int outerIdx,
     for (int slot = start; slot < end; ++slot) {
         if (!Data::IsSlotPopulated(unit, slot))
             continue;
-        if (playerOnly && !Data::IsPlayerCast(unit, slot))
+        if (!Data::CasterMatches(caster, Data::IsPlayerCast(unit, slot)))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         Data::Push(L, unit, slot);
         Game::Lua::SetTable(L, outerIdx);
     }
     // Append auras the descriptor dropped but Aura::Source still has live.
-    Data::AppendCacheFallbacks(L, unit, filter, playerOnly, outerIdx, nextKey);
+    Data::AppendCacheFallbacks(L, unit, filter, caster, outerIdx, nextKey);
 }
 
 int __fastcall Script_GetUnitAuras(void *L) {
@@ -274,26 +309,24 @@ int __fastcall Script_GetUnitAuras(void *L) {
     // Range tokens are independent of PLAYER: an explicit HELPFUL/HARMFUL
     // selects that range, neither selects both. So `"PLAYER"` alone returns
     // both ranges restricted to player-cast auras (matching retail).
-    const bool playerOnly = HasPlayerFilter(filterStr);
-    const bool hasHelpful = filterStr != nullptr && strstr(filterStr, "HELPFUL") != nullptr;
-    const bool hasHarmful = filterStr != nullptr && strstr(filterStr, "HARMFUL") != nullptr;
-    const bool both = !hasHelpful && !hasHarmful;
+    const ParsedFilter pf = ParseFilters(filterStr);
+    const bool both = !pf.helpful && !pf.harmful;
 
     int nextKey = 1;
     if (unit != nullptr) {
-        if (hasHelpful || both)
-            AppendRangeToArray(L, unit, 1, Data::Filter::Helpful, nextKey, playerOnly);
-        if (hasHarmful || both)
-            AppendRangeToArray(L, unit, 1, Data::Filter::Harmful, nextKey, playerOnly);
+        if (pf.helpful || both)
+            AppendRangeToArray(L, unit, 1, Data::Filter::Helpful, nextKey, pf.caster);
+        if (pf.harmful || both)
+            AppendRangeToArray(L, unit, 1, Data::Filter::Harmful, nextKey, pf.caster);
     } else {
         // No live CGUnit — out-of-range / cross-map groupmate. Enumerate the
         // group-member aura array (spell IDs the server still transmits), the
         // same source the built-in UnitBuff/UnitDebuff read out of range.
         const uint64_t guid = GuidForOutOfRange(unitToken);
-        if (hasHelpful || both)
-            Data::AppendGroupAuras(L, guid, Data::Filter::Helpful, playerOnly, 1, nextKey);
-        if (hasHarmful || both)
-            Data::AppendGroupAuras(L, guid, Data::Filter::Harmful, playerOnly, 1, nextKey);
+        if (pf.helpful || both)
+            Data::AppendGroupAuras(L, guid, Data::Filter::Helpful, pf.caster, 1, nextKey);
+        if (pf.harmful || both)
+            Data::AppendGroupAuras(L, guid, Data::Filter::Harmful, pf.caster, 1, nextKey);
     }
     return 1;
 }

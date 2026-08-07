@@ -203,7 +203,7 @@ int BuildList(LocEntry *out, int maxOut) {
         const uint64_t playerGuid = Unit::Identity::PlayerGuid();
         for (int i = 1; n < maxOut; ++i) {
             const int slot = Aura::Data::FindNthSlot(
-                player, i, Aura::Data::Filter::Harmful, false);
+                player, i, Aura::Data::Filter::Harmful, Aura::Data::CasterMode::Any);
             if (slot < 0)
                 break;
             const uint32_t spellID = Aura::Data::ReadSpellID(player, slot);

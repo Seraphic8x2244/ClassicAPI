@@ -33,6 +33,14 @@ namespace Aura::Data {
 // to helpful when no filter is specified.
 enum class Filter { Helpful, Harmful };
 
+// Caster restriction from the `PLAYER` / `!PLAYER` aura filter tokens.
+// `Any` = no restriction; `PlayerOnly` = only auras the local player cast
+// (`PLAYER`); `NotPlayer` = only auras NOT cast by the local player
+// (`!PLAYER`). Caster attribution comes from the `Aura::Source` cache; a
+// cache miss counts as "not the player" (so `PlayerOnly` excludes it and
+// `NotPlayer` includes it — matching `IsPlayerCast`'s miss semantics).
+enum class CasterMode { Any, PlayerOnly, NotPlayer };
+
 // Reads the spell ID at the given absolute slot (0..47). Returns 0
 // if the slot is empty or the unit pointer is null.
 uint32_t ReadSpellID(const uint8_t *unit, int slot);
@@ -50,26 +58,30 @@ bool IsSlotPopulated(const uint8_t *unit, int slot);
 // UNIT_AURA_TOTAL-1 for Harmful. When `playerOnly` is true, only auras
 // the local player cast (per `IsPlayerCast`) are counted/returned.
 int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
-                bool playerOnly = false);
+                CasterMode caster = CasterMode::Any);
 
 // Finds the absolute slot of a populated aura with the given spell
 // ID, optionally restricted to one filter range. `filter` of
 // nullptr searches both ranges (helpful first, then harmful).
 // `playerOnly` restricts to player-cast auras. Returns -1 if not found.
 int FindSlotBySpellID(const uint8_t *unit, uint32_t spellID,
-                      const Filter *filter, bool playerOnly = false);
+                      const Filter *filter, CasterMode caster = CasterMode::Any);
 
 // Finds the absolute slot of a populated aura whose locale-resolved
 // spell name exactly matches `spellName`. Case-sensitive. Otherwise
 // same semantics as `FindSlotBySpellID`. Returns -1 if not found
 // or if `spellName` is null/empty.
 int FindSlotBySpellName(const uint8_t *unit, const char *spellName,
-                        const Filter *filter, bool playerOnly = false);
+                        const Filter *filter, CasterMode caster = CasterMode::Any);
 
 // True iff the aura at `slot` was cast by the local player, per the
 // `Aura::Source` cache. False on a cache miss (caster unknown) — so a
 // PLAYER-filtered query excludes auras whose cast we didn't observe.
 bool IsPlayerCast(const uint8_t *unit, int slot);
+
+// Applies a `CasterMode` to a per-aura "was cast by the local player" answer.
+// `Any` → always true; `PlayerOnly` → the answer; `NotPlayer` → its negation.
+bool CasterMatches(CasterMode caster, bool isPlayerCast);
 
 // Display stack count for the given slot (engine stores stacks-1,
 // we add 1). Returns 0 if the unit is null.
@@ -122,7 +134,7 @@ void Push(void *L, const uint8_t *unit, int slot);
 // helpful/harmful classification matches `filter` and that aren't already in a
 // populated descriptor slot are considered.
 bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
-                          Filter filter, bool playerOnly = false);
+                          Filter filter, CasterMode caster = CasterMode::Any);
 
 // Appends every eligible `Aura::Source` cache fallback for `unit` matching
 // `filter` into the array table at `outerIdx`, continuing from `nextKey`
@@ -130,7 +142,7 @@ bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
 // for `GetUnitAuras`. Skips entries already present in a populated descriptor
 // slot so it never double-lists.
 void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
-                          bool playerOnly, int outerIdx, int &nextKey);
+                          CasterMode caster, int outerIdx, int &nextKey);
 
 // ── Out-of-range groupmate path ────────────────────────────────────────────
 //
@@ -154,23 +166,23 @@ void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
 // matching `filter`. On a hit pushes the table and returns true; otherwise
 // pushes nothing and returns false (caller pushes nil).
 bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
-                      bool playerOnly = false);
+                      CasterMode caster = CasterMode::Any);
 
 // Pushes AuraData for the group-array aura with `spellID` on `guid`, optionally
 // restricted to one filter range (nullptr = both, helpful first). Returns true
 // on a hit (table pushed), false otherwise (nothing pushed).
 bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
-                            const Filter *filter, bool playerOnly = false);
+                            const Filter *filter, CasterMode caster = CasterMode::Any);
 
 // As `PushGroupAuraBySpellID` but matched by locale-resolved spell name
 // (case-sensitive exact match), mirroring `FindSlotBySpellName`.
 bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
-                              const Filter *filter, bool playerOnly = false);
+                              const Filter *filter, CasterMode caster = CasterMode::Any);
 
 // Appends every group-array aura on `guid` matching `filter` into the array
 // table at `outerIdx`, continuing from `nextKey` (updated in place). The
 // bulk-enumeration analog of `PushNthGroupAura`, for `GetUnitAuras`.
-void AppendGroupAuras(void *L, uint64_t guid, Filter filter, bool playerOnly,
+void AppendGroupAuras(void *L, uint64_t guid, Filter filter, CasterMode caster,
                       int outerIdx, int &nextKey);
 
 } // namespace Aura::Data
