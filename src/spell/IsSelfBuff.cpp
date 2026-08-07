@@ -16,7 +16,11 @@
 // `Spell.dbc.EffectImplicitTargetA[3]` and `EffectImplicitTargetB[3]`
 // — an effect is "self-only" when both targets are either
 // `TARGET_NONE` (0) or `TARGET_SELF` (1). Effects with a zero
-// `Effect` code are skipped (unused effect slots).
+// `Effect` code are skipped (unused effect slots). The record-scan core
+// is `Spell::IsSelfBuff::IsSelfBuff` (see the header) so the aura layer
+// can share it for sourceGUID inference.
+
+#include "spell/IsSelfBuff.h"
 
 #include "Game.h"
 #include "Offsets.h"
@@ -46,23 +50,13 @@ bool IsSelfOnlyTarget(int target) {
 
 } // namespace
 
-static int __fastcall Script_IsSelfBuff(void *L) {
-    if (!Game::Lua::IsNumber(L, 1)) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
-    const int spellID = static_cast<int>(Game::Lua::ToNumber(L, 1));
-    if (spellID <= 0) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
+bool IsSelfBuff(uint32_t spellID) {
+    if (spellID == 0)
+        return false;
     const uint8_t *rec = DBC::Record(Offsets::VAR_SPELL_RECORDS,
-                                     Offsets::VAR_SPELL_RECORD_COUNT,
-                                     static_cast<uint32_t>(spellID));
-    if (rec == nullptr) {
-        Game::Lua::PushBool(L, false);
-        return 1;
-    }
+                                     Offsets::VAR_SPELL_RECORD_COUNT, spellID);
+    if (rec == nullptr)
+        return false;
 
     bool sawEffect = false;
     for (int i = 0; i < EFFECT_COUNT; ++i) {
@@ -75,12 +69,20 @@ static int __fastcall Script_IsSelfBuff(void *L) {
             rec + OFF_SPELL_EFFECT_TARGET_A + i * 4);
         const int targetB = *reinterpret_cast<const int *>(
             rec + OFF_SPELL_EFFECT_TARGET_B + i * 4);
-        if (!IsSelfOnlyTarget(targetA) || !IsSelfOnlyTarget(targetB)) {
-            Game::Lua::PushBool(L, false);
-            return 1;
-        }
+        if (!IsSelfOnlyTarget(targetA) || !IsSelfOnlyTarget(targetB))
+            return false;
     }
-    Game::Lua::PushBool(L, sawEffect);
+    return sawEffect;
+}
+
+static int __fastcall Script_IsSelfBuff(void *L) {
+    if (!Game::Lua::IsNumber(L, 1)) {
+        Game::Lua::PushBool(L, false);
+        return 1;
+    }
+    const int spellID = static_cast<int>(Game::Lua::ToNumber(L, 1));
+    Game::Lua::PushBool(
+        L, spellID > 0 && IsSelfBuff(static_cast<uint32_t>(spellID)));
     return 1;
 }
 

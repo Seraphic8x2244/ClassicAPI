@@ -149,6 +149,43 @@ int g_writeCursor = 0;
 // gets dropped (and OnAuraRemoved evicts real removals directly regardless).
 constexpr uint32_t kEvictGraceMs = 2000;
 
+// True if `guid`'s live unit descriptor still lists `spellId` in any aura
+// slot. The descriptor is the presence authority while the unit is in view,
+// so an entry backing a still-listed aura must never be timer-reclaimed: the
+// caster (sourceGUID / sourceUnit) is immutable for the aura's lifetime, but
+// our `expirationMs` is only a base-duration estimate for non-player casters
+// (we lack their mod tables), which underestimates talent-extended auras and
+// elapses while the aura is still up. Resolves the GUID through the object
+// manager — non-throwing, returns null when the unit isn't loaded / is out of
+// range — so an out-of-range or stealthed unit reports false and its
+// fallback-only entry stays timer-reclaimable exactly as before.
+bool DescriptorListsAura(uint64_t guid, uint32_t spellId) {
+    if (guid == 0 || spellId == 0)
+        return false;
+    using ResolveByGuid_t = void *(__fastcall *)(int typeMask, const char *dbg,
+                                                 uint32_t guidLo,
+                                                 uint32_t guidHi, int priority);
+    constexpr int kUnitOrPlayerMask =
+        (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
+    auto resolve = reinterpret_cast<ResolveByGuid_t>(
+        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
+    const auto *unit = static_cast<const uint8_t *>(
+        resolve(kUnitOrPlayerMask, nullptr, static_cast<uint32_t>(guid),
+                static_cast<uint32_t>(guid >> 32), 0));
+    if (unit == nullptr)
+        return false;
+    const auto *desc = *reinterpret_cast<const uint8_t *const *>(
+        unit + Offsets::OFF_CGUNIT_OBJECT_FIELDS);
+    if (desc == nullptr)
+        return false;
+    for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot) {
+        if (*reinterpret_cast<const uint32_t *>(
+                desc + Offsets::OFF_UNIT_FIELD_AURA + slot * 4) == spellId)
+            return true;
+    }
+    return false;
+}
+
 // `fromCast` true: the SpellGo hook — authoritative caster + caster-modified
 // (talented) timing. False: the OnAuraAdded application hook — timing only,
 // no caster, and it must not clobber an entry SpellGo already owns (that
@@ -180,9 +217,13 @@ void Store(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
             return;
         }
     }
-    // Take a free slot, else an expired one, else evict round-robin.
+    // Take a free slot, else an expired one whose aura the descriptor no
+    // longer lists (a still-present aura keeps its slot so its caster isn't
+    // lost — see DescriptorListsAura), else evict round-robin.
     for (auto &e : g_cache) {
-        if (!e.used || (e.expirationMs != 0 && now >= e.expirationMs)) {
+        if (!e.used ||
+            (e.expirationMs != 0 && now >= e.expirationMs &&
+             !DescriptorListsAura(e.targetGuid, e.spellId))) {
             e = {targetGuid, casterGuid, spellId, expirationMs, durationMs,
                  now, kind, true};
             return;
@@ -547,8 +588,18 @@ void OnWorldTick() {
 
     const uint32_t now = NowMs();
     for (auto &e : g_cache) {
-        if (e.used && e.expirationMs != 0 && now >= e.expirationMs)
-            e.used = false;
+        if (!e.used || e.expirationMs == 0 || now < e.expirationMs)
+            continue;
+        // A timer elapse doesn't prove the aura is gone — expirationMs is only
+        // a base-duration estimate for non-player casters. Keep any entry whose
+        // aura the owning unit's descriptor still lists (descriptor = presence
+        // authority in view; caster is immutable for the aura's life). Only
+        // genuinely orphaned entries (unit out of range / stealthed / despawned
+        // → no descriptor backing) are timer-reclaimed; the fallback path
+        // already skips expired entries, so this can't resurface a phantom.
+        if (DescriptorListsAura(e.targetGuid, e.spellId))
+            continue;
+        e.used = false;
     }
     // Forget snapshots for members we haven't polled recently (left the group,
     // or no longer displayed) so a later re-appearance re-baselines cleanly.

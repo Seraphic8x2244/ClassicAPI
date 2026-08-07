@@ -20,6 +20,7 @@
 #include "group/MemberStats.h"
 #include "guid/Guid.h"
 #include "spell/CrowdControl.h"
+#include "spell/IsSelfBuff.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -210,6 +211,18 @@ double SpellBaseDurationSeconds(uint32_t spellID, int unitLevel) {
 // Reads the player's level from UNIT_FIELD_LEVEL. Returns 0 when
 // unresolved (pre-login, no descriptor) — caller should treat that
 // as "skip level scaling".
+// True if the engine-tick expiration `expMs` has already reached/passed now.
+// Same signed-wrap-safe compare `PlayerBuffExpirationSeconds` uses (absorbs
+// the ~24.86-day GetTickCount wrap). An already-elapsed cached expiration is
+// not meaningful — the caster is kept regardless, but the time is reported as
+// unknown rather than as a negative remaining.
+bool ExpirationElapsed(uint32_t expMs) {
+    using TickCount_t = uint32_t(__fastcall *)();
+    const uint32_t nowMs = reinterpret_cast<TickCount_t>(
+        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
+    return static_cast<int32_t>(nowMs - expMs) >= 0;
+}
+
 int PlayerLevel(const uint8_t *player) {
     auto *desc = Descriptor(player);
     if (desc == nullptr)
@@ -528,13 +541,27 @@ static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
         uint32_t expMs = 0;
         uint32_t durMs = 0;
         if (Aura::Source::Get(guid, spellID, &c, &expMs, &durMs)) {
-            if (expirationTime == 0.0 && expMs != 0)
+            // A cached expiration that already elapsed while the aura is still
+            // present (non-player casters get an underestimated base duration)
+            // is not meaningful — report unknown (0) rather than a negative
+            // remaining time. The caster stays; it's immutable for the life of
+            // the aura, which is the whole point of pinning the entry.
+            if (expirationTime == 0.0 && expMs != 0 && !ExpirationElapsed(expMs))
                 expirationTime = static_cast<double>(expMs) * 0.001;
             if (durMs != 0)
                 duration = static_cast<double>(durMs) * 0.001;
             casterGuid = c;
         }
     }
+    // Never observed the cast (no cache entry, or one with no caster): a
+    // self-only-target aura can only have been self-cast, so the unit carrying
+    // it is its own source. Recovers sourceUnit/sourceGUID for pre-existing
+    // self-buffs — e.g. a party member buffed before we saw them, or the
+    // player's own login-persisted buffs. Timing stays unknown (we still never
+    // saw the cast); only the caster is inferred, and it's exact.
+    if (casterGuid == 0 && guid != 0 && spellID != 0 &&
+        Spell::IsSelfBuff::IsSelfBuff(spellID))
+        casterGuid = guid;
     BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
                casterGuid);
 }
