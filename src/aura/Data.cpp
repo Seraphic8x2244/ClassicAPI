@@ -19,6 +19,7 @@
 #include "dbc/Lookup.h"
 #include "group/MemberStats.h"
 #include "guid/Guid.h"
+#include "spell/CrowdControl.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -288,9 +289,21 @@ bool DispelMatches(DispelMode dispel, uint32_t spellID) {
     }
 }
 
+bool CcMatches(CcMode cc, uint32_t spellID) {
+    switch (cc) {
+        case CcMode::CrowdControlOnly:
+            return Spell::CrowdControl::IsCrowdControl(spellID);
+        case CcMode::NotCrowdControl:
+            return !Spell::CrowdControl::IsCrowdControl(spellID);
+        default:
+            return true; // Any
+    }
+}
+
 bool MatchesAura(const Match &match, bool isPlayerCast, uint32_t spellID) {
     return CasterMatches(match.caster, isPlayerCast) &&
-           DispelMatches(match.dispel, spellID);
+           DispelMatches(match.dispel, spellID) &&
+           CcMatches(match.cc, spellID);
 }
 
 // Group-array analog of IsPlayerCast: the group aura carries no caster, so we

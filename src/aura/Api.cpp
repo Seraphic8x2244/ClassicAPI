@@ -23,12 +23,14 @@
 // mistaken for `PLAYER` and `!PLAYER` is a negation rather than a match.
 // Honored: `HELPFUL` / `HARMFUL` (descriptor slot ranges), `PLAYER` /
 // `!PLAYER` (caster == / != the local player, from the Aura::Source cache),
-// and `DISPELLABLE` / `!DISPELLABLE` (dispel type is / isn't one a
+// `DISPELLABLE` / `!DISPELLABLE` (dispel type is / isn't one a
 // dispel/purge/steal can remove — Spell.dbc Dispel ∈ Magic/Curse/Disease/
-// Poison, matching the server's DISPEL_ALL_MASK). Every other modern token
-// (`RAID`, `CANCELABLE`, `INCLUDE_NAME_PLATE_ONLY`, `MAW`, …) is accepted and
-// ignored — they need a class-dispel matrix or systems vanilla has no data
-// for.
+// Poison, matching the server's DISPEL_ALL_MASK), and `CROWD_CONTROL` /
+// `!CROWD_CONTROL` (is / isn't a hard control effect, via the shared
+// `Spell::CrowdControl` classifier that also backs C_LossOfControl). Every
+// other modern token (`RAID`, `CANCELABLE`, `INCLUDE_NAME_PLATE_ONLY`, `MAW`,
+// …) is accepted and ignored — they need a class-dispel matrix or systems
+// vanilla has no data for.
 
 #include "Data.h"
 
@@ -74,8 +76,9 @@ struct ParsedFilter {
     bool harmful = false;
     Data::CasterMode caster = Data::CasterMode::Any;
     Data::DispelMode dispel = Data::DispelMode::Any;
+    Data::CcMode cc = Data::CcMode::Any;
 
-    Data::Match ToMatch() const { return Data::Match{caster, dispel}; }
+    Data::Match ToMatch() const { return Data::Match{caster, dispel, cc}; }
 };
 
 // Reduces the parsed range tokens to the single `Data::Filter` the indexed /
@@ -125,6 +128,9 @@ ParsedFilter ParseFilters(const char *filter) {
         else if (strcmp(tok, "DISPELLABLE") == 0)
             out.dispel = negate ? Data::DispelMode::NotDispellable
                                 : Data::DispelMode::DispellableOnly;
+        else if (strcmp(tok, "CROWD_CONTROL") == 0)
+            out.cc = negate ? Data::CcMode::NotCrowdControl
+                            : Data::CcMode::CrowdControlOnly;
         // else: accepted and ignored (retail-only / unimplemented token).
     }
     return out;

@@ -13729,6 +13729,11 @@ leading `!`. This build honors:
   purged, or stolen (dispel type Magic, Curse, Disease, or Poison), or
   only auras that cannot. This is "can it be removed at all", not "can
   you remove it".
+- `CROWD_CONTROL` / `!CROWD_CONTROL` — only auras that are a crowd-
+  control effect (stun, fear, silence, root, charm, confuse, disarm, and
+  movement slows), or only auras that are not. Shares the loss-of-control
+  classifier with `C_LossOfControl`, plus snares (which are crowd
+  control but not loss of control).
 
 All other AuraFilters tokens (`RAID`, `CANCELABLE`,
 `INCLUDE_NAME_PLATE_ONLY`, `MAW`, and the rest) are accepted and

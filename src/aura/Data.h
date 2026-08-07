@@ -49,12 +49,19 @@ enum class CasterMode { Any, PlayerOnly, NotPlayer };
 // matching the modern AuraFilters semantics.
 enum class DispelMode { Any, DispellableOnly, NotDispellable };
 
+// Restriction from the `CROWD_CONTROL` / `!CROWD_CONTROL` aura filter tokens.
+// `Any` = no restriction; `CrowdControlOnly` = only auras that are a crowd-
+// control effect (stun / fear / silence / root / etc., per
+// `Spell::CrowdControl`); `NotCrowdControl` = the complement.
+enum class CcMode { Any, CrowdControlOnly, NotCrowdControl };
+
 // A parsed aura-filter's per-aura predicates (beyond the helpful/harmful
 // range, which is the separate `Filter`). Extensible: new orthogonal filter
 // dimensions add a field here rather than another function parameter.
 struct Match {
     CasterMode caster = CasterMode::Any;
     DispelMode dispel = DispelMode::Any;
+    CcMode cc = CcMode::Any;
 };
 
 // Reads the spell ID at the given absolute slot (0..47). Returns 0

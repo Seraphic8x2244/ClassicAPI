@@ -45,6 +45,7 @@
 #include "event/Custom.h"
 #include "net/PacketDispatch.h"
 #include "net/PacketReader.h"
+#include "spell/CrowdControl.h"
 #include "spell/Lookup.h"
 #include "tick/WorldTick.h"
 #include "unit/Identity.h"
@@ -87,30 +88,9 @@ int SpellSchoolIndex(const uint8_t *rec) {
     return *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_SCHOOL);
 }
 
-// Classify a spell's control-loss type from its EffectApplyAuraName array, or
-// null if it applies no control-loss aura. Priority-ordered (strongest control
-// first) so a multi-effect spell resolves to one locType, matching retail.
-const char *ClassifyControlLoss(const uint8_t *rec) {
-    const int32_t *aura = reinterpret_cast<const int32_t *>(
-        rec + Offsets::OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME);
-    auto has = [&](int type) {
-        for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i)
-            if (aura[i] == type)
-                return true;
-        return false;
-    };
-    if (has(Offsets::SPELL_AURA_MOD_POSSESS)) return "POSSESS";
-    if (has(Offsets::SPELL_AURA_MOD_CHARM)) return "CHARM";
-    if (has(Offsets::SPELL_AURA_MOD_STUN)) return "STUN";
-    if (has(Offsets::SPELL_AURA_MOD_FEAR)) return "FEAR";
-    if (has(Offsets::SPELL_AURA_MOD_CONFUSE)) return "CONFUSE";
-    if (has(Offsets::SPELL_AURA_MOD_PACIFY_SILENCE)) return "PACIFYSILENCE";
-    if (has(Offsets::SPELL_AURA_MOD_SILENCE)) return "SILENCE";
-    if (has(Offsets::SPELL_AURA_MOD_PACIFY)) return "PACIFY";
-    if (has(Offsets::SPELL_AURA_MOD_ROOT)) return "ROOT";
-    if (has(Offsets::SPELL_AURA_MOD_DISARM)) return "DISARM";
-    return nullptr;
-}
+// The control-loss classifier lives in `Spell::CrowdControl::Classify` so the
+// `C_UnitAuras` CROWD_CONTROL aura filter shares this hard-control set (that
+// filter additionally counts snares, which are crowd control but not LoC).
 
 // ---- School-interrupt lockout state (fed by SMSG_SPELL_COOLDOWN) -----------
 
@@ -213,7 +193,7 @@ int BuildList(LocEntry *out, int maxOut) {
                 Spell::Lookup::RecordForID(static_cast<int>(spellID));
             if (rec == nullptr)
                 continue;
-            const char *locType = ClassifyControlLoss(rec);
+            const char *locType = Spell::CrowdControl::Classify(rec);
             if (locType == nullptr)
                 continue;
 

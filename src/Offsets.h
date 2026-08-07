@@ -5788,6 +5788,10 @@ enum Offsets {
     SPELL_AURA_MOD_CHARM = 6,
     SPELL_AURA_MOD_FEAR = 7,
     SPELL_AURA_MOD_STUN = 12,
+    // Movement slow / snare. Not a loss-of-control (C_LossOfControl omits it),
+    // but the C_UnitAuras CROWD_CONTROL filter counts it — see
+    // Spell::CrowdControl::IsCrowdControl.
+    SPELL_AURA_MOD_DECREASE_SPEED = 33,
     SPELL_AURA_MOD_PACIFY = 25,
     SPELL_AURA_MOD_ROOT = 26,
     SPELL_AURA_MOD_SILENCE = 27,
