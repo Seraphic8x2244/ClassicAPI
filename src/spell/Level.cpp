@@ -84,38 +84,35 @@ int SpellBaseLevel(int spellID) {
         record + Offsets::OFF_SPELL_RECORD_BASE_LEVEL);
 }
 
-// Spell.dbc attribute fields/bits used to filter learnable-spell
-// results down to what's actually user-facing.
+// Spell.dbc attribute filter for the learnable-spell walk. Only the
+// verified HIDDEN_CLIENTSIDE bit is used:
 //
-//   Attributes   (+0x18)
-//     bit 0x80  = HIDDEN_CLIENTSIDE — engine-internal helpers like
-//                 "Defensive Stance Passive" (7376) that pair with
-//                 a user-visible spell (Defensive Stance, 71) and
-//                 never appear in the spellbook. Skip these.
+//   Attributes (+0x18) bit 0x80 = HIDDEN_CLIENTSIDE — engine-internal
+//   helpers like "Defensive Stance Passive" (7376) that pair with a
+//   user-visible spell (Defensive Stance, 71) and never appear in the
+//   spellbook. Skip these.
 //
-//   AttributesEx3 (+0x24), bit 0x02000000
-//     Ported from Cata's GetCurrentLevelSpells gate
-//     (FUN_00911c60's `(spellData[+0x24] & 0x02000000) == 0`) to catch
-//     proc-only / engine-internal spells with a BaseLevel. UNVERIFIED for
-//     1.12: FUN_00911c60 is outside 1.12's .text, and the 1.12 server enum
-//     names AttributesEx3 bit 25 TREAT_AS_PERIODIC, not an auto-learn flag —
-//     Cata's flat-by-column record layout differs from 1.12's, so the byte
-//     offset may not carry the same meaning. Kept at the original +0x24 read
-//     (a 1.12-client auto-learn/spellbook-hide path still needs confirming).
+// A prior version also tested AttributesEx3 (+0x24) bit 0x02000000 as a
+// "hide from auto-learn" gate ported from a MoP function (FUN_00911c60).
+// That was invalid on every count: FUN_00911c60 is outside 1.12's .text
+// and its `+0x24` is not 1.12's AttributesEx3. Verified against Spell.dbc,
+// the 1.12 bit is a sparse grab-bag (44 / 27925 records: passive procs,
+// odd DoT ranks, the Night Elf priest Starshards line, Turtle customs) —
+// not an auto-learn flag — so it could only wrongly hide legitimate
+// learnable spells (Starshards carries it). Removed. The authoritative
+// auto-learn signal is SkillLineAbility.learnOnGetSkill (col 9: 2 =
+// race/class, 1 = profession, 0 = trainer-taught), not a Spell.dbc bit;
+// this feature deliberately reports the broader "trainable at level" set,
+// so it applies no learnOnGetSkill filter.
 constexpr uint32_t SPELL_ATTR_HIDDEN_CLIENTSIDE = 0x80;
-constexpr uint32_t SPELL_ATTR_EX3_AUTOLEARN_HIDE_UNVERIFIED = 0x02000000;
 
-bool SpellHiddenFromAutoLearn(int spellID) {
+bool SpellHiddenFromSpellbook(int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return false;
     const uint32_t attributes = *reinterpret_cast<const uint32_t *>(
         record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
-    if ((attributes & SPELL_ATTR_HIDDEN_CLIENTSIDE) != 0)
-        return true;
-    const uint32_t attrEx3 = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3);
-    return (attrEx3 & SPELL_ATTR_EX3_AUTOLEARN_HIDE_UNVERIFIED) != 0;
+    return (attributes & SPELL_ATTR_HIDDEN_CLIENTSIDE) != 0;
 }
 
 // ---- Target-level gate for ranked beneficial auras ----------------------
@@ -426,12 +423,9 @@ int __fastcall Script_GetCurrentLevelSpells(void *L) {
         // GetCurrentLevelSpells excludes them too.
         if (TalentSpellSet().count(spellID) != 0)
             continue;
-        // Skip spells flagged "hide from auto-learn list" — the
-        // same AttributesEx2 bit Cata's GetCurrentLevelSpells
-        // checks (FUN_00911c60). Catches engine-internal or proc-
-        // only spells that have a BaseLevel but aren't meant to
-        // surface as learnable.
-        if (SpellHiddenFromAutoLearn(spellID))
+        // Skip engine-internal spellbook-hidden spells (HIDDEN_CLIENTSIDE):
+        // they can carry a BaseLevel but never surface as learnable.
+        if (SpellHiddenFromSpellbook(spellID))
             continue;
         if (!seen.insert(spellID).second)
             continue;
