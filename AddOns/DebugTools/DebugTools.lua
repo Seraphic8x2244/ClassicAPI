@@ -1018,7 +1018,7 @@ end
 
 local function _UpdateFrameStackTooltip(tooltip, showHidden)
     tooltip:ClearLines();
-    tooltip:AddLine("Frame Stack", 1, 1, 1);
+    tooltip:AddLine(DEBUG_FRAMESTACK or "Frame Stack", 1, 1, 1);
     local matches = _CollectFramesUnderMouse(showHidden);
     local count = table.getn(matches);
     if (count == 0) then
