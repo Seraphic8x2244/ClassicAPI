@@ -31,13 +31,17 @@ static constexpr int OFF_ICON_ID = 0x1D4;
 static constexpr int OFF_NAME = 0x1E0;
 static constexpr int OFF_RANK = 0x204;
 
-// Spell.dbc Attributes (+0x18) and AttributesEx (+0x1C) flag bits we read.
-// Both bits are 0x40, but on different fields:
-//   Attributes  bit 6 = SPELL_ATTR_PASSIVE  — passive spell (no cast bar,
-//                       applies its effect as soon as learned/equipped)
-//   AttributesEx bit 6 = SPELL_ATTR_EX_FUNNEL_PERCENT — funnel channel
+// Attributes (+0x18) bit 6 = SPELL_ATTR_PASSIVE — passive spell (no cast
+// bar, applies its effect as soon as learned/equipped).
 static constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;
-static constexpr uint32_t SPELL_ATTR_EX_FUNNEL = 0x40;
+// GetSpellInfo's isFunnel means a health-funnel spell — AttributesEx2 (+0x20)
+// bit 11 = SPELL_ATTR_EX2_HEALTH_FUNNEL. Verified from Spell.dbc: Health
+// Funnel (755) Ex2=0x808 and Hellfire (1949) Ex2=0x800 carry it, while
+// channeled non-funnels (Drain Life, Mind Flay, Arcane Missiles, Rain of
+// Fire) do not. An earlier version read AttributesEx bit 6, which is
+// CHANNELED_2 — false for Health Funnel itself and true for unrelated
+// channels, so it never actually detected funnel spells.
+static constexpr uint32_t SPELL_ATTR_EX2_HEALTH_FUNNEL = 0x800;
 // Spell.dbc effect-target arrays. Each spell has 3 effects, each
 // with an implicit target A and an implicit target B (the latter
 // often 0). Used by IsSpellHarmful / IsSpellHelpful — vanilla has
@@ -152,9 +156,9 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
 
     out.cost = *reinterpret_cast<const int *>(record + OFF_MANA_COST);
 
-    const uint32_t attrEx = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX);
-    out.isFunnel = (attrEx & SPELL_ATTR_EX_FUNNEL) != 0;
+    const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
+    out.isFunnel = (attrEx2 & SPELL_ATTR_EX2_HEALTH_FUNNEL) != 0;
 
     out.powerType = *reinterpret_cast<const int *>(record + OFF_POWER_TYPE);
 
