@@ -5759,14 +5759,16 @@ enum Offsets {
     // VAR_SPELLMOD_*). Verified from FUN_006e6b30: SpellFamilyName at
     // +0x280 (gates whether the player's class mods apply), 64-bit
     // SpellFamilyFlags at +0x284 (selects which familyFlagBit rows to
-    // sum). AttributesEx2 (+0x24) bit 0x20000000 disables spell mods.
+    // sum). AttributesEx2 (+0x20) bit 0x20000000 disables spell mods.
     OFF_SPELL_RECORD_FAMILY_NAME = 0x280,             // u32
     OFF_SPELL_RECORD_FAMILY_FLAGS = 0x284,            // u64
     OFF_SPELL_RECORD_ICON_ID = 0x1D4,                 // u32 SpellIconID (→ SpellIcon.dbc)
-    OFF_SPELL_RECORD_ATTRIBUTES = 0x18,               // u32 (base Attributes)
+    OFF_SPELL_RECORD_ATTRIBUTES = 0x18,               // u32 (column 6, base Attributes)
     SPELL_ATTR_PASSIVE = 0x40,                        // bit 6 — always-on aura
-    OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x24,           // u32
+    OFF_SPELL_RECORD_ATTRIBUTES_EX = 0x1C,            // u32 (column 7)
+    OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x20,           // u32 (column 8; 0x24 is AttributesEx3)
     SPELL_ATTR_EX2_NO_SPELL_MODS = 0x20000000,
+    OFF_SPELL_RECORD_INTERRUPT_FLAGS = 0x54,          // u32 (column 21)
 
     // Spell.dbc Mechanic field — the spell-level SpellMechanic ID (→
     // SpellMechanic.dbc), 0 = none. Field 5 of the record

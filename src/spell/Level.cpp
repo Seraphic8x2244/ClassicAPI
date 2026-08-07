@@ -93,14 +93,12 @@ int SpellBaseLevel(int spellID) {
 //                 a user-visible spell (Defensive Stance, 71) and
 //                 never appear in the spellbook. Skip these.
 //
-//   AttributesEx2 (+0x24)
+//   AttributesEx2 (+0x20)
 //     bit 0x02000000 = HIDE_FROM_AUTOLEARN — the same gate Cata's
 //                       GetCurrentLevelSpells checks
 //                       (FUN_00911c60's `(spellData[+0x24] &
 //                       0x02000000) == 0`). Catches proc-only and
 //                       engine-internal spells with a BaseLevel.
-constexpr int OFF_SPELL_RECORD_ATTRIBUTES = 0x18;
-constexpr int OFF_SPELL_RECORD_ATTRIBUTES_EX2 = 0x24;
 constexpr uint32_t SPELL_ATTR_HIDDEN_CLIENTSIDE = 0x80;
 constexpr uint32_t SPELL_ATTR_EX2_HIDE_FROM_AUTOLEARN = 0x02000000;
 
@@ -109,11 +107,11 @@ bool SpellHiddenFromAutoLearn(int spellID) {
     if (record == nullptr)
         return false;
     const uint32_t attributes = *reinterpret_cast<const uint32_t *>(
-        record + OFF_SPELL_RECORD_ATTRIBUTES);
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     if ((attributes & SPELL_ATTR_HIDDEN_CLIENTSIDE) != 0)
         return true;
     const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
-        record + OFF_SPELL_RECORD_ATTRIBUTES_EX2);
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
     return (attrEx2 & SPELL_ATTR_EX2_HIDE_FROM_AUTOLEARN) != 0;
 }
 
@@ -190,7 +188,7 @@ int RequiredTargetLevel(const uint8_t *record) {
     if (spellLevel <= 10) // targetLevel + 10 >= spellLevel holds for any level
         return 0;
     const uint32_t attr =
-        *reinterpret_cast<const uint32_t *>(record + OFF_SPELL_RECORD_ATTRIBUTES);
+        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     if (attr & SPELL_ATTR_PASSIVE)
         return 0;
     if (!HasRankString(record)) // single-rank spell → not gated

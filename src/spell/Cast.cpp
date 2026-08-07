@@ -92,8 +92,6 @@ using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, in
 // Spell.dbc record field offsets (mirrors Spell::Info's locals).
 constexpr int OFF_NAME = 0x1E0;            // localized name[9]
 constexpr int OFF_ICON_ID = 0x1D4;         // -> SpellIcon.dbc
-constexpr int OFF_ATTRIBUTES = 0x18;       // u32 Attributes flags
-constexpr int OFF_ATTRIBUTES_EX2 = 0x24;   // u32 AttributesEx2 flags
 constexpr int OFF_SUBRECORD_VALUE = 0x04;  // SpellIcon path field
 
 // SPELL_ATTR_TRADESPELL — set on profession recipe casts (enchant,
@@ -188,9 +186,9 @@ int CastTimeMs(int spellID) {
         const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
         if (rec != nullptr) {
             const uint32_t attr =
-                *reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES);
+                *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
             const uint32_t attrEx2 =
-                *reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES_EX2);
+                *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
             if ((attr & SPELL_ATTR_RANGED) && !(attrEx2 & SPELL_ATTR_EX2_AUTOREPEAT))
                 ms += 500;
         }
@@ -216,7 +214,8 @@ const char *SpellName(const uint8_t *rec) {
 }
 
 bool IsTradeskill(const uint8_t *rec) {
-    return (*reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES) & SPELL_ATTR_TRADESPELL) != 0;
+    return (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES) &
+            SPELL_ATTR_TRADESPELL) != 0;
 }
 
 // Spell icon texture path, or "" if there's no icon record. SpellIcon.dbc
@@ -340,11 +339,10 @@ const Game::HookAutoRegister _castStartHook{
 // thing at a time). Regular casts back `UnitCastingInfo`; channels add real
 // times to `UnitChannelInfo` (validated against the live +0x228 field).
 
-constexpr int OFF_ATTRIBUTES_EX = 0x1C; // Spell.dbc AttributesEx
 constexpr uint32_t SPELL_ATTR_EX_CHANNELED = 0x4 | 0x40; // IS_CHANNELED | SELF
 
 bool IsChannelSpell(const uint8_t *rec) {
-    return (*reinterpret_cast<const uint32_t *>(rec + OFF_ATTRIBUTES_EX) &
+    return (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
             SPELL_ATTR_EX_CHANNELED) != 0;
 }
 

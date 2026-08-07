@@ -23,7 +23,6 @@
 namespace Spell::Info {
 
 // Spell.dbc record offsets (from BuildSpellTooltip / Script_GetSpellName / Script_GetSpellTexture).
-static constexpr int OFF_ATTRIBUTES_EX = 0x1C;
 static constexpr int OFF_CASTING_TIME_INDEX = 0x48;
 static constexpr int OFF_POWER_TYPE = 0x7C;
 static constexpr int OFF_MANA_COST = 0x80;
@@ -37,7 +36,6 @@ static constexpr int OFF_RANK = 0x204;
 //   Attributes  bit 6 = SPELL_ATTR_PASSIVE  — passive spell (no cast bar,
 //                       applies its effect as soon as learned/equipped)
 //   AttributesEx bit 6 = SPELL_ATTR_EX_FUNNEL_PERCENT — funnel channel
-static constexpr int OFF_ATTRIBUTES = 0x18;
 static constexpr uint32_t SPELL_ATTR_PASSIVE = 0x40;
 static constexpr uint32_t SPELL_ATTR_EX_FUNNEL = 0x40;
 // Spell.dbc effect-target arrays. Each spell has 3 effects, each
@@ -154,7 +152,8 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
 
     out.cost = *reinterpret_cast<const int *>(record + OFF_MANA_COST);
 
-    const uint32_t attrEx = *reinterpret_cast<const uint32_t *>(record + OFF_ATTRIBUTES_EX);
+    const uint32_t attrEx = *reinterpret_cast<const uint32_t *>(
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX);
     out.isFunnel = (attrEx & SPELL_ATTR_EX_FUNNEL) != 0;
 
     out.powerType = *reinterpret_cast<const int *>(record + OFF_POWER_TYPE);
@@ -404,7 +403,8 @@ static int PushIsPassive(void *L, int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return 0;
-    const uint32_t attr = *reinterpret_cast<const uint32_t *>(record + OFF_ATTRIBUTES);
+    const uint32_t attr = *reinterpret_cast<const uint32_t *>(
+        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     Game::Lua::PushBool(L, (attr & SPELL_ATTR_PASSIVE) != 0);
     return 1;
 }
