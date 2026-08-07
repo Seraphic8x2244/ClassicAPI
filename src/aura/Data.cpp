@@ -231,6 +231,25 @@ int PlayerLevel(const uint8_t *player) {
         desc + Offsets::OFF_UNIT_FIELD_LEVEL);
 }
 
+// The caster GUID attributed to `(guid, spellID)`: the observed caster from
+// the Aura::Source cache, else — when we never saw the cast — the unit itself
+// if the spell is a self-only-target buff (self-buffs can't be cross-cast).
+// 0 when genuinely unknown. Single source of truth for both display
+// (sourceGUID/sourceUnit) and the PLAYER caster filter, so a self-buff shows a
+// source AND matches HELPFUL|PLAYER instead of the two paths disagreeing.
+uint64_t EffectiveCaster(uint64_t guid, uint32_t spellID) {
+    if (guid == 0 || spellID == 0)
+        return 0;
+    uint64_t c = 0;
+    uint32_t expMs = 0;
+    uint32_t durMs = 0;
+    if (Aura::Source::Get(guid, spellID, &c, &expMs, &durMs) && c != 0)
+        return c; // observed caster
+    if (Spell::IsSelfBuff::IsSelfBuff(spellID))
+        return guid; // self-only-target aura → cast by the unit itself
+    return 0;
+}
+
 } // namespace
 
 uint32_t ReadSpellID(const uint8_t *unit, int slot) {
@@ -264,12 +283,8 @@ bool IsPlayerCast(const uint8_t *unit, int slot) {
     const uint32_t spellID = ReadSpellID(unit, slot);
     if (spellID == 0)
         return false;
-    uint64_t casterGuid = 0;
-    uint32_t expMs = 0;
-    uint32_t durMs = 0;
-    if (!Aura::Source::Get(UnitGuid(unit), spellID, &casterGuid, &expMs, &durMs))
-        return false;
-    return casterGuid != 0 && casterGuid == Unit::Identity::PlayerGuid();
+    const uint64_t player = Unit::Identity::PlayerGuid();
+    return player != 0 && EffectiveCaster(UnitGuid(unit), spellID) == player;
 }
 
 // Applies the PLAYER / !PLAYER caster restriction. `isPlayerCast` is the
@@ -323,11 +338,8 @@ bool MatchesAura(const Match &match, bool isPlayerCast, uint32_t spellID) {
 // consult the Aura::Source cache by (guid, spellID). A miss counts as "not the
 // player" (same as IsPlayerCast).
 bool GroupIsPlayerCast(uint64_t guid, uint32_t spellID) {
-    uint64_t c = 0;
-    uint32_t e = 0;
-    uint32_t d = 0;
-    return Aura::Source::Get(guid, spellID, &c, &e, &d) &&
-           c == Unit::Identity::PlayerGuid();
+    const uint64_t player = Unit::Identity::PlayerGuid();
+    return player != 0 && EffectiveCaster(guid, spellID) == player;
 }
 
 int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
@@ -544,24 +556,19 @@ static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
             // A cached expiration that already elapsed while the aura is still
             // present (non-player casters get an underestimated base duration)
             // is not meaningful — report unknown (0) rather than a negative
-            // remaining time. The caster stays; it's immutable for the life of
-            // the aura, which is the whole point of pinning the entry.
+            // remaining time.
             if (expirationTime == 0.0 && expMs != 0 && !ExpirationElapsed(expMs))
                 expirationTime = static_cast<double>(expMs) * 0.001;
             if (durMs != 0)
                 duration = static_cast<double>(durMs) * 0.001;
-            casterGuid = c;
         }
+        // Caster (sourceGUID/sourceUnit): observed caster, else the self-buff
+        // inference — same resolution the PLAYER filter uses, so a self-buff
+        // both shows a source and matches HELPFUL|PLAYER. Timing stays unknown
+        // when we never saw the cast; only the caster is inferred, and it's
+        // exact.
+        casterGuid = EffectiveCaster(guid, spellID);
     }
-    // Never observed the cast (no cache entry, or one with no caster): a
-    // self-only-target aura can only have been self-cast, so the unit carrying
-    // it is its own source. Recovers sourceUnit/sourceGUID for pre-existing
-    // self-buffs — e.g. a party member buffed before we saw them, or the
-    // player's own login-persisted buffs. Timing stays unknown (we still never
-    // saw the cast); only the caster is inferred, and it's exact.
-    if (casterGuid == 0 && guid != 0 && spellID != 0 &&
-        Spell::IsSelfBuff::IsSelfBuff(spellID))
-        casterGuid = guid;
     BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
                casterGuid);
 }
