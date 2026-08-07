@@ -202,6 +202,19 @@ enum Offsets {
     //     GO field at +0x370.
     FUN_GAMETOOLTIP_BUILD_UNIT = 0x00529FE0,
     FUN_GAMETOOLTIP_BUILD_GAMEOBJECT = 0x0052AA20,
+    // Pointer to the GameTooltip CFrameScriptObject the engine's mouseover
+    // setter builds into (`DAT_00b4b3c4`; the value at this address is the
+    // tooltip object). `Frame::Attributes` reads it to build the unit tooltip
+    // for offline/out-of-range party & raid members, which FUN_00492890 skips.
+    VAR_GAMETOOLTIP_OBJECT_PTR = 0x00B4B3C4,
+    // The tooltip's OnTooltipSetDefaultAnchor handler slot (the `{handler,
+    // context}` pair the script resolver maps that name to). The engine
+    // mouseover setter fires this before building to (re)establish the
+    // tooltip owner/anchor via FrameXML's GameTooltip_SetDefaultAnchor —
+    // without it a rebuild after the tooltip was hidden has no owner and
+    // stays invisible. `Frame::Attributes` fires it (via the self-contained
+    // FUN_FRAME_INVOKE_SCRIPT) before the offline roster build.
+    OFF_TOOLTIP_SET_DEFAULT_ANCHOR_HANDLER = 0x444,
     FUN_GAMETOOLTIP_ADD_LINE = 0x00530270,        // __thiscall(self, left, right, lColorBGRA*, rColorBGRA*, wrap)
     OFF_GAMETOOLTIP_NUM_LINES = 0x31C,            // int — live line count (AddLine index; +0x320 is the cap)
     // The displayed item's identity is read via the existing

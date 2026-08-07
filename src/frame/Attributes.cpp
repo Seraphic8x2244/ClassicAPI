@@ -410,6 +410,56 @@ void CallEngineMouseover(uint64_t guid) {
         static_cast<uint32_t>(guid), static_cast<uint32_t>(guid >> 32), 0, 0);
 }
 
+// True when the GUID resolves to a live unit/player object (loaded, in range).
+// False for an offline or far out-of-range party/raid member — the case the
+// engine mouseover setter skips the tooltip for. Same resolver Unit::Mouseover
+// uses for its unit test.
+bool GuidHasLiveUnit(uint64_t guid) {
+    if (guid == 0)
+        return false;
+    constexpr int kUnitOrPlayerMask =
+        (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
+    auto resolve = reinterpret_cast<void *(__fastcall *)(int, const char *, uint32_t,
+                                                         uint32_t, int)>(
+        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
+    return resolve(kUnitOrPlayerMask, "ClassicAPI",
+                   static_cast<uint32_t>(guid),
+                   static_cast<uint32_t>(guid >> 32), 0) != nullptr;
+}
+
+// Build the mouseover tooltip for a unit with no live object, straight from the
+// party/raid roster. FUN_00529FE0 is the same unit-tooltip builder SetUnit and
+// the engine mouseover use; with no object it fills name/level/class + the
+// "Offline" line from the roster (verified: `GameTooltip:SetUnit("party1")`
+// works for an offline member). The engine's setter (FUN_00492890) gates this
+// call on a live object, so offline members get nothing — we do it here.
+void BuildRosterUnitTooltip(uint64_t guid) {
+    void *tooltip = *reinterpret_cast<void *const *>(
+        static_cast<uintptr_t>(Offsets::VAR_GAMETOOLTIP_OBJECT_PTR));
+    if (tooltip == nullptr)
+        return;
+
+    // Fire OnTooltipSetDefaultAnchor first, exactly as the engine mouseover
+    // setter (FUN_00492890) does before it builds — FrameXML's handler sets
+    // the tooltip's owner + anchor, which is what actually shows it. Without
+    // this, a rebuild after the tooltip was hidden on the previous leave has
+    // no owner and never re-appears (only a subsequent live-unit hover, which
+    // takes the engine's own anchor path, would). Use the self-contained
+    // invoker FUN_FRAME_INVOKE_SCRIPT, safe to call from the WorldTick.
+    const int anchorHandler = *reinterpret_cast<const int *>(
+        reinterpret_cast<uint8_t *>(tooltip) +
+        Offsets::OFF_TOOLTIP_SET_DEFAULT_ANCHOR_HANDLER);
+    if (anchorHandler != 0)
+        reinterpret_cast<void(__fastcall *)(int, void *)>(
+            static_cast<uintptr_t>(Offsets::FUN_FRAME_INVOKE_SCRIPT))(anchorHandler,
+                                                                      tooltip);
+
+    uint32_t packed[2] = {static_cast<uint32_t>(guid),
+                          static_cast<uint32_t>(guid >> 32)};
+    reinterpret_cast<void(__thiscall *)(void *, uint32_t *)>(
+        static_cast<uintptr_t>(Offsets::FUN_GAMETOOLTIP_BUILD_UNIT))(tooltip, packed);
+}
+
 void MouseoverTick() {
     const void *focus = CurrentMouseFocus();
 
@@ -423,6 +473,11 @@ void MouseoverTick() {
 
     if (guid != g_lastSet) {
         CallEngineMouseover(guid); // sets slot + highlight + tooltip + event
+        // Offline / far out-of-range party or raid member: the setter wrote the
+        // GUID slot but skipped the tooltip (no live object). Build it from the
+        // roster so hovering the frame still shows name / level / "Offline".
+        if (guid != 0 && !GuidHasLiveUnit(guid))
+            BuildRosterUnitTooltip(guid);
         g_lastSet = guid;
     }
 }
