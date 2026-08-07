@@ -135,9 +135,18 @@ struct Entry {
     bool used;
 };
 
-constexpr int kCacheSize = 256;
+// Sized for the realistic worst case: a fully raid-buffed 40-man plus its
+// debuff load. We cache one entry per (target, spellId) for EVERY
+// aura-applying SMSG_SPELL_GO we observe — not just auras on the player, but
+// every buff cast on every unit in view — so the live working set in a raid
+// is ~40 members × ~30 persistent buffs ≈ 1200, plus debuffs. At the old 256
+// the table was permanently full and the overflow path evicted live buffs,
+// dropping their source (the "lost sourceGUID on a buff" report). 2048 gives
+// a fully-buffed 40-man comfortable headroom; the tick sweep still reclaims
+// expired/orphaned entries so it rarely approaches full outside a raid.
+// (~40 bytes/entry → ~80 KB static.)
+constexpr int kCacheSize = 2048;
 Entry g_cache[kCacheSize];
-int g_writeCursor = 0;
 
 // SMSG_SPELL_GO arrives before the SMSG_UPDATE_OBJECT that adds the aura to
 // the target's descriptor, so for a brief window a just-captured entry names
@@ -229,10 +238,32 @@ void Store(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
             return;
         }
     }
-    Entry &slot = g_cache[g_writeCursor];
-    g_writeCursor = (g_writeCursor + 1) % kCacheSize;
-    slot = {targetGuid, casterGuid, spellId, expirationMs, durationMs, now,
-            kind, true};
+    // Saturated. Honor the same invariant as the tick sweep: an entry whose
+    // aura is still present on a resolvable unit is NEVER evicted — its caster
+    // can't be recovered once dropped (the "buff still on the player lost its
+    // source" case). Prefer the least-recently-updated ORPHAN (no live
+    // descriptor backing: out of range / despawned / genuinely gone); only if
+    // every single slot is a present, live aura — true saturation we can't
+    // avoid — fall back to the global LRU victim. With kCacheSize sized to the
+    // raid working set, reaching here is already unlikely and the saturated
+    // fallback is practically unreachable.
+    Entry *orphan = nullptr;
+    Entry *lru = &g_cache[0];
+    for (auto &e : g_cache) {
+        if (!e.used) { // defensive: a freed slot always wins outright
+            orphan = &e;
+            break;
+        }
+        if (e.stampMs < lru->stampMs)
+            lru = &e;
+        if (DescriptorListsAura(e.targetGuid, e.spellId))
+            continue; // still present on a live descriptor — protect it
+        if (orphan == nullptr || e.stampMs < orphan->stampMs)
+            orphan = &e;
+    }
+    Entry *victim = (orphan != nullptr) ? orphan : lru;
+    *victim = {targetGuid, casterGuid, spellId, expirationMs, durationMs, now,
+               kind, true};
 }
 
 // ---- Out-of-range group-member aura snapshots ---------------------------
