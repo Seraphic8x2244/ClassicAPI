@@ -19,13 +19,13 @@
 // vs. on-next-swing abilities like Heroic Strike or Maul. We test
 // against the engine constant directly.
 //
-// Ranged — both vanilla ranged auto-attacks (`75` Auto Shot, `5019`
-// Shoot wand) set bit 1 of `Spell.dbc.Attributes` (the
-// `SPELL_ATTR_AUTO_REPEAT` flag at value `0x02`). Verified empirically
-// against the in-game cache: Attr `0x00050012` (Auto Shot) and
-// `0x00000012` (Shoot) share that bit; on-next-swing Heroic Strike
-// (`0x00050014`) and other ranged spells like Aimed Shot / Fireball do
-// NOT. The attribute check naturally extends to any future
+// Ranged — the two vanilla ranged auto-attacks (`75` Auto Shot, `5019`
+// Shoot wand) are exactly the spells carrying SPELL_ATTR_EX2_AUTOREPEAT_FLAG
+// (AttributesEx2 bit 5, `0x20`). Verified from Spell.dbc: Auto Shot and
+// Shoot have Ex2 `0x20`; the on-cast ranged abilities (Aimed Shot 19434,
+// Multi-Shot 2643) do NOT — they only set the generic RANGED bit
+// (Attributes bit 1), which is why an earlier RANGED test wrongly matched
+// them. The AUTOREPEAT flag is the exact signal and extends to any future
 // auto-repeating spell a private server might add.
 
 #include "Lookup.h"
@@ -42,7 +42,7 @@ namespace Spell::AutoAttack {
 namespace {
 
 constexpr int SPELL_AUTO_ATTACK = 6603;
-constexpr uint32_t SPELL_ATTR_AUTO_REPEAT = 0x00000002;
+constexpr uint32_t SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x00000020;
 
 bool IsMelee(int spellID) {
     return spellID == SPELL_AUTO_ATTACK;
@@ -56,9 +56,9 @@ bool IsRanged(int spellID) {
                                      static_cast<uint32_t>(spellID));
     if (rec == nullptr)
         return false;
-    const uint32_t attr = *reinterpret_cast<const uint32_t *>(
-        rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
-    return (attr & SPELL_ATTR_AUTO_REPEAT) != 0;
+    const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
+        rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
+    return (attrEx2 & SPELL_ATTR_EX2_AUTOREPEAT_FLAG) != 0;
 }
 
 int ReadSpellID(void *L) {
