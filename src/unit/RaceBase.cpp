@@ -10,7 +10,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
-#include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -88,11 +88,7 @@ int __fastcall Script_UnitRaceBase(void *L) {
         return 2;
     }
 
-    const char *raceFile = DBC::StringField(
-        Offsets::VAR_CHRRACES_RECORDS,
-        Offsets::VAR_CHRRACES_COUNT,
-        raceByte,
-        Offsets::OFF_CHRRACES_FILENAME);
+    const char *raceFile = DBC::RaceToken(raceByte);
     if (raceFile == nullptr) {
         Game::Lua::PushNil(L);
         Game::Lua::PushNil(L);

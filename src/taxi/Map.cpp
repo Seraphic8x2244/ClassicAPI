@@ -35,6 +35,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "map/Area.h"
 
 #include <cstdint>
@@ -130,10 +131,8 @@ int ResolveZoneByName(const char *zone) {
         *reinterpret_cast<const int *>(Offsets::VAR_AREATABLE_COUNT);
     int prefixHit = 0;
     for (int id = 1; id <= count; ++id) {
-        const char *nm = DBC::LocalizedField(Offsets::VAR_AREATABLE_RECORDS,
-                                             Offsets::VAR_AREATABLE_COUNT,
-                                             static_cast<uint32_t>(id),
-                                             Offsets::OFF_AREATABLE_NAMES);
+        const char *nm =
+            DBC::AreaName(static_cast<uint32_t>(id), /*resolveToParent=*/false);
         if (nm == nullptr)
             continue;
         if (IEqual(nm, zone))

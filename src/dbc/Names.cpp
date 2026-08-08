@@ -42,21 +42,32 @@ const char *RaceName(uint32_t raceID) {
                           Offsets::OFF_CHRRACES_NAMES);
 }
 
+const char *RaceToken(uint32_t raceID) {
+    if (raceID == 0)
+        return nullptr;
+    return StringField(Offsets::VAR_CHRRACES_RECORDS,
+                       Offsets::VAR_CHRRACES_COUNT, raceID,
+                       Offsets::OFF_CHRRACES_FILENAME);
+}
+
 const char *AreaName(uint32_t areaID, bool resolveToParent) {
     if (areaID == 0)
         return nullptr;
-    const uint8_t *rec = Record(Offsets::VAR_AREATABLE_RECORDS,
-                                Offsets::VAR_AREATABLE_COUNT, areaID);
-    if (rec == nullptr)
-        return nullptr;
+    // Only the parent-resolving path needs the record; the direct read goes
+    // straight through LocalizedField (which bounds-checks the id itself), so
+    // the common !resolveToParent case is a single lookup.
     uint32_t use = areaID;
     if (resolveToParent) {
-        const uint32_t parent = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_AREATABLE_PARENT_ID);
-        if (parent != 0 &&
-            Record(Offsets::VAR_AREATABLE_RECORDS, Offsets::VAR_AREATABLE_COUNT,
-                   parent) != nullptr)
-            use = parent;
+        const uint8_t *rec = Record(Offsets::VAR_AREATABLE_RECORDS,
+                                    Offsets::VAR_AREATABLE_COUNT, areaID);
+        if (rec != nullptr) {
+            const uint32_t parent = *reinterpret_cast<const uint32_t *>(
+                rec + Offsets::OFF_AREATABLE_PARENT_ID);
+            if (parent != 0 &&
+                Record(Offsets::VAR_AREATABLE_RECORDS,
+                       Offsets::VAR_AREATABLE_COUNT, parent) != nullptr)
+                use = parent;
+        }
     }
     return LocalizedField(Offsets::VAR_AREATABLE_RECORDS,
                           Offsets::VAR_AREATABLE_COUNT, use,

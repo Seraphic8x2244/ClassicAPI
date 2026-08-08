@@ -37,7 +37,7 @@
 #include "Game.h"
 #include "NameCache.h"
 #include "Offsets.h"
-#include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "friendlist/FriendList.h"
 #include "guid/Guid.h"
 #include "unit/Identity.h"
@@ -109,18 +109,10 @@ int __fastcall Script_GetPlayerInfoByGUID(void *L) {
         realm = "";
     }
 
-    const char *englishClass = DBC::StringField(
-        Offsets::VAR_CHRCLASSES_RECORDS, Offsets::VAR_CHRCLASSES_COUNT,
-        classID, Offsets::OFF_CHRCLASSES_FILENAME);
-    const char *localizedClass = DBC::LocalizedField(
-        Offsets::VAR_CHRCLASSES_RECORDS, Offsets::VAR_CHRCLASSES_COUNT,
-        classID, Offsets::OFF_CHRCLASSES_NAMES);
-    const char *englishRace = DBC::StringField(
-        Offsets::VAR_CHRRACES_RECORDS, Offsets::VAR_CHRRACES_COUNT,
-        race, Offsets::OFF_CHRRACES_FILENAME);
-    const char *localizedRace = DBC::LocalizedField(
-        Offsets::VAR_CHRRACES_RECORDS, Offsets::VAR_CHRRACES_COUNT,
-        race, Offsets::OFF_CHRRACES_NAMES);
+    const char *englishClass = DBC::ClassToken(classID);
+    const char *localizedClass = DBC::ClassName(classID);
+    const char *englishRace = DBC::RaceToken(race);
+    const char *localizedRace = DBC::RaceName(race);
 
     Game::Lua::PushString(L, localizedClass ? localizedClass : "");
     Game::Lua::PushString(L, englishClass ? englishClass : "");
@@ -144,18 +136,10 @@ int __fastcall Script_GetPlayerInfoByGUID(void *L) {
 // inside the Entry value.
 int PushFromNameCacheEntry(void *L, const char *name,
                            const NameCache::Entry &e) {
-    const char *englishClass = DBC::StringField(
-        Offsets::VAR_CHRCLASSES_RECORDS, Offsets::VAR_CHRCLASSES_COUNT,
-        e.classID, Offsets::OFF_CHRCLASSES_FILENAME);
-    const char *localizedClass = DBC::LocalizedField(
-        Offsets::VAR_CHRCLASSES_RECORDS, Offsets::VAR_CHRCLASSES_COUNT,
-        e.classID, Offsets::OFF_CHRCLASSES_NAMES);
-    const char *englishRace = DBC::StringField(
-        Offsets::VAR_CHRRACES_RECORDS, Offsets::VAR_CHRRACES_COUNT,
-        e.raceID, Offsets::OFF_CHRRACES_FILENAME);
-    const char *localizedRace = DBC::LocalizedField(
-        Offsets::VAR_CHRRACES_RECORDS, Offsets::VAR_CHRRACES_COUNT,
-        e.raceID, Offsets::OFF_CHRRACES_NAMES);
+    const char *englishClass = DBC::ClassToken(e.classID);
+    const char *localizedClass = DBC::ClassName(e.classID);
+    const char *englishRace = DBC::RaceToken(e.raceID);
+    const char *localizedRace = DBC::RaceName(e.raceID);
 
     Game::Lua::PushString(L, localizedClass ? localizedClass : "");
     Game::Lua::PushString(L, englishClass ? englishClass : "");

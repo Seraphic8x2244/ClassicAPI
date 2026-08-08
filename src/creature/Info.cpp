@@ -54,6 +54,7 @@
 #include "Offsets.h"
 #include "cache/QueryLoad.h"
 #include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "event/Custom.h"
 
 #include <cstdint>
@@ -143,17 +144,10 @@ int __fastcall Script_GetRaceInfo(void *L) {
         return 0; // nil
     const int raceID = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const char *file =
-        (raceID > 0) ? DBC::StringField(Offsets::VAR_CHRRACES_RECORDS,
-                                        Offsets::VAR_CHRRACES_COUNT,
-                                        static_cast<uint32_t>(raceID),
-                                        Offsets::OFF_CHRRACES_FILENAME)
-                     : nullptr;
+        (raceID > 0) ? DBC::RaceToken(static_cast<uint32_t>(raceID)) : nullptr;
     if (file == nullptr)
         return 0; // unknown id -> nil
-    const char *name = DBC::LocalizedField(Offsets::VAR_CHRRACES_RECORDS,
-                                           Offsets::VAR_CHRRACES_COUNT,
-                                           static_cast<uint32_t>(raceID),
-                                           Offsets::OFF_CHRRACES_NAMES);
+    const char *name = DBC::RaceName(static_cast<uint32_t>(raceID));
 
     Game::Lua::NewTable(L);
     Game::Lua::SetFieldString(L, "raceName", name); // NULL coerced to ""
@@ -169,17 +163,10 @@ int __fastcall Script_GetClassInfo(void *L) {
         return 0; // nil
     const int classID = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const char *file =
-        (classID > 0) ? DBC::StringField(Offsets::VAR_CHRCLASSES_RECORDS,
-                                         Offsets::VAR_CHRCLASSES_COUNT,
-                                         static_cast<uint32_t>(classID),
-                                         Offsets::OFF_CHRCLASSES_FILENAME)
-                      : nullptr;
+        (classID > 0) ? DBC::ClassToken(static_cast<uint32_t>(classID)) : nullptr;
     if (file == nullptr)
         return 0; // unknown id -> nil
-    const char *name = DBC::LocalizedField(Offsets::VAR_CHRCLASSES_RECORDS,
-                                           Offsets::VAR_CHRCLASSES_COUNT,
-                                           static_cast<uint32_t>(classID),
-                                           Offsets::OFF_CHRCLASSES_NAMES);
+    const char *name = DBC::ClassName(static_cast<uint32_t>(classID));
 
     Game::Lua::NewTable(L);
     Game::Lua::SetFieldString(L, "className", name); // NULL coerced to ""

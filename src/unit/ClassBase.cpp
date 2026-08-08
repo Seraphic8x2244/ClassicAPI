@@ -10,7 +10,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
-#include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -108,11 +108,7 @@ int __fastcall Script_UnitClassBase(void *L) {
         return 2;
     }
 
-    const char *classFile = DBC::StringField(
-        Offsets::VAR_CHRCLASSES_RECORDS,
-        Offsets::VAR_CHRCLASSES_COUNT,
-        classByte,
-        Offsets::OFF_CHRCLASSES_FILENAME);
+    const char *classFile = DBC::ClassToken(classByte);
     if (classFile == nullptr) {
         Game::Lua::PushNil(L);
         Game::Lua::PushNil(L);

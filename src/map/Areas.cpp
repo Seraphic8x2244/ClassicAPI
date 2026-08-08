@@ -32,6 +32,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "dbc/Names.h"
 
 #include <cstdint>
 
@@ -48,10 +49,8 @@ int __fastcall Script_GetAreaInfo(void *L) {
     }
     const int areaID = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const char *name =
-        (areaID > 0) ? DBC::LocalizedField(Offsets::VAR_AREATABLE_RECORDS,
-                                           Offsets::VAR_AREATABLE_COUNT,
-                                           static_cast<uint32_t>(areaID),
-                                           Offsets::OFF_AREATABLE_NAMES)
+        (areaID > 0) ? DBC::AreaName(static_cast<uint32_t>(areaID),
+                                     /*resolveToParent=*/false)
                      : nullptr;
     if (name == nullptr) {
         Game::Lua::PushNil(L);
@@ -71,10 +70,8 @@ int __fastcall Script_GetAreas(void *L) {
     const int count =
         *reinterpret_cast<const int *>(Offsets::VAR_AREATABLE_COUNT);
     for (int id = 1; id <= count; ++id) {
-        const char *name = DBC::LocalizedField(Offsets::VAR_AREATABLE_RECORDS,
-                                               Offsets::VAR_AREATABLE_COUNT,
-                                               static_cast<uint32_t>(id),
-                                               Offsets::OFF_AREATABLE_NAMES);
+        const char *name =
+            DBC::AreaName(static_cast<uint32_t>(id), /*resolveToParent=*/false);
         if (name == nullptr)
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(id));

@@ -47,6 +47,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "dbc/Names.h"
 #include "event/Custom.h"
 #include "unit/Identity.h"
 
@@ -105,25 +106,6 @@ uint32_t ClassIdFromRecord(const uint8_t *rec) {
     return rec != nullptr
                ? *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_PLAYER_INFO_CLASS)
                : 0;
-}
-
-// ChrClasses.dbc record ID -> class token ("WARRIOR", "MAGE", …). The DBC's
-// filename field is the token; RAID_CLASS_COLORS et al. key on it. nullptr if
-// the ID is out of range or the record is missing.
-const char *ClassTokenForId(uint32_t classId) {
-    if (classId == 0)
-        return nullptr;
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_COUNT));
-    const uint8_t *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_RECORDS));
-    if (records == nullptr || static_cast<int>(classId) > count)
-        return nullptr;
-    const uint8_t *rec = records[classId];
-    if (rec == nullptr)
-        return nullptr;
-    return *reinterpret_cast<const char *const *>(
-        rec + Offsets::OFF_CHRCLASSES_FILENAME);
 }
 
 constexpr int kNameLen = 48; // engine NameCache inline name[48]
@@ -506,7 +488,7 @@ int __fastcall Script_GetPlayerInfo(void *L) {
         Game::Lua::PushString(L, r.name);                    // 1 name
     else
         Game::Lua::PushNil(L);
-    const char *classToken = ClassTokenForId(r.classId);     // 2 class token
+    const char *classToken = DBC::ClassToken(r.classId);     // 2 class token
     if (classToken != nullptr)
         Game::Lua::PushString(L, classToken);
     else

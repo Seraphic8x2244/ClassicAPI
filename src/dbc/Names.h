@@ -34,6 +34,11 @@ const char *ClassToken(uint32_t classID);
 // Localized race name for a `ChrRaces.dbc` id (e.g. "Night Elf").
 const char *RaceName(uint32_t raceID);
 
+// Locale-independent race token for a `ChrRaces.dbc` id — the client-filename
+// column (e.g. "NightElf", "Scourge"), the race analog of ClassToken and what
+// `UnitRace`'s second return / GetPlayerInfoByGUID's englishRace use.
+const char *RaceToken(uint32_t raceID);
+
 // Localized zone name for an `AreaTable.dbc` id. When `resolveToParent` is
 // true, a sub-area reports its parent zone (so "Goldshire" → "Elwynn
 // Forest"); when false, the area's own name is returned (what the engine's

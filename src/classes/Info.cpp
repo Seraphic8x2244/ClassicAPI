@@ -15,6 +15,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "dbc/Names.h"
 
 #include <cstdint>
 
@@ -22,19 +23,9 @@ namespace Classes::Info {
 
 namespace {
 
-const uint8_t *const *Records() {
-    return *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_RECORDS));
-}
-
 int Count() {
     return *reinterpret_cast<const int *>(
         static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_COUNT));
-}
-
-int LocaleIndex() {
-    return *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
 }
 
 // `FillLocalizedClassList(table [, isFemale]) → table` — fills the
@@ -58,15 +49,7 @@ int __fastcall Script_FillLocalizedClassList(void *L) {
         return 0;
     }
 
-    auto *records = Records();
-    if (records == nullptr) {
-        // DBC not loaded yet — return the table unchanged. Matches
-        // modern behavior of "fill what's available, don't crash".
-        Game::Lua::SetTop(L, 1);
-        return 1;
-    }
     const int count = Count();
-    const int locale = LocaleIndex();
 
     // Drop the optional `isFemale` arg (and any further junk) so the
     // table sits alone at idx 1. Each loop iteration pushes key+value
@@ -74,19 +57,14 @@ int __fastcall Script_FillLocalizedClassList(void *L) {
     // [table] before the next iteration.
     Game::Lua::SetTop(L, 1);
     for (int i = 1; i <= count; i++) {
-        const uint8_t *record = records[i];
-        if (record == nullptr)
+        // DBC::* are null-safe (empty result if ChrClasses.dbc isn't loaded)
+        // and skip empty strings, so a sparse/absent class id just falls
+        // through — same "fill what's available, don't crash" behavior.
+        const char *token = DBC::ClassToken(static_cast<uint32_t>(i));
+        if (token == nullptr)
             continue;
-
-        const char *token = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_CHRCLASSES_FILENAME);
-        if (token == nullptr || *token == '\0')
-            continue;
-
-        const char *const *names = reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_CHRCLASSES_NAMES);
-        const char *name = names[locale];
-        if (name == nullptr || *name == '\0')
+        const char *name = DBC::ClassName(static_cast<uint32_t>(i));
+        if (name == nullptr)
             continue;
 
         Game::Lua::PushString(L, token);

@@ -50,7 +50,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
-#include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "guid/Guid.h"
 #include "unit/Identity.h"
 
@@ -164,16 +164,10 @@ int __fastcall Script_GetClass(void *L) {
         return 0;
     // className / classFile from ChrClasses.dbc — same reads as
     // C_CreatureInfo.GetClassInfo(classID).
-    const char *classFile = DBC::StringField(Offsets::VAR_CHRCLASSES_RECORDS,
-                                             Offsets::VAR_CHRCLASSES_COUNT,
-                                             static_cast<uint32_t>(classID),
-                                             Offsets::OFF_CHRCLASSES_FILENAME);
+    const char *classFile = DBC::ClassToken(static_cast<uint32_t>(classID));
     if (classFile == nullptr)
         return 0; // classID with no ChrClasses row
-    const char *className = DBC::LocalizedField(Offsets::VAR_CHRCLASSES_RECORDS,
-                                                Offsets::VAR_CHRCLASSES_COUNT,
-                                                static_cast<uint32_t>(classID),
-                                                Offsets::OFF_CHRCLASSES_NAMES);
+    const char *className = DBC::ClassName(static_cast<uint32_t>(classID));
 
     Game::Lua::PushString(L, className); // NULL → nil via lua_pushstring
     Game::Lua::PushString(L, classFile);
