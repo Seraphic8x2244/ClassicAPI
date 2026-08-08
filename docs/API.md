@@ -131,6 +131,7 @@ build instructions.
   - [`UNIT_FACTION` event (fire-coverage fix)](#unit_faction-event-fire-coverage-fix)
   - [`UPDATE_MOUSEOVER_UNIT` event (loss-fire fix)](#update_mouseover_unit-event-loss-fire-fix)
   - [`UPDATE_SHAPESHIFT_FORM` event](#update_shapeshift_form-event)
+  - [`UNIT_SPELLCAST_*` events](#unit_spellcast_-events)
 
 - [Expansion](#expansion)
   - [`GetClassicExpansionLevel()`](#getclassicexpansionlevel)
@@ -461,7 +462,6 @@ build instructions.
   - [`C_Spell.CancelSpellByID(spellID)` / `CancelSpellByName(name)`](#c_spellcancelspellbyidspellid--cancelspellbynamename)
   - [`C_Spell.UnitCastingInfo(unit)` / `C_Spell.CastingInfo()`](#c_spellunitcastinginfounit--c_spellcastinginfo)
   - [`C_Spell.UnitChannelInfo(unit)` / `C_Spell.ChannelInfo()`](#c_spellunitchannelinfounit--c_spellchannelinfo)
-  - [`UNIT_SPELLCAST_*` events (player)](#unit_spellcast_-events-player)
   - [`C_Spell.GetSpellLevelInfo(spellID)`](#c_spellgetspelllevelinfospellid)
   - [`GetSpellRequiredTargetLevel(spellID)`](#getspellrequiredtargetlevelspellid)
 
@@ -3243,6 +3243,131 @@ bytes (standstate, etc.) the engine also routes through this helper.
 The cached "last form" sentinel uses `-1` for "player descriptor not
 yet resolvable" so transient resolution failures during early login
 don't get misread as leaving a form.
+
+### `UNIT_SPELLCAST_*` events
+
+Backport of the TBC+ cast/channel events to 1.12, for the **local player and
+other units**. Ported cast-bar / rotation addons (anything written against
+the modern signature) register these instead of vanilla's arg-less
+`SPELLCAST_*` events and read `unit, castGUID, spellID` directly. Thirteen
+events are provided; six also fire for non-player units:
+
+| Event | Fires when | Units | Args |
+|-------|-----------|-------|------|
+| `UNIT_SPELLCAST_SENT` | `CMSG_CAST_SPELL` leaves the client (earliest point) | player | `unit, target, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_START` | a cast-time spell begins | all | `unit, castGUID, spellID, spellName, rank` |
+| `UNIT_SPELLCAST_STOP` | a cast-time spell ends (any reason) | all | same |
+| `UNIT_SPELLCAST_DELAYED` | pushback extends the cast | player | same |
+| `UNIT_SPELLCAST_SUCCEEDED` | the spell goes off (`SMSG_SPELL_GO`) — incl. instants | all | same |
+| `UNIT_SPELLCAST_INTERRUPTED` | a started **cast** is interrupted (kick, movement, LoS) — never for channels | all | same |
+| `UNIT_SPELLCAST_FAILED` | a cast is rejected before it starts (range, mana, cooldown) with an error shown | player | same |
+| `UNIT_SPELLCAST_FAILED_QUIET` | a cast fails with **no** error shown (spammy retry, reticle cancel, …) | player | same |
+| `UNIT_SPELLCAST_CHANNEL_START` | a channel begins | all | same |
+| `UNIT_SPELLCAST_CHANNEL_UPDATE` | pushback shortens a channel | player | same |
+| `UNIT_SPELLCAST_CHANNEL_STOP` | a channel ends | all | same |
+| `UNIT_SPELLCAST_RETICLE_TARGET` | a ground-target reticle appears (AoE placement — Blizzard, Flare, …) | player | `unit, "", spellID, spellName, rank` |
+| `UNIT_SPELLCAST_RETICLE_CLEAR` | the reticle is placed or cancelled | player | `unit, "", spellID, spellName, rank` |
+
+`unit` (arg1) is the token of the casting unit — `"player"` for your own
+casts, or a unit token (`"target"`, `"focus"`, `"party3"`, `"nameplate2"`,
+`"pet"`, `"mouseover"`, …) for another unit. `spellName` / `rank` are
+ClassicAPI tail extensions (modern stops at `spellID`); addons reading only
+the first three positional args are unaffected.
+
+**Per-token fan-out.** A caster GUID can map to several tokens at once (your
+`target` is also `party2` and `nameplate1`). Like retail, the event fires
+**once per token** currently pointing at the caster, so a `target`-frame
+cast bar, a `party2` frame, and a nameplate cast bar each get their own
+event with the same castGUID. Tokens are resolved fresh at fire time (they
+shift frame-to-frame). If you run **SuperWoW**, its raw-GUID token (`"0x…"`)
+is deliberately filtered out — only standard tokens are fanned out.
+
+**Non-player limits.** Only the six events above fire for other units, and
+they're **best-effort** — driven purely by the packets an observer receives:
+- `SENT` never fires (only your own outgoing casts are visible).
+- `DELAYED` / `CHANNEL_UPDATE` never fire (pushback is sent only to the
+  caster, so another unit's bar can't stretch/shrink from damage).
+- `FAILED` never fires (a pre-cast requirement failure is client-local).
+- A remote cast/channel only has timing from the moment its
+  `SMSG_SPELL_START` was observed; casters who were already casting when
+  they came into range have no start time.
+
+**Channels never fire `INTERRUPTED`.** Retail emits only `CHANNEL_STOP` when a
+channel ends, whether it completed or was cut short (verified against retail),
+so ClassicAPI matches that for both the player and other units. `INTERRUPTED`
+is a cast-only event.
+
+**Reticle events** fire for ground-targeted (AoE) spells only, always for the
+player: `RETICLE_TARGET` when the placement reticle comes up, `RETICLE_CLEAR`
+when it's placed or cancelled. There's no cast yet, so the castGUID slot
+(arg2) is empty — retail pushes `nil` there, but the engine's event
+dispatcher can't emit a `nil` mid-argument-list, so ClassicAPI pushes `""`
+instead. `unit` (arg1) and `spellID` (arg3) are exact; arg2 is the only
+difference and is inconsequential for a reticle.
+
+**castGUID.** A synthesized string in the modern shape
+`Cast-<type>-<serverID>-<instanceID>-<zoneUID>-<spellID>-<castUID>`. Vanilla
+can't know server / instance / zone, so those three fields are `0`; the
+load-bearing parts are the `spellID` (field 6, which addons `strsplit("-")`
+out) and a unique-per-cast `castUID` (field 7). **Every event of one cast
+carries the same castGUID**, so `SENT` → `START`/`CHANNEL_START` →
+`SUCCEEDED` → `STOP`/`CHANNEL_STOP` all pair up — including across the caster
+and observers (they converge on the same value), and a chained same-spell
+recast gets its own castUID. The `type` and `castUID` follow the
+[spell-cast-GUID spec](https://warcraft.wiki.gg/wiki/GUID#Cast):
+- **Type 3** (real casts — the common case): `castUID` is time-based — the
+  low 23 bits are the cast's UNIX-epoch second, the higher bits a per-second
+  counter.
+- **Type 2** (`UNIT_SPELLCAST_FAILED` — a local-only cast that never reached
+  the server): `castUID` is a plain locally-incrementing integer.
+
+**Ordering** matches modern:
+
+- Cast-time spell: `SENT → START → SUCCEEDED → STOP`.
+- Channel: `SENT → CHANNEL_START → SUCCEEDED → CHANNEL_STOP` (CHANNEL_START
+  before SUCCEEDED, as on retail).
+- Instant: `SENT → SUCCEEDED`.
+
+**INTERRUPTED vs FAILED vs FAILED_QUIET** follow modern's split: a spell that
+never started (out of range, not enough mana, on cooldown, LoS to a target)
+fires `FAILED`, except for a fixed whitelist of "quiet" `SpellCastResult`
+codes that fire `FAILED_QUIET` instead — `SPELL_IN_PROGRESS` (casting while
+already casting / a spell-queue rejection), `DONT_REPORT` (fake fails, a
+cancelled ground reticle), and `CHARMED`. That whitelist mirrors the 3.3.5
+client's own unit-spellcast dispatch, mapped to vanilla's `SpellCastResult`
+enum. A spell that was *already casting* and gets stopped (an enemy kick,
+moving to cancel, breaking LoS mid-cast) fires `INTERRUPTED`. Holding
+the cast key while running fires `INTERRUPTED` repeatedly (once per retry),
+each reusing the interrupted cast's castGUID — matching retail.
+
+**Channel pushback (player).** Taking damage while channeling shortens the
+channel in vanilla; `CHANNEL_UPDATE` fires on each hit and
+[`C_Spell.UnitChannelInfo`](#c_spellunitchannelinfounit--c_spellchannelinfo)'s
+`endTimeMs` re-anchors to the server's new remaining time, so cast bars
+shrink correctly. (The event carries no time — like retail it's a "re-read
+now" trigger; timing is read back from `UnitChannelInfo`.)
+
+Every fire is gated on whether any frame is registered for that event, so
+the whole system costs one pointer-compare per state transition when no
+addon uses it (no arg synthesis, no DBC lookups, no per-token fan-out).
+
+```lua
+local f = CreateFrame("Frame")
+for _, e in ipairs({
+    "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP",
+    "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_CHANNEL_START",
+}) do f:RegisterEvent(e) end
+f:SetScript("OnEvent", function()
+    -- vanilla passes event/arg1/... as globals, not function params
+    if arg1 == "target" then print(event, arg3) end  -- arg3 = spellID
+end)
+```
+
+> **Additive to the vanilla `SPELLCAST_*` events.** The engine's own arg-less
+> `SPELLCAST_START` / `SPELLCAST_CHANNEL_UPDATE` / … still fire as before;
+> these `UNIT_`-prefixed events are the modern layer on top. The empowered-cast
+> events (`UNIT_SPELLCAST_EMPOWER_*`, a Dragonflight addition) are not
+> implemented — vanilla has no empowered casts.
 
 ## Expansion
 
@@ -11485,131 +11610,6 @@ so a stale cache entry never applies to a different/ended channel);
 otherwise it falls back to `name`/`displayName`/`textureID`/`spellID` with
 **`nil` times**. The player path is unchanged (full timing). Same
 placeholder fields as `C_Spell.UnitCastingInfo`.
-
-### `UNIT_SPELLCAST_*` events
-
-Backport of the TBC+ cast/channel events to 1.12, for the **local player and
-other units**. Ported cast-bar / rotation addons (anything written against
-the modern signature) register these instead of vanilla's arg-less
-`SPELLCAST_*` events and read `unit, castGUID, spellID` directly. Thirteen
-events are provided; six also fire for non-player units:
-
-| Event | Fires when | Units | Args |
-|-------|-----------|-------|------|
-| `UNIT_SPELLCAST_SENT` | `CMSG_CAST_SPELL` leaves the client (earliest point) | player | `unit, target, castGUID, spellID, spellName, rank` |
-| `UNIT_SPELLCAST_START` | a cast-time spell begins | all | `unit, castGUID, spellID, spellName, rank` |
-| `UNIT_SPELLCAST_STOP` | a cast-time spell ends (any reason) | all | same |
-| `UNIT_SPELLCAST_DELAYED` | pushback extends the cast | player | same |
-| `UNIT_SPELLCAST_SUCCEEDED` | the spell goes off (`SMSG_SPELL_GO`) — incl. instants | all | same |
-| `UNIT_SPELLCAST_INTERRUPTED` | a started **cast** is interrupted (kick, movement, LoS) — never for channels | all | same |
-| `UNIT_SPELLCAST_FAILED` | a cast is rejected before it starts (range, mana, cooldown) with an error shown | player | same |
-| `UNIT_SPELLCAST_FAILED_QUIET` | a cast fails with **no** error shown (spammy retry, reticle cancel, …) | player | same |
-| `UNIT_SPELLCAST_CHANNEL_START` | a channel begins | all | same |
-| `UNIT_SPELLCAST_CHANNEL_UPDATE` | pushback shortens a channel | player | same |
-| `UNIT_SPELLCAST_CHANNEL_STOP` | a channel ends | all | same |
-| `UNIT_SPELLCAST_RETICLE_TARGET` | a ground-target reticle appears (AoE placement — Blizzard, Flare, …) | player | `unit, "", spellID, spellName, rank` |
-| `UNIT_SPELLCAST_RETICLE_CLEAR` | the reticle is placed or cancelled | player | `unit, "", spellID, spellName, rank` |
-
-`unit` (arg1) is the token of the casting unit — `"player"` for your own
-casts, or a unit token (`"target"`, `"focus"`, `"party3"`, `"nameplate2"`,
-`"pet"`, `"mouseover"`, …) for another unit. `spellName` / `rank` are
-ClassicAPI tail extensions (modern stops at `spellID`); addons reading only
-the first three positional args are unaffected.
-
-**Per-token fan-out.** A caster GUID can map to several tokens at once (your
-`target` is also `party2` and `nameplate1`). Like retail, the event fires
-**once per token** currently pointing at the caster, so a `target`-frame
-cast bar, a `party2` frame, and a nameplate cast bar each get their own
-event with the same castGUID. Tokens are resolved fresh at fire time (they
-shift frame-to-frame). If you run **SuperWoW**, its raw-GUID token (`"0x…"`)
-is deliberately filtered out — only standard tokens are fanned out.
-
-**Non-player limits.** Only the six events above fire for other units, and
-they're **best-effort** — driven purely by the packets an observer receives:
-- `SENT` never fires (only your own outgoing casts are visible).
-- `DELAYED` / `CHANNEL_UPDATE` never fire (pushback is sent only to the
-  caster, so another unit's bar can't stretch/shrink from damage).
-- `FAILED` never fires (a pre-cast requirement failure is client-local).
-- A remote cast/channel only has timing from the moment its
-  `SMSG_SPELL_START` was observed; casters who were already casting when
-  they came into range have no start time.
-
-**Channels never fire `INTERRUPTED`.** Retail emits only `CHANNEL_STOP` when a
-channel ends, whether it completed or was cut short (verified against retail),
-so ClassicAPI matches that for both the player and other units. `INTERRUPTED`
-is a cast-only event.
-
-**Reticle events** fire for ground-targeted (AoE) spells only, always for the
-player: `RETICLE_TARGET` when the placement reticle comes up, `RETICLE_CLEAR`
-when it's placed or cancelled. There's no cast yet, so the castGUID slot
-(arg2) is empty — retail pushes `nil` there, but the engine's event
-dispatcher can't emit a `nil` mid-argument-list, so ClassicAPI pushes `""`
-instead. `unit` (arg1) and `spellID` (arg3) are exact; arg2 is the only
-difference and is inconsequential for a reticle.
-
-**castGUID.** A synthesized string in the modern shape
-`Cast-<type>-<serverID>-<instanceID>-<zoneUID>-<spellID>-<castUID>`. Vanilla
-can't know server / instance / zone, so those three fields are `0`; the
-load-bearing parts are the `spellID` (field 6, which addons `strsplit("-")`
-out) and a unique-per-cast `castUID` (field 7). **Every event of one cast
-carries the same castGUID**, so `SENT` → `START`/`CHANNEL_START` →
-`SUCCEEDED` → `STOP`/`CHANNEL_STOP` all pair up — including across the caster
-and observers (they converge on the same value), and a chained same-spell
-recast gets its own castUID. The `type` and `castUID` follow the
-[spell-cast-GUID spec](https://warcraft.wiki.gg/wiki/GUID#Cast):
-- **Type 3** (real casts — the common case): `castUID` is time-based — the
-  low 23 bits are the cast's UNIX-epoch second, the higher bits a per-second
-  counter.
-- **Type 2** (`UNIT_SPELLCAST_FAILED` — a local-only cast that never reached
-  the server): `castUID` is a plain locally-incrementing integer.
-
-**Ordering** matches modern:
-
-- Cast-time spell: `SENT → START → SUCCEEDED → STOP`.
-- Channel: `SENT → CHANNEL_START → SUCCEEDED → CHANNEL_STOP` (CHANNEL_START
-  before SUCCEEDED, as on retail).
-- Instant: `SENT → SUCCEEDED`.
-
-**INTERRUPTED vs FAILED vs FAILED_QUIET** follow modern's split: a spell that
-never started (out of range, not enough mana, on cooldown, LoS to a target)
-fires `FAILED`, except for a fixed whitelist of "quiet" `SpellCastResult`
-codes that fire `FAILED_QUIET` instead — `SPELL_IN_PROGRESS` (casting while
-already casting / a spell-queue rejection), `DONT_REPORT` (fake fails, a
-cancelled ground reticle), and `CHARMED`. That whitelist mirrors the 3.3.5
-client's own unit-spellcast dispatch, mapped to vanilla's `SpellCastResult`
-enum. A spell that was *already casting* and gets stopped (an enemy kick,
-moving to cancel, breaking LoS mid-cast) fires `INTERRUPTED`. Holding
-the cast key while running fires `INTERRUPTED` repeatedly (once per retry),
-each reusing the interrupted cast's castGUID — matching retail.
-
-**Channel pushback (player).** Taking damage while channeling shortens the
-channel in vanilla; `CHANNEL_UPDATE` fires on each hit and
-[`C_Spell.UnitChannelInfo`](#c_spellunitchannelinfounit--c_spellchannelinfo)'s
-`endTimeMs` re-anchors to the server's new remaining time, so cast bars
-shrink correctly. (The event carries no time — like retail it's a "re-read
-now" trigger; timing is read back from `UnitChannelInfo`.)
-
-Every fire is gated on whether any frame is registered for that event, so
-the whole system costs one pointer-compare per state transition when no
-addon uses it (no arg synthesis, no DBC lookups, no per-token fan-out).
-
-```lua
-local f = CreateFrame("Frame")
-for _, e in ipairs({
-    "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP",
-    "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_CHANNEL_START",
-}) do f:RegisterEvent(e) end
-f:SetScript("OnEvent", function()
-    -- vanilla passes event/arg1/... as globals, not function params
-    if arg1 == "target" then print(event, arg3) end  -- arg3 = spellID
-end)
-```
-
-> **Additive to the vanilla `SPELLCAST_*` events.** The engine's own arg-less
-> `SPELLCAST_START` / `SPELLCAST_CHANNEL_UPDATE` / … still fire as before;
-> these `UNIT_`-prefixed events are the modern layer on top. The empowered-cast
-> events (`UNIT_SPELLCAST_EMPOWER_*`, a Dragonflight addition) are not
-> implemented — vanilla has no empowered casts.
 
 ### `C_Spell.GetSpellLevelInfo(spellID)`
 
