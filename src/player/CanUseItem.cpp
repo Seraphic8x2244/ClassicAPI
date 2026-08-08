@@ -54,6 +54,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "item/Arg.h"
+#include "item/Record.h"
 #include "spell/Lookup.h"
 #include "unit/Identity.h"
 
@@ -63,9 +64,6 @@ namespace Player::CanUseItem {
 
 namespace {
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
 // `__thiscall(player /*ecx*/, skillLineID) -> slot` (-1 if the player
 // doesn't have the skill line). See VAR docs on FUN_SKILL_LINE_TO_SLOT.
 using SkillLineToSlot_t = int(__thiscall *)(void *player, uint32_t skillLineID);
@@ -75,13 +73,6 @@ using RepStanding_t = int(__fastcall *)(int factionID);
 // `__thiscall(player /*ecx*/, spellID) -> nonzero` if the player knows a
 // higher rank in spellID's chain. See FUN_SPELL_RANK_CHAIN_KNOWN.
 using SpellRankChainKnown_t = int(__thiscall *)(void *player, uint32_t spellID);
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 // True iff `mask` restricts a 1-based `index` (class/race) the player
 // isn't part of. Mask 0 and 0xFFFFFFFF both mean "no restriction".
@@ -236,7 +227,7 @@ bool RequiredReputationMet(const uint8_t *record) {
 bool ComputeCanUse(int itemID) {
     if (itemID <= 0)
         return false;
-    auto *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    auto *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr)
         return false; // not cached → sync false, no load fired
     auto *player = Unit::Identity::PlayerObject();

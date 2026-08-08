@@ -52,6 +52,7 @@
 #include "equipmentset/Data.h"
 #include "equipmentset/Locations.h"
 #include "equipmentset/Set.h"
+#include "item/Record.h"
 
 #include <cstdint>
 
@@ -107,17 +108,6 @@ struct Tally {
     // Stays 0 for entries loaded from pre-itemID-format files.
     uint32_t missingItemIDs[SLOT_COUNT];
 };
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 // Walks a set's slots, classifying each non-empty entry into the
 // equipped / in-inventory / ignored / missing buckets via
@@ -215,7 +205,7 @@ int __fastcall Script_GameTooltipSetEquipmentSet(void *L) {
             unnamedMissing++;
             continue;
         }
-        auto *record = PeekItemRecord(id);
+        auto *record = Item::PeekRecord(id);
         if (record == nullptr) {
             unnamedMissing++;
             continue;

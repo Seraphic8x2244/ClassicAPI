@@ -54,6 +54,7 @@
 #include "item/ID.h"
 #include "item/Link.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/StatAccum.h"
 
 #include <cstdint>
@@ -107,7 +108,7 @@ int __fastcall Script_C_Container_GetContainerItemInfo(void *L) {
     // them off the half-built table avoids any stack interleaving. ---
     const int itemID = Item::ID::FromCGItem(item);
     const uint8_t *record = (itemID > 0)
-        ? Item::StatAccum::FetchRecord(static_cast<uint32_t>(itemID))
+        ? Item::PeekRecord(static_cast<uint32_t>(itemID))
         : nullptr;
 
     // Live per-instance descriptor fields.

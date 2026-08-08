@@ -62,6 +62,7 @@
 #include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/StatAccum.h"
 #include "player/StatSignal.h"
 #include "spell/HealingAura.h"
@@ -120,7 +121,7 @@ long ItemFlatHealing(const uint8_t *cgItem) {
     const int itemID = Item::ID::FromCGItem(cgItem);
     if (itemID > 0)
         Item::StatAccum::AccumulateRecord(
-            acc, Item::StatAccum::FetchRecord(static_cast<uint32_t>(itemID)), +1);
+            acc, Item::PeekRecord(static_cast<uint32_t>(itemID)), +1);
 
     auto *desc = Item::ObjectFields(cgItem);
     if (desc != nullptr) {

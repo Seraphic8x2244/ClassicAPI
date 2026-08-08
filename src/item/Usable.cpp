@@ -40,6 +40,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "item/Arg.h"
+#include "item/Record.h"
 #include "item/Spell.h"
 #include "spell/Lookup.h"
 
@@ -49,20 +50,8 @@ namespace Item::Usable {
 
 namespace {
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 using SpellIsUsable_t = int(__fastcall *)(const uint8_t *spellRecord, int *outNoMana);
-
-// Same item-cache peek pattern as the other item modules (no shared
-// helper — each call site is one line different). Sync, no load fired.
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 const uint8_t *PlayerDescriptor() {
     auto resolve = reinterpret_cast<ResolveUnitToken_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN);
@@ -91,7 +80,7 @@ Usability ComputeUsability(int itemID) {
     if (itemID <= 0)
         return r;
 
-    auto *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    auto *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr)
         return r; // not cached → sync "false", no load fired
 

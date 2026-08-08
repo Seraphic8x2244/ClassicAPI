@@ -55,6 +55,7 @@
 #include "item/Data.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "object/Resolve.h"
 #include "unit/Identity.h"
 
@@ -65,10 +66,6 @@
 namespace Item::AverageLevel {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
 
 // 1-based slot range used by both walks.
 constexpr int kFirstSlot = 1;
@@ -120,13 +117,6 @@ constexpr uint32_t kSlotMaskByInvType[29] = {
 constexpr int kInvTypeMax = static_cast<int>(sizeof(kSlotMaskByInvType) /
                                               sizeof(kSlotMaskByInvType[0])) - 1;
 
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
-
 // Returns (itemLevel, inventoryType) for the CGItem, or (0, 0) if
 // the itemID is unresolvable or the cache record hasn't loaded.
 struct ItemInfo {
@@ -140,7 +130,7 @@ ItemInfo ReadItemInfo(const uint8_t *cgItem) {
     const int itemID = Item::ID::FromCGItem(cgItem);
     if (itemID <= 0)
         return {0, 0};
-    const uint8_t *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         // Equipped or bagged item with no cache record yet — queue a
         // warmup so the next call gets populated data. Cheap on cache

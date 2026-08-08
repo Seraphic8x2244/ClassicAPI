@@ -61,6 +61,7 @@
 #include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/StatAccum.h"
 #include "item/TooltipItem.h"
 #include "tooltip/SetEvents.h"
@@ -540,7 +541,7 @@ int __fastcall Script_SetHyperlinkCompareItem(void *L) {
         }
     }
     const uint8_t *hoveredRec =
-        hoveredID > 0 ? Item::StatAccum::FetchRecord(static_cast<uint32_t>(hoveredID)) : nullptr;
+        hoveredID > 0 ? Item::PeekRecord(static_cast<uint32_t>(hoveredID)) : nullptr;
     if (hoveredRec == nullptr)
         return bail(0); // no link and no comparisonTooltip item, or not cached yet
 
@@ -610,7 +611,7 @@ int __fastcall Script_SetHyperlinkCompareItem(void *L) {
         Item::StatAccum::AccumulateRecord(acc, hoveredRec, +1);
         Item::StatAccum::ApplyRandomSuffix(acc, hoveredSuffix, +1);
         const uint8_t *equippedRec =
-            Item::StatAccum::FetchRecord(static_cast<uint32_t>(equippedID));
+            Item::PeekRecord(static_cast<uint32_t>(equippedID));
         if (equippedRec != nullptr) {
             Item::StatAccum::AccumulateRecord(acc, equippedRec, -1);
             Item::StatAccum::ApplyRandomSuffix(acc, equippedSuffix, -1);

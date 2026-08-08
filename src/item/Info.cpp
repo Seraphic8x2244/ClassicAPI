@@ -20,6 +20,7 @@
 #include "item/ID.h"
 #include "item/Link.h"
 #include "item/Location.h"
+#include "item/Record.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -27,20 +28,9 @@
 
 namespace Item::Info {
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                       const uint64_t *guid, void *callback,
-                                                       void *userData, bool requestIfMissing);
-
 static const char *PushedOrEmpty(const char *s) { return (s != nullptr && s[0] != 0) ? s : ""; }
 
 static int CurrentLocaleIndex() { return *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX); }
-
-static const uint8_t *FetchItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, false);
-}
 
 static const char *LookupItemClassName(uint32_t classID) {
     return PushedOrEmpty(DBC::LocalizedField(
@@ -114,7 +104,7 @@ static int __fastcall Script_GetItemInfoInstant(void *L) {
 
     Game::Lua::PushNumber(L, static_cast<double>(itemID));
 
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         for (int i = 0; i < 6; ++i)
             Game::Lua::PushNil(L);
@@ -150,7 +140,7 @@ static int __fastcall Script_GetItemInfoInstant(void *L) {
 static int PushIconForItemID(void *L, int itemID) {
     if (itemID <= 0)
         return 0;
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr)
         return 0;
     const uint32_t displayInfoID = *reinterpret_cast<const uint32_t *>(
@@ -229,7 +219,7 @@ static int __fastcall Script_C_Item_GetItemFamily(void *L) {
     const int itemID = Item::Arg::ResolveItemID(L, 1);
     if (itemID <= 0)
         return 0;
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return 0;
@@ -264,7 +254,7 @@ static int __fastcall Script_C_Item_GetItemInfo(void *L) {
     if (itemID <= 0)
         return 0;
 
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return 0; // nil this call; GET_ITEM_INFO_RECEIVED fires when ready

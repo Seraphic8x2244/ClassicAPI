@@ -54,11 +54,6 @@ void AddByKey(Accum *acc, const char *key, long delta);
 // Read the accumulated value for `key` (0 for an unknown key). Linear scan.
 long Value(const Accum *acc, const char *key);
 
-// Passive cache peek for an item's `ItemStats_C` record. Does NOT warm
-// the cache (returns nullptr for an uncached item) — see the item-cache
-// race note in CLAUDE.md.
-const uint8_t *FetchRecord(uint32_t itemID);
-
 // Fold an item record's base stats + on-equip-spell stats into `acc`,
 // scaled by `sign` (+1 to add, -1 to subtract for a delta). No-op for a
 // null record.

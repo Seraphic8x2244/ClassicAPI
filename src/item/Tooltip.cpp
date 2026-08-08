@@ -18,6 +18,7 @@
 #include "item/Link.h"
 #include "item/Location.h"
 #include "item/QualityColor.h"
+#include "item/Record.h"
 #include "item/TooltipItem.h"
 #include "object/Resolve.h"
 
@@ -139,17 +140,6 @@ static int __fastcall Script_GameTooltipSetInventoryItemByID(void *L) {
 }
 
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
-
-static const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
-
 // Resolves a stored item GUID into a CGItem via the engine's own
 // resolver. Same path Item::Count uses for direct bank reads — no
 // gating, no inventory walk, works for any object the engine has
@@ -246,7 +236,7 @@ static int __fastcall Script_GameTooltipGetItem(void *L) {
     // OFF_TOOLTIP_COMPARE_SUFFIX — include it (in the link's suffix field)
     // when the compare-descriptor flag is set, so the link round-trips the
     // suffix for stat comparison. Matches 3.3.5's auction GetItem.
-    const uint8_t *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return 0;

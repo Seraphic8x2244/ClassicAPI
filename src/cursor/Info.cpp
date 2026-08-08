@@ -53,6 +53,7 @@
 #include "item/Link.h"
 #include "item/Location.h"
 #include "item/QualityColor.h"
+#include "item/Record.h"
 #include "spell/Lookup.h"
 
 #include <cstdint>
@@ -140,17 +141,6 @@ int PushBagItemCursor(void *L) {
     return PushItem(L, cgItem);
 }
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
-
 // Builds a basic `"|cffRRGGBB|Hitem:N:0:0:0|h[Name]|h|r"` link from
 // the cached ItemStats record for `itemID`. No enchant / random-
 // suffix decoration — the cursor only stores the bare itemID for
@@ -158,7 +148,7 @@ const uint8_t *PeekItemRecord(uint32_t itemID) {
 // instance state from. Returns true and writes into `out` (size
 // `outSize`) on success; returns false if the item isn't cached.
 bool BuildBasicItemLink(uint32_t itemID, char *out, size_t outSize) {
-    const uint8_t *record = PeekItemRecord(itemID);
+    const uint8_t *record = Item::PeekRecord(itemID);
     if (record == nullptr) return false;
     const char *name = *reinterpret_cast<const char *const *>(
         record + Offsets::OFF_ITEMSTATS_NAME);

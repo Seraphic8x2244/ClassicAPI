@@ -42,6 +42,7 @@
 #include "item/Data.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 
 #include <cstdint>
 
@@ -49,25 +50,11 @@ namespace Item::Uniqueness {
 
 namespace {
 
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                       const uint64_t *guid,
-                                                       void *callback, void *userData,
-                                                       int unused);
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(
-        static_cast<uintptr_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD));
-    auto *cache = reinterpret_cast<void *>(
-        static_cast<uintptr_t>(Offsets::VAR_ITEMDB_CACHE));
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
-
 // Returns the item's `m_maxCount` or -1 if the record isn't cached.
 // `-1` is a "warm-and-bail" sentinel; caller pushes nothing on -1
 // so the Lua side sees the modern "MayReturnNothing" behaviour.
 int ReadMaxCount(uint32_t itemID) {
-    const uint8_t *record = PeekItemRecord(itemID);
+    const uint8_t *record = Item::PeekRecord(itemID);
     if (record == nullptr) {
         Item::Data::WarmCache(itemID);
         return -1;

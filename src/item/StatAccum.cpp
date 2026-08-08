@@ -47,6 +47,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "item/Record.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -54,10 +55,6 @@
 namespace Item::StatAccum {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, bool requestIfMissing);
 
 // Base-record m_statType uses the ItemModType enum: 0=mana, 1=health,
 // 3=agility, 4=strength, 5=intellect, 6=spirit, 7=stamina (2 is
@@ -286,13 +283,6 @@ long Value(const Accum *acc, const char *key) {
         if (std::strcmp(acc[i].key, key) == 0)
             return acc[i].value;
     return 0;
-}
-
-const uint8_t *FetchRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, false);
 }
 
 double ComputeDPS(const uint8_t *record) {

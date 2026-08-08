@@ -58,6 +58,7 @@
 #include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/Swap.h"
 #include "tick/WorldTick.h"
 
@@ -97,16 +98,6 @@ struct Job {
 Job g_job{};
 
 // --- small CGItem / cache readers ---------------------------------------
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 int CGItemCount(const uint8_t *item) {
     auto *desc = Item::ObjectFields(item);
@@ -187,7 +178,7 @@ bool BagIsGeneral(int bag) {
     const int id = Item::ID::FromCGItem(bagItem);
     if (id == 0)
         return false;
-    const uint8_t *rec = PeekItemRecord(static_cast<uint32_t>(id));
+    const uint8_t *rec = Item::PeekRecord(static_cast<uint32_t>(id));
     if (rec == nullptr)
         return false;
     return *reinterpret_cast<const uint32_t *>(

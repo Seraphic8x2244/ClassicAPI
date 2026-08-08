@@ -29,6 +29,7 @@
 #include "Offsets.h"
 #include "item/Arg.h"
 #include "item/Data.h"
+#include "item/Record.h"
 #include "spell/Lookup.h"
 
 #include <cstdint>
@@ -36,17 +37,6 @@
 namespace Item::Spell {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, bool requestIfMissing);
-
-const uint8_t *FetchItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, false);
-}
 
 const char *SpellNameForID(int spellID) {
     const uint8_t *record = ::Spell::Lookup::RecordForID(spellID);
@@ -69,7 +59,7 @@ int __fastcall Script_GetItemSpell(void *L) {
     const int itemID = Item::Arg::ResolveItemID(L, 1);
     if (itemID <= 0)
         return 0;
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return 0;
@@ -113,7 +103,7 @@ int FindOnUseSpellIDInRecord(const uint8_t *record) {
 int OnUseSpellIDForItemID(uint32_t itemID) {
     if (itemID == 0)
         return 0;
-    const uint8_t *record = FetchItemRecord(itemID);
+    const uint8_t *record = Item::PeekRecord(itemID);
     if (record == nullptr)
         return 0;
     return FindOnUseSpellIDInRecord(record);

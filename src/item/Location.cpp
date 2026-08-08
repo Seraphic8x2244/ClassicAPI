@@ -22,6 +22,7 @@
 #include "CGItem.h"
 #include "ID.h"
 #include "Link.h"
+#include "Record.h"
 
 #include <cstring>
 
@@ -32,9 +33,6 @@ namespace {
 using GetItemBySlot_t = void *(__thiscall *)(void *thisInvMgr, int slot);
 using PackBagSlot_t = int(__fastcall *)(void *L, void **outInvMgr, int *outLinearSlot,
                                          int *outUnused);
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
 
 // Reads `loc.fieldName` and returns it as an int. Returns false via the
 // boolean result if the field is missing or non-numeric. Always leaves the
@@ -57,13 +55,6 @@ const uint8_t *ResolveBagSlot(void *L, int bagID, int slotIndex) {
 }
 
 // --- GUID-walk helpers ---------------------------------------------------
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 uint64_t ReadCGItemGUID(const uint8_t *item) {
     auto *instance = Item::InstanceBlock(item);
@@ -125,7 +116,7 @@ int GetBagSlotCount(int bagID) {
     const int bagItemID = Item::ID::FromCGItem(bagItem);
     if (bagItemID == 0)
         return 0;
-    auto *record = PeekItemRecord(static_cast<uint32_t>(bagItemID));
+    auto *record = Item::PeekRecord(static_cast<uint32_t>(bagItemID));
     if (record == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(

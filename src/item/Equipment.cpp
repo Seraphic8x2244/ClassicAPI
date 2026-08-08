@@ -17,6 +17,7 @@
 #include "item/Cursor.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/Swap.h"
 
 #include <cstdint>
@@ -24,20 +25,6 @@
 namespace Item::Equipment {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
-
-// Same item-cache peek pattern as `Item::Bag::PeekItemRecord` — we
-// don't share because each caller is one-line-different and the
-// helper isn't worth a header.
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 // `OffhandHasWeapon()` — true iff the player has a one-handed
 // weapon (or off-hand-only weapon) equipped in the off-hand slot.
@@ -64,7 +51,7 @@ int __fastcall Script_OffhandHasWeapon(void *L) {
         return 1;
     }
 
-    auto *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    auto *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
@@ -102,7 +89,7 @@ int __fastcall Script_C_Item_IsEquippableItem(void *L) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
     }
-    auto *record = PeekItemRecord(static_cast<uint32_t>(itemID));
+    auto *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Game::Lua::PushBoolean(L, 0);
         return 1;

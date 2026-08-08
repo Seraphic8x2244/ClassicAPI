@@ -27,6 +27,7 @@
 #include "item/Arg.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "item/Record.h"
 #include "item/Spell.h"
 
 #include <cstdint>
@@ -35,17 +36,6 @@
 namespace Item::GetData {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, bool requestIfMissing);
-
-const uint8_t *FetchItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, false);
-}
 
 int CurrentLocaleIndex() {
     return *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
@@ -377,7 +367,7 @@ int PushDataForItemID(void *L, int itemID) {
         Game::Lua::PushNil(L);
         return 1;
     }
-    const uint8_t *record = FetchItemRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Game::Lua::PushNil(L);
         return 1;

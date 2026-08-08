@@ -17,6 +17,7 @@
 #include "Offsets.h"
 #include "item/Location.h"
 #include "item/QualityColor.h"
+#include "item/Record.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -33,20 +34,6 @@ using BuildInstanceName_t = void(__thiscall *)(const void *cgItem, char *out,
 // Inner name builder, no CGItem needed: (out, outSize, itemID, suffixID).
 using BuildNameFromID_t = void(__fastcall *)(char *out, unsigned outSize,
                                              uint32_t itemID, int suffixID);
-
-// Cached ItemStats record lookup. Same `_GetRecord` pattern the rest of
-// the codebase uses; passes a noop NULL callback so no SMSG fires for
-// uncached items — caller treats "not cached" as a clean failure.
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                       const uint64_t *guid, void *callback,
-                                                       void *userData, int dedupFlag);
-
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
 
 } // namespace
 
@@ -80,7 +67,7 @@ bool NameFromIDSuffix(uint32_t itemID, int suffixID, char *out, size_t outSize) 
 bool BasicFromIDSuffix(uint32_t itemID, int suffixID, char *out, size_t outSize) {
     if (out == nullptr || outSize == 0)
         return false;
-    const uint8_t *record = PeekItemRecord(itemID);
+    const uint8_t *record = Item::PeekRecord(itemID);
     if (record == nullptr)
         return false;
     char name[128];

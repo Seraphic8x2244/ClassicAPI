@@ -46,6 +46,7 @@
 #include "item/ID.h"
 #include "item/Link.h"
 #include "item/Location.h"
+#include "item/Record.h"
 
 #include <cstdint>
 #include <vector>
@@ -53,10 +54,6 @@
 namespace Item::InventoryItemsForSlot {
 
 namespace {
-
-using GetItemRecord_t = const uint8_t *(__thiscall *)(void *cache, uint32_t itemID,
-                                                      const uint64_t *guid, void *callback,
-                                                      void *userData, int unused);
 
 // invType → slot bitmask. Bit N (0-based) means "this item type fits
 // 1-based slot N+1". Values 0..28 cover every InventoryType
@@ -146,18 +143,11 @@ bool PlayerCanEquip(const uint8_t *record) {
     return PlayerHasProficiency(classCode, subclass);
 }
 
-const uint8_t *PeekItemRecord(uint32_t itemID) {
-    auto fn = reinterpret_cast<GetItemRecord_t>(Offsets::FUN_DBCACHE_ITEMSTATS_GET_RECORD);
-    auto *cache = reinterpret_cast<void *>(Offsets::VAR_ITEMDB_CACHE);
-    const uint64_t zeroGuid = 0;
-    return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
-}
-
 const uint8_t *ItemRecordForCGItem(const uint8_t *cgItem) {
     const int itemID = Item::ID::FromCGItem(cgItem);
     if (itemID <= 0)
         return nullptr;
-    return PeekItemRecord(static_cast<uint32_t>(itemID));
+    return Item::PeekRecord(static_cast<uint32_t>(itemID));
 }
 
 uint32_t ReadInventoryType(const uint8_t *record) {

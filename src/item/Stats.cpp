@@ -24,6 +24,7 @@
 
 #include "Game.h"
 #include "item/Arg.h"
+#include "item/Record.h"
 #include "item/StatAccum.h"
 
 #include <cstdint>
@@ -70,7 +71,7 @@ int __fastcall Script_GetItemStats(void *L) {
         return 0;
     }
     const int suffixID = StatAccum::ParseRandomSuffixFromLink(L, 1);
-    const uint8_t *record = StatAccum::FetchRecord(static_cast<uint32_t>(itemID));
+    const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr) {
         Game::Lua::PushNil(L);
         return 1;
@@ -99,8 +100,8 @@ int __fastcall Script_GetItemStatDelta(void *L) {
     }
     const int suffix1 = StatAccum::ParseRandomSuffixFromLink(L, 1);
     const int suffix2 = StatAccum::ParseRandomSuffixFromLink(L, 2);
-    const uint8_t *r1 = StatAccum::FetchRecord(static_cast<uint32_t>(id1));
-    const uint8_t *r2 = StatAccum::FetchRecord(static_cast<uint32_t>(id2));
+    const uint8_t *r1 = Item::PeekRecord(static_cast<uint32_t>(id1));
+    const uint8_t *r2 = Item::PeekRecord(static_cast<uint32_t>(id2));
     if (r1 == nullptr || r2 == nullptr) {
         Game::Lua::PushNil(L);
         return 1;
