@@ -23,7 +23,7 @@
 namespace Object {
 
 // Resolve `guid` to its live client object. `typeMask` is a bitmask of
-// `Offsets::OBJ_TYPE_*` (e.g. `OBJ_TYPE_UNIT | OBJ_TYPE_PLAYER`, or
+// `Offsets::TYPEMASK_*` (e.g. `TYPEMASK_UNIT | TYPEMASK_PLAYER`, or
 // `TYPEMASK_UNIT` / `TYPEMASK_OBJECT`). Returns nullptr when the GUID isn't
 // currently in the object table (out of range, despawned, pre-world).
 // Non-throwing — safe from any context (Lua callback, world tick, packet

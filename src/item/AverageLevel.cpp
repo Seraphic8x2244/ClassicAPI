@@ -199,7 +199,7 @@ void WalkGuidArrayRange(const uint8_t *invMgr, int firstSlot, int lastSlot,
     if (guidArray == nullptr)
         return;
     for (int slot = firstSlot; slot <= lastSlot; ++slot) {
-        const uint8_t *item = ResolveByGuid(Offsets::OBJ_TYPE_ITEM, guidArray[slot]);
+        const uint8_t *item = ResolveByGuid(Offsets::TYPEMASK_ITEM, guidArray[slot]);
         if (item == nullptr)
             continue;
         CollectBagOrBankItem(item, candidates);
@@ -219,7 +219,7 @@ void WalkBankBags(std::vector<Candidate> &candidates) {
         return;
     for (int slot = Offsets::INVMGR_BANK_BAG_FIRST_SLOT;
          slot <= Offsets::INVMGR_BANK_BAG_LAST_SLOT; ++slot) {
-        const uint8_t *bag = ResolveByGuid(Offsets::OBJ_TYPE_CONTAINER,
+        const uint8_t *bag = ResolveByGuid(Offsets::TYPEMASK_CONTAINER,
                                             playerGuidArray[slot]);
         if (bag == nullptr)
             continue;

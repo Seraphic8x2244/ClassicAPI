@@ -79,7 +79,7 @@ const uint8_t *ResolveObject(uint64_t guid) {
     if (guid == 0)
         return nullptr;
     return static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "RaidTarget", 0x172));
+        Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, "RaidTarget", 0x172));
 }
 
 // Descriptor-field observer callback for marker slot `Idx` (0-based).

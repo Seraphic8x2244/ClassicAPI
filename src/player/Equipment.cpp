@@ -82,7 +82,7 @@ const Event::Custom::AutoReserve _r2{kEvtDurability};
 // error thrown from there unwinds through raw engine code.
 bool SlotHasItem(uint32_t guidLo, uint32_t guidHi, int slot0Based) {
     auto *player = static_cast<const uint8_t *>(Object::ByGuid(
-        Offsets::OBJ_TYPE_PLAYER,
+        Offsets::TYPEMASK_PLAYER,
         (static_cast<uint64_t>(guidHi) << 32) | guidLo, "ClassicAPI", 0x172));
     if (player == nullptr)
         return false;

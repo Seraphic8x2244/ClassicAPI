@@ -68,7 +68,7 @@ uint8_t *ResolveByGUID(int type, uint64_t guid) {
 // bank bags (linear 63..68) — the only differences are the source of
 // the bag's GUID and how the result encodes back into a location.
 int WalkBagContents(uint64_t bagGuid, uint64_t targetGuid) {
-    auto *bag = ResolveByGUID(Offsets::OBJ_TYPE_CONTAINER, bagGuid);
+    auto *bag = ResolveByGUID(Offsets::TYPEMASK_CONTAINER, bagGuid);
     if (bag == nullptr)
         return 0;
     auto *bagInvMgr =

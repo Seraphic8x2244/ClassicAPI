@@ -129,7 +129,7 @@ static void PushNamePlateForGUID(void *L, uint64_t guid) {
         return;
     }
     auto *unit = static_cast<uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "NamePlate", 0x172));
+        Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, "NamePlate", 0x172));
     if (unit == nullptr) {
         Game::Lua::PushNil(L);
         return;

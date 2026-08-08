@@ -304,7 +304,7 @@ void AppendNonBagOwned(uint64_t *out, int *count) {
         return;
     for (int slot = Offsets::INVMGR_BANK_BAG_FIRST_SLOT;
          slot <= Offsets::INVMGR_BANK_BAG_LAST_SLOT; ++slot) {
-        const uint8_t *bag = ResolveByGuid(Offsets::OBJ_TYPE_CONTAINER, playerArr[slot]);
+        const uint8_t *bag = ResolveByGuid(Offsets::TYPEMASK_CONTAINER, playerArr[slot]);
         if (bag == nullptr)
             continue;
         auto *bagInvMgr =

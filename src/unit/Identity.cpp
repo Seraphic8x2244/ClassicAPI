@@ -109,7 +109,7 @@ const uint8_t *PlayerObject() {
     if (guid == 0)
         return nullptr;
     return static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_PLAYER, guid, "ClassicAPI", 0));
+        Object::ByGuid(Offsets::TYPEMASK_PLAYER, guid, "ClassicAPI", 0));
 }
 
 const uint8_t *PlayerInventoryManager() {

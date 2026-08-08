@@ -107,7 +107,7 @@ void *EquippedBagInventory(int bagID) {
     if (bagGuid == 0)
         return nullptr; // no bag equipped in that slot
     auto *container = static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_CONTAINER, bagGuid, "ItemMgr", 0x172));
+        Object::ByGuid(Offsets::TYPEMASK_CONTAINER, bagGuid, "ItemMgr", 0x172));
     return ContainerInventory(container);
 }
 
@@ -168,7 +168,7 @@ const uint8_t *ResolveByGUID(uint64_t guid) {
     if (guid == 0)
         return nullptr;
     return static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_ITEM, guid, "ItemMgr", 0x172));
+        Object::ByGuid(Offsets::TYPEMASK_ITEM, guid, "ItemMgr", 0x172));
 }
 
 bool FindByItemID(void *L, int itemID, ByGUIDResult *out) {

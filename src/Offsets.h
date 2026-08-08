@@ -198,7 +198,7 @@ enum Offsets {
     //     Returns an int the caller (Script_GameTooltip_SetUnit) tests, so the
     //     co-hook must forward the original's return value.
     //   - GameObject (0x0052aa20, __thiscall(self, guid*), RET 4) — the GO
-    //     hover populator; resolves the GO (OBJ_TYPE_GAMEOBJECT) and writes the
+    //     hover populator; resolves the GO (TYPEMASK_GAMEOBJECT) and writes the
     //     GO field at +0x370.
     FUN_GAMETOOLTIP_BUILD_UNIT = 0x00529FE0,
     FUN_GAMETOOLTIP_BUILD_GAMEOBJECT = 0x0052AA20,
@@ -1895,7 +1895,7 @@ enum Offsets {
     // gated on the bank-open globals). Returns the CGContainer GUID of the bag
     // equipped in that slot, or 0 if none. This is the internal PackBagSlot
     // uses to resolve bags 1..4: get the bag GUID here, resolve the container
-    // via FUN_OBJECT_RESOLVE_BY_GUID(OBJ_TYPE_CONTAINER, guid), then call the
+    // via FUN_OBJECT_RESOLVE_BY_GUID(TYPEMASK_CONTAINER, guid), then call the
     // container's vtable[+OFF_CONTAINER_GET_INVENTORY] to get the inventory
     // object GetItemBySlot indexes. Lets us enumerate bag contents in pure C++
     // without PackBagSlot's Lua-stack coupling. (Reads GUID arrays at
@@ -1957,14 +1957,8 @@ enum Offsets {
     // guidLo/guidHi). All our callers go through `Object::ByGuid`
     // (object/Resolve.h), which wraps this single address.
     FUN_OBJECT_RESOLVE_BY_GUID = 0x00468460,
-    // The type arg is a bitmask of object-type bits, not an enum
-    // index — `1<<1` for items, `1<<2` for containers, `1<<3` for
-    // units, matching what `FUN_00529FE0` passes for SetUnit (`ECX=8`).
-    OBJ_TYPE_ITEM = 2,
-    OBJ_TYPE_CONTAINER = 4,
-    OBJ_TYPE_UNIT = 8,
-    OBJ_TYPE_PLAYER = 0x10, // what the engine's bag observer FUN_004F8DB0 passes
-    OBJ_TYPE_GAMEOBJECT = 0x20, // 1<<5; passed by FUN_0052AA20 (hover-tooltip populator).
+    // The type arg is a bitmask of object-type bits (see the TYPEMASK_*
+    // block below), not an enum index.
 
     // `CGObject::GetName` — returns the display-name `const char *` for
     // a resolved CGObject (CGUnit / CGPlayer / CGCreature). Internally
@@ -2850,8 +2844,11 @@ enum Offsets {
     // each callback invocation, guidLo/guidHi pushed as 8 stack bytes.
     FUN_CLNT_OBJ_MGR_ENUM_VISIBLE_OBJECTS = 0x00468380,
 
-    // Type-mask flags accepted by FUN_OBJECT_RESOLVE_BY_GUID. Single-bit
-    // flags can be OR'd together.
+    // Type-mask flags accepted by FUN_OBJECT_RESOLVE_BY_GUID (and the SetUnit
+    // path FUN_00529FE0, which passes ECX=8 for UNIT). A bitmask of
+    // object-type bits, not an enum index — single-bit flags OR together.
+    // PLAYER (0x10) is what the bag observer FUN_004F8DB0 passes; GAMEOBJECT
+    // (0x20) what the hover-tooltip populator FUN_0052AA20 passes.
     TYPEMASK_OBJECT        = 0x01,
     TYPEMASK_ITEM          = 0x02,
     TYPEMASK_CONTAINER     = 0x04,

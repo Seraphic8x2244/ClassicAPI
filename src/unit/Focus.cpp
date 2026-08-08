@@ -125,7 +125,7 @@ const uint8_t *ResolveObject(uint64_t guid) {
     if (guid == 0)
         return nullptr;
     return static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "Focus", 0x172));
+        Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, "Focus", 0x172));
 }
 
 // True if `guid` is a current party or raid member. Reads the roster GUID

@@ -158,7 +158,7 @@ static const uint8_t *PeekItemRecord(uint32_t itemID) {
 static void *ResolveItemByGuid(uint32_t guidLo, uint32_t guidHi) {
     if (guidLo == 0 && guidHi == 0)
         return nullptr;
-    return Object::ByGuid(Offsets::OBJ_TYPE_ITEM,
+    return Object::ByGuid(Offsets::TYPEMASK_ITEM,
                           (static_cast<uint64_t>(guidHi) << 32) | guidLo,
                           "GameTooltip:GetItem", 0x172);
 }

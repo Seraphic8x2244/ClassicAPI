@@ -122,7 +122,7 @@ uint64_t WalkSuffix(uint64_t guid, const char *suffix) {
             return 0; // unknown suffix component — modern returns nil
         suffix += kSuffixTargetLen;
         auto *obj = static_cast<uint8_t *>(
-            Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "ClassicAPI",
+            Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, "ClassicAPI",
                            kResolvePriority));
         if (obj == nullptr)
             return 0;

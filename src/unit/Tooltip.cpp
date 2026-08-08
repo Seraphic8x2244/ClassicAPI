@@ -81,7 +81,7 @@ static int __fastcall Script_GameTooltipSetUnitAura(void *L) {
 using ObjectGetName_t = const char *(__fastcall *)(void *obj, void *edx_unused, int *outFlags);
 
 static const char *ResolveUnitName(uint32_t guidLo, uint32_t guidHi) {
-    void *obj = Object::ByGuid(Offsets::OBJ_TYPE_UNIT,
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT,
                                (static_cast<uint64_t>(guidHi) << 32) | guidLo,
                                "GameTooltip:GetUnitGUID", 0x172);
     if (obj == nullptr)

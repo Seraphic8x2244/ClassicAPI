@@ -70,7 +70,7 @@ const uint8_t *ResolveEquipmentSlot(int slot1Based);
 int GetBagSlotCount(int bagID);
 
 // Given a `CGContainer*` (an equipped bag or bank bag, resolved by GUID via
-// `FUN_OBJECT_RESOLVE_BY_GUID` with `OBJ_TYPE_CONTAINER`), returns its own
+// `FUN_OBJECT_RESOLVE_BY_GUID` with `TYPEMASK_CONTAINER`), returns its own
 // inventory-manager object via the container's vtable method at
 // `+OFF_CONTAINER_GET_INVENTORY`. The returned object has the same layout as
 // the player inventory manager: slot count at `+0x00`, flat GUID array at

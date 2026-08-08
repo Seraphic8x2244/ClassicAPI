@@ -70,7 +70,7 @@ static int __fastcall Script_GameTooltipGetGameObject(void *L) {
     if (guidLo == 0 && guidHi == 0)
         return 0;
 
-    void *obj = Object::ByGuid(Offsets::OBJ_TYPE_GAMEOBJECT,
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_GAMEOBJECT,
                                (static_cast<uint64_t>(guidHi) << 32) | guidLo,
                                "GameTooltip:GetGameObject", 0x172);
     if (obj == nullptr)

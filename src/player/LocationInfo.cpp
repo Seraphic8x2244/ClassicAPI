@@ -105,7 +105,7 @@ bool LocationGuid(void *L, int locIdx, uint64_t *out) {
 // Resolves a GUID to its currently-synced CGUnit, or null if not resident.
 const uint8_t *ResolveUnit(uint64_t guid) {
     return static_cast<const uint8_t *>(
-        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "ClassicAPI", 0));
+        Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, "ClassicAPI", 0));
 }
 
 // Reads a UNIT_FIELD_BYTES_0 byte: the login-time mirror global when `guid` is
