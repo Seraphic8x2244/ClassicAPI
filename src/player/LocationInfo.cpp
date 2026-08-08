@@ -52,6 +52,7 @@
 #include "Offsets.h"
 #include "dbc/Names.h"
 #include "guid/Guid.h"
+#include "object/Resolve.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -61,8 +62,6 @@ namespace Player::LocationInfo {
 namespace {
 
 using TokenToGuid_t = uint64_t(__fastcall *)(const char *token);
-using ResolveObject_t = void *(__fastcall *)(uint32_t typeMask, const char *dbg,
-                                             uint32_t guidLo, uint32_t guidHi, int line);
 using GetName_t = const char *(__thiscall *)(void *obj, int *outFlags);
 using GroupLookup_t = void *(__fastcall *)(const uint64_t *guid);
 
@@ -105,10 +104,8 @@ bool LocationGuid(void *L, int locIdx, uint64_t *out) {
 
 // Resolves a GUID to its currently-synced CGUnit, or null if not resident.
 const uint8_t *ResolveUnit(uint64_t guid) {
-    auto resolve = reinterpret_cast<ResolveObject_t>(Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
     return static_cast<const uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_UNIT, "ClassicAPI", static_cast<uint32_t>(guid),
-                static_cast<uint32_t>(guid >> 32), 0));
+        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "ClassicAPI", 0));
 }
 
 // Reads a UNIT_FIELD_BYTES_0 byte: the login-time mirror global when `guid` is

@@ -14,6 +14,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "guid/Guid.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 
@@ -77,16 +78,12 @@ static int __fastcall Script_GameTooltipSetUnitAura(void *L) {
 // directly as `GetUnitGUID()` avoids inventing a faux token that wouldn't
 // match the original Lua input anyway.
 
-using ObjectResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                                   uint32_t guidLo, uint32_t guidHi,
-                                                   int priority);
 using ObjectGetName_t = const char *(__fastcall *)(void *obj, void *edx_unused, int *outFlags);
 
 static const char *ResolveUnitName(uint32_t guidLo, uint32_t guidHi) {
-    auto resolve = reinterpret_cast<ObjectResolveByGUID_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    void *obj = resolve(Offsets::OBJ_TYPE_UNIT, "GameTooltip:GetUnitGUID",
-                        guidLo, guidHi, 0x172);
+    void *obj = Object::ByGuid(Offsets::OBJ_TYPE_UNIT,
+                               (static_cast<uint64_t>(guidHi) << 32) | guidLo,
+                               "GameTooltip:GetUnitGUID", 0x172);
     if (obj == nullptr)
         return nullptr;
     // `FUN_OBJECT_GET_NAME` is __thiscall — wire as __fastcall with the

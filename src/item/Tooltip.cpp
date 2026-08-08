@@ -19,6 +19,7 @@
 #include "item/Location.h"
 #include "item/QualityColor.h"
 #include "item/TooltipItem.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -149,10 +150,6 @@ static const uint8_t *PeekItemRecord(uint32_t itemID) {
     return fn(cache, itemID, &zeroGuid, nullptr, nullptr, 0);
 }
 
-using ResolveObjectByGuid_t = void *(__fastcall *)(int type, const char *debugName,
-                                                    uint32_t guidLo, uint32_t guidHi,
-                                                    int priority);
-
 // Resolves a stored item GUID into a CGItem via the engine's own
 // resolver. Same path Item::Count uses for direct bank reads — no
 // gating, no inventory walk, works for any object the engine has
@@ -161,8 +158,9 @@ using ResolveObjectByGuid_t = void *(__fastcall *)(int type, const char *debugNa
 static void *ResolveItemByGuid(uint32_t guidLo, uint32_t guidHi) {
     if (guidLo == 0 && guidHi == 0)
         return nullptr;
-    auto fn = reinterpret_cast<ResolveObjectByGuid_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    return fn(Offsets::OBJ_TYPE_ITEM, "GameTooltip:GetItem", guidLo, guidHi, 0x172);
+    return Object::ByGuid(Offsets::OBJ_TYPE_ITEM,
+                          (static_cast<uint64_t>(guidHi) << 32) | guidLo,
+                          "GameTooltip:GetItem", 0x172);
 }
 
 // `GameTooltip:GetItem()` → (name, link, itemID) for whichever item

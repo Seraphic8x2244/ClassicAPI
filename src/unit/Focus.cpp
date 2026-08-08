@@ -50,6 +50,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "event/Custom.h"
+#include "object/Resolve.h"
 #include "tick/WorldTick.h"
 #include "unit/TokenObserver.h"
 
@@ -108,9 +109,6 @@ int __fastcall FocusTargetFieldCb(uint32_t fieldOffset, uint32_t /*size*/,
 }
 
 using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
-using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                              uint32_t guidLo, uint32_t guidHi,
-                                              int priority);
 
 uint64_t ResolveTokenGUID(const char *token) {
     if (token == nullptr || *token == '\0')
@@ -126,11 +124,8 @@ uint64_t ResolveTokenGUID(const char *token) {
 const uint8_t *ResolveObject(uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
     return static_cast<const uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_UNIT, "Focus", static_cast<uint32_t>(guid),
-                static_cast<uint32_t>(guid >> 32), 0x172));
+        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "Focus", 0x172));
 }
 
 // True if `guid` is a current party or raid member. Reads the roster GUID

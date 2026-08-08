@@ -15,6 +15,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "object/Resolve.h"
 #include "unit/Position.h"
 
 #include <cstdint>
@@ -30,12 +31,6 @@ namespace {
 using EnumCallback_t = int(__fastcall *)(void *ctx, void *unusedEdx,
                                          uint64_t guid);
 using EnumVisibleObjects_t = int(__fastcall *)(EnumCallback_t cb, void *ctx);
-
-// `ClntObjMgrObjectPtr(typeMask, dbg, guidLo, guidHi, dbgCode)` — resolves
-// a GUID to its live `CGObject_C *`, filtered by typeMask; NULL if none.
-using ObjectPtr_t = void *(__fastcall *)(uint32_t typeMask, const char *dbg,
-                                         uint32_t guidLo, uint32_t guidHi,
-                                         int dbgCode);
 
 struct ScanCtx {
     uint32_t typeMask;
@@ -54,10 +49,7 @@ int __fastcall ScanCallback(ScanCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
     if (entry != ctx->wantEntry)
         return 1;
 
-    auto ObjectPtr =
-        reinterpret_cast<ObjectPtr_t>(Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = ObjectPtr(ctx->typeMask, nullptr, static_cast<uint32_t>(guid),
-                          static_cast<uint32_t>(guid >> 32), 0);
+    void *obj = Object::ByGuid(ctx->typeMask, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
 

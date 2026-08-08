@@ -40,6 +40,7 @@
 #include "dbc/Names.h"
 #include "friendlist/FriendList.h"
 #include "guid/Guid.h"
+#include "object/Resolve.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -205,16 +206,10 @@ int __fastcall Script_UnitNameFromGUID(void *L) {
     // safely returns the "UNKNOWNOBJECT" sentinel for non-unit
     // objects (gameobjects etc.), so we just gate on the sentinel
     // rather than pre-filtering by typemask.
-    using ObjectPtr_t = void *(__fastcall *)(uint32_t typeMask,
-                                              const char *debugMsg,
-                                              uint32_t guidLo,
-                                              uint32_t guidHi,
-                                              int debugCode);
     using GetName_t = const char *(__thiscall *)(void *obj, int *outFlags);
 
-    auto objectPtr = reinterpret_cast<ObjectPtr_t>(
-        Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = objectPtr(Offsets::TYPEMASK_OBJECT, nullptr, lo, hi, 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_OBJECT,
+                               (static_cast<uint64_t>(hi) << 32) | lo, nullptr, 0);
     if (obj != nullptr) {
         auto getName = reinterpret_cast<GetName_t>(Offsets::FUN_OBJECT_GET_NAME);
         const char *name = getName(obj, nullptr);

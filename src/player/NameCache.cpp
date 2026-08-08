@@ -68,6 +68,7 @@
 #include "Offsets.h"
 #include "dbc/Names.h"
 #include "guid/Guid.h"
+#include "object/Resolve.h"
 #include "settings/Account.h"
 #include "unit/Identity.h"
 
@@ -512,12 +513,6 @@ using EnumVisibleObjects_t = bool(__fastcall *)(void *callback, void *context);
 using EnumVisibleObjectsCallback_t = int(__fastcall *)(void *context, void *edx,
                                                       uint64_t guid);
 
-// GUID → CGObject pointer resolver with type-mask filter. Returns
-// NULL if the GUID isn't loaded or its object type doesn't match the
-// mask. We pass TYPEMASK_PLAYER for our player-only sweep.
-using ObjectPtr_t = void *(__fastcall *)(uint32_t typeMask, void *unused,
-                                         uint64_t guid, int unused2);
-
 // CGObject vftable's GetName slot. Slot 22 = byte offset 22 * 4 = 0x58.
 // VanillaMinimapTracking calls obj->vftable->GetName(obj) the same way
 // in its NameLookupCallback; verified working against the 1.12 binary.
@@ -586,9 +581,7 @@ int __fastcall ScanCallback(void * /*context*/, void * /*edx*/, uint64_t guid) {
     // we hit when calling GetName on the local CGPlayer's vftable.
     if (guid == LocalPlayerGUID())
         return 1;
-    auto resolver = reinterpret_cast<ObjectPtr_t>(
-        static_cast<uintptr_t>(Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR));
-    void *obj = resolver(Offsets::TYPEMASK_PLAYER, nullptr, guid, 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_PLAYER, guid, nullptr, 0);
     if (obj == nullptr)
         return 1; // not a player (or not currently loaded)
     const char *name = CallGetName(obj);

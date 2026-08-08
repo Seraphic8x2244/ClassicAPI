@@ -1951,7 +1951,11 @@ enum Offsets {
     //
     // Type values: 2 = item (returns CGItem*), 4 = container/bag
     // (returns CGContainer*). Engine passes `"ItemMgr"` as debugName
-    // and `0x172` as priority for both call sites we've decoded.
+    // and `0x172` as priority for both call sites we've decoded. Some engine
+    // sites type it as `(u32 typeMask, void *unused, u64 guid, int)` —
+    // ABI-equivalent (the u64 occupies the same two stack dwords as
+    // guidLo/guidHi). All our callers go through `Object::ByGuid`
+    // (object/Resolve.h), which wraps this single address.
     FUN_OBJECT_RESOLVE_BY_GUID = 0x00468460,
     // The type arg is a bitmask of object-type bits, not an enum
     // index — `1<<1` for items, `1<<2` for containers, `1<<3` for
@@ -2846,14 +2850,7 @@ enum Offsets {
     // each callback invocation, guidLo/guidHi pushed as 8 stack bytes.
     FUN_CLNT_OBJ_MGR_ENUM_VISIBLE_OBJECTS = 0x00468380,
 
-    // GUID → CGObject resolver. __fastcall with this signature:
-    //   CGObject *(__fastcall *)(uint32_t typeMask, void *unused,
-    //                            uint64_t guid, int unused2);
-    // typeMask filters to specific object types; returns NULL if the
-    // GUID isn't loaded or its type doesn't match the mask.
-    FUN_CLNT_OBJ_MGR_OBJECT_PTR = 0x00468460,
-
-    // Type-mask flags accepted by FUN_CLNT_OBJ_MGR_OBJECT_PTR. Single-bit
+    // Type-mask flags accepted by FUN_OBJECT_RESOLVE_BY_GUID. Single-bit
     // flags can be OR'd together.
     TYPEMASK_OBJECT        = 0x01,
     TYPEMASK_ITEM          = 0x02,

@@ -14,6 +14,7 @@
 #include "../Game.h"
 #include "../Offsets.h"
 #include "../guid/Guid.h"
+#include "../object/Resolve.h"
 
 #include <cstdint>
 
@@ -21,11 +22,6 @@ namespace Loot::Unit {
 
 namespace {
 
-using ClntObjMgrObjectPtr_t = void *(__fastcall *)(uint32_t typeMask,
-                                                    const char *debugMsg,
-                                                    uint32_t guidLo,
-                                                    uint32_t guidHi,
-                                                    int debugCode);
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 
 // `FUN_CMSG_LOOT_UNIT` is `__thiscall(player, target, useDistanceCheck)`.
@@ -71,11 +67,7 @@ int __fastcall Script_LootUnit(void *L) {
     if (*reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) == nullptr)
         return 0;
 
-    auto ObjectPtr = reinterpret_cast<ClntObjMgrObjectPtr_t>(
-        Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *target = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                             static_cast<uint32_t>(guid),
-                             static_cast<uint32_t>(guid >> 32), 0);
+    void *target = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (target == nullptr)
         return 0;
 

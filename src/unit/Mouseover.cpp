@@ -46,6 +46,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 
@@ -60,17 +61,6 @@ using SetMouseover_t = void(__stdcall *)(uint32_t guidLo, uint32_t guidHi,
 
 using FireEventNoArgs_t = void(__fastcall *)(int eventID);
 
-// `FUN_OBJECT_RESOLVE_BY_GUID(typeMask, debugName, guidLo, guidHi, prio)`
-// — keeps the object only if its type flags intersect `typeMask`, so the
-// unit|player mask returns non-null only for a live unit / player / pet /
-// MC'd creature (never a gameobject or item). Same primitive
-// `Unit::Flags::ResolveUnitOrPlayerByGuid` uses.
-using ResolveObjectByGuid_t = void *(__fastcall *)(int typeMask,
-                                                   const char *debugName,
-                                                   uint32_t guidLo,
-                                                   uint32_t guidHi,
-                                                   int priority);
-
 // True iff the current mouseover GUID resolves to a unit (not a
 // gameobject / item / nothing).
 bool MouseoverIsUnit() {
@@ -82,9 +72,9 @@ bool MouseoverIsUnit() {
         return false;
     constexpr int kUnitOrPlayerMask =
         (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
-    auto fn = reinterpret_cast<ResolveObjectByGuid_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
-    return fn(kUnitOrPlayerMask, "UPDATE_MOUSEOVER_UNIT", lo, hi, 0) != nullptr;
+    return Object::ByGuid(kUnitOrPlayerMask,
+                          (static_cast<uint64_t>(hi) << 32) | lo,
+                          "UPDATE_MOUSEOVER_UNIT", 0) != nullptr;
 }
 
 SetMouseover_t SetMouseover_o = nullptr;

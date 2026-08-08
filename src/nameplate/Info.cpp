@@ -56,6 +56,7 @@
 #include "Offsets.h"
 #include "guid/Guid.h"
 #include "nameplate/Walk.h"
+#include "object/Resolve.h"
 #include "ui/FrameObject.h"
 
 #include <cstdint>
@@ -68,9 +69,6 @@ using NamePlate::Walk::ForEachNamePlatedUnit;
 using NamePlate::Walk::kOffUnitNamePlate;
 
 using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
-using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                              uint32_t guidLo, uint32_t guidHi,
-                                              int priority);
 
 } // namespace
 
@@ -130,13 +128,8 @@ static void PushNamePlateForGUID(void *L, uint64_t guid) {
         Game::Lua::PushNil(L);
         return;
     }
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
     auto *unit = static_cast<uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_UNIT, "NamePlate",
-                static_cast<uint32_t>(guid),
-                static_cast<uint32_t>(guid >> 32),
-                0x172));
+        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "NamePlate", 0x172));
     if (unit == nullptr) {
         Game::Lua::PushNil(L);
         return;

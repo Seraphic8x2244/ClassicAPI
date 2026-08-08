@@ -54,6 +54,7 @@
 #include "Offsets.h"
 #include "equipmentset/Locations.h"
 #include "event/Custom.h"
+#include "object/Resolve.h"
 #include "player/StatSignal.h"
 #include "unit/Identity.h"
 
@@ -79,14 +80,9 @@ const Event::Custom::AutoReserve _r2{kEvtDurability};
 // player object can be mid-create and momentarily unresolvable — a Lua
 // error thrown from there unwinds through raw engine code.
 bool SlotHasItem(uint32_t guidLo, uint32_t guidHi, int slot0Based) {
-    using ResolveByGUID_t = void *(__fastcall *)(uint32_t typeMask,
-                                                 const char *debugName,
-                                                 uint32_t guidLo, uint32_t guidHi,
-                                                 int line);
-    auto resolve =
-        reinterpret_cast<ResolveByGUID_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    auto *player = static_cast<const uint8_t *>(resolve(
-        Offsets::OBJ_TYPE_PLAYER, "ClassicAPI", guidLo, guidHi, 0x172));
+    auto *player = static_cast<const uint8_t *>(Object::ByGuid(
+        Offsets::OBJ_TYPE_PLAYER,
+        (static_cast<uint64_t>(guidHi) << 32) | guidLo, "ClassicAPI", 0x172));
     if (player == nullptr)
         return false;
     const uint8_t *invMgr = player + Offsets::OFF_PLAYER_INVENTORY_MANAGER;

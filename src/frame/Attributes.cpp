@@ -98,6 +98,7 @@
 #include "Offsets.h"
 #include "baselib/Ascii.h"
 #include "cursor/Info.h"
+#include "object/Resolve.h"
 #include "spell/AtCursor.h"
 #include "spell/AtUnit.h"
 #include "tick/WorldTick.h"
@@ -411,12 +412,7 @@ bool GuidHasLiveUnit(uint64_t guid) {
         return false;
     constexpr int kUnitOrPlayerMask =
         (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
-    auto resolve = reinterpret_cast<void *(__fastcall *)(int, const char *, uint32_t,
-                                                         uint32_t, int)>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
-    return resolve(kUnitOrPlayerMask, "ClassicAPI",
-                   static_cast<uint32_t>(guid),
-                   static_cast<uint32_t>(guid >> 32), 0) != nullptr;
+    return Object::ByGuid(kUnitOrPlayerMask, guid, "ClassicAPI", 0) != nullptr;
 }
 
 // Build the mouseover tooltip for a unit with no live object, straight from the

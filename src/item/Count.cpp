@@ -18,6 +18,7 @@
 #include "item/Arg.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "object/Resolve.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -97,22 +98,11 @@ int CountInBag(void *L, int bagID, int targetItemID, bool includeUses) {
 // object resolver `FUN_OBJECT_RESOLVE_BY_GUID` (the same function
 // `GetItemBySlot` would call internally if the gate let us through).
 
-using ResolveObjectByGuid_t = void *(__fastcall *)(int type,
-                                                    const char *debugName,
-                                                    uint32_t guidLo,
-                                                    uint32_t guidHi,
-                                                    int priority);
-
 const uint8_t *ResolveByGuid(int type, uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    auto fn = reinterpret_cast<ResolveObjectByGuid_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     return static_cast<const uint8_t *>(
-        fn(type, "ItemMgr",
-           static_cast<uint32_t>(guid),
-           static_cast<uint32_t>(guid >> 32),
-           0x172));
+        Object::ByGuid(type, guid, "ItemMgr", 0x172));
 }
 
 // Walks linear slots `[firstSlot, lastSlot]` of `invMgr`'s GUID array

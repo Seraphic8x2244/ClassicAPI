@@ -17,6 +17,7 @@
 #include "Offsets.h"
 #include "guid/Guid.h"
 #include "nameplate/Walk.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -107,16 +108,8 @@ const uint8_t *PlayerObject() {
     const uint64_t guid = PlayerGuid();
     if (guid == 0)
         return nullptr;
-    using ResolveByGuid_t = void *(__fastcall *)(uint32_t typeMask,
-                                                 const char *debugName,
-                                                 uint32_t guidLo, uint32_t guidHi,
-                                                 int line);
-    auto resolve =
-        reinterpret_cast<ResolveByGuid_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     return static_cast<const uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_PLAYER, "ClassicAPI",
-                static_cast<uint32_t>(guid), static_cast<uint32_t>(guid >> 32),
-                /*line*/ 0));
+        Object::ByGuid(Offsets::OBJ_TYPE_PLAYER, guid, "ClassicAPI", 0));
 }
 
 const uint8_t *PlayerInventoryManager() {

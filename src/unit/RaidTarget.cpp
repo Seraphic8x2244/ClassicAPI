@@ -46,6 +46,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "object/Resolve.h"
 #include "tick/WorldTick.h"
 #include "unit/TokenObserver.h"
 
@@ -71,21 +72,14 @@ uint64_t g_markGUID[kMarkCount] = {};
 // tick re-registers when it returns (nodes die with the object).
 bool g_markObserved[kMarkCount] = {};
 
-using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                             uint32_t guidLo, uint32_t guidHi,
-                                             int priority);
-
 // Resolve a GUID to its live `CGUnit`, or null when it isn't currently in
 // the client's object table (out of range / despawned / a non-unit
 // marker). Non-throwing — safe from the tick. Mirrors `Focus::ResolveObject`.
 const uint8_t *ResolveObject(uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
     return static_cast<const uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_UNIT, "RaidTarget", static_cast<uint32_t>(guid),
-                static_cast<uint32_t>(guid >> 32), 0x172));
+        Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "RaidTarget", 0x172));
 }
 
 // Descriptor-field observer callback for marker slot `Idx` (0-based).

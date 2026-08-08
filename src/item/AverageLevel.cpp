@@ -55,6 +55,7 @@
 #include "item/Data.h"
 #include "item/ID.h"
 #include "item/Location.h"
+#include "object/Resolve.h"
 #include "unit/Identity.h"
 
 #include <algorithm>
@@ -154,22 +155,11 @@ ItemInfo ReadItemInfo(const uint8_t *cgItem) {
 // Bank-walk helpers — bypass the bank-window gate on `GetItemBySlot`
 // by reading the player's invMgr GUID array directly. Same shape as
 // `C_Item.GetItemCount`'s bank path.
-using ResolveObjectByGuid_t = void *(__fastcall *)(int type,
-                                                    const char *debugName,
-                                                    uint32_t guidLo,
-                                                    uint32_t guidHi,
-                                                    int priority);
-
 const uint8_t *ResolveByGuid(int type, uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    auto fn = reinterpret_cast<ResolveObjectByGuid_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     return static_cast<const uint8_t *>(
-        fn(type, "AverageLevel",
-           static_cast<uint32_t>(guid),
-           static_cast<uint32_t>(guid >> 32),
-           0x172));
+        Object::ByGuid(type, guid, "AverageLevel", 0x172));
 }
 
 // Collects a single CGItem into `candidates` if it could equip in

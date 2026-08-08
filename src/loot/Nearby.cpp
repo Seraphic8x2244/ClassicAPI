@@ -14,6 +14,7 @@
 #include "../Game.h"
 #include "../Offsets.h"
 #include "../guid/Guid.h"
+#include "../object/Resolve.h"
 
 #include <cstdint>
 
@@ -61,19 +62,6 @@ struct C3Vector {
 using GetPosition_t = const C3Vector *(__thiscall *)(const void *self,
                                                       C3Vector *outBuf);
 constexpr int VTBL_GET_POSITION_OFFSET = 0x14;
-
-// `ClntObjMgrObjectPtr(typeMask, debugMessage, guid_lo, guid_hi, debugCode)`
-// — resolves a 64-bit GUID to the loaded `CGObject_C *` it currently
-// refers to, filtered by `typeMask`. Returns NULL when no live object
-// matches the GUID *and* the typeMask. Splitting the GUID into lo/hi
-// DWORDs on the stack is equivalent to the engine's
-// `__fastcall(uint32_t, const char*, uint64_t, int)` signature once the
-// `uint64_t` argument is placed in the same stack slots.
-using ClntObjMgrObjectPtr_t = void *(__fastcall *)(uint32_t typeMask,
-                                                    const char *debugMsg,
-                                                    uint32_t guidLo,
-                                                    uint32_t guidHi,
-                                                    int debugCode);
 
 // Reads `(unit.m_objectFields[+0x224] & UNIT_DYNFLAG_LOOTABLE) != 0`
 // — the server-driven bit it sets when the local player has loot
@@ -157,11 +145,7 @@ struct ScanCtx {
 };
 
 int __fastcall ScanCallback(ScanCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
-    auto ObjectPtr = reinterpret_cast<ClntObjMgrObjectPtr_t>(
-        Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                          static_cast<uint32_t>(guid),
-                          static_cast<uint32_t>(guid >> 32), 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1; // GUID isn't a unit; continue
 

@@ -15,6 +15,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -166,12 +167,6 @@ using PlayerInfoLookup_t = const uint8_t *(__thiscall *)(
     void *cache, uint32_t guidLo, uint32_t guidHi, uint64_t *cookie,
     void *callback, void *userData, int retryFlag);
 
-using ResolveObjectByGuid_t = void *(__fastcall *)(int typeMask,
-                                                   const char *debugName,
-                                                   uint32_t guidLo,
-                                                   uint32_t guidHi,
-                                                   int priority);
-
 // Resolve a GUID to its live CGUnit / CGPlayer object, or nullptr if
 // the object isn't currently loaded. Unlike a unit-*token* resolve
 // (`FUN_RESOLVE_UNIT_TOKEN`), this takes the GUID directly, so it works
@@ -185,11 +180,8 @@ const uint8_t *ResolveUnitOrPlayerByGuid(uint64_t guid) {
         return nullptr;
     constexpr int kUnitOrPlayerMask =
         (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
-    auto fn = reinterpret_cast<ResolveObjectByGuid_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     return static_cast<const uint8_t *>(
-        fn(kUnitOrPlayerMask, "UnitIsInMyGuild",
-           static_cast<uint32_t>(guid), static_cast<uint32_t>(guid >> 32), 0));
+        Object::ByGuid(kUnitOrPlayerMask, guid, "UnitIsInMyGuild", 0));
 }
 
 // Resolves a player GUID to its character name via

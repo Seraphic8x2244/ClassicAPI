@@ -15,6 +15,7 @@
 
 #include "Offsets.h"
 #include "item/Location.h"
+#include "object/Resolve.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -58,13 +59,7 @@ int InvMgrSlotCount(const uint8_t *invMgr) {
 uint8_t *ResolveByGUID(int type, uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    using ResolveByGUID_t = void *(__fastcall *)(int, const char *, uint32_t,
-                                                  uint32_t, int);
-    auto fn = reinterpret_cast<ResolveByGUID_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    return static_cast<uint8_t *>(fn(type, "ItemMgr",
-                                     static_cast<uint32_t>(guid),
-                                     static_cast<uint32_t>(guid >> 32),
-                                     0x172));
+    return static_cast<uint8_t *>(Object::ByGuid(type, guid, "ItemMgr", 0x172));
 }
 
 // Walks one bag's contents for a matching GUID. Returns the 1-based

@@ -21,6 +21,7 @@
 #include "Offsets.h"
 #include "net/PacketDispatch.h"
 #include "net/PacketReader.h"
+#include "object/Resolve.h"
 #include "player/StatSignal.h"
 #include "spell/CastEvents.h"
 #include "spell/Lookup.h"
@@ -171,16 +172,10 @@ constexpr uint32_t kEvictGraceMs = 2000;
 bool DescriptorListsAura(uint64_t guid, uint32_t spellId) {
     if (guid == 0 || spellId == 0)
         return false;
-    using ResolveByGuid_t = void *(__fastcall *)(int typeMask, const char *dbg,
-                                                 uint32_t guidLo,
-                                                 uint32_t guidHi, int priority);
     constexpr int kUnitOrPlayerMask =
         (1 << Offsets::OBJECT_TYPE_UNIT) | (1 << Offsets::OBJECT_TYPE_PLAYER);
-    auto resolve = reinterpret_cast<ResolveByGuid_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID));
     const auto *unit = static_cast<const uint8_t *>(
-        resolve(kUnitOrPlayerMask, nullptr, static_cast<uint32_t>(guid),
-                static_cast<uint32_t>(guid >> 32), 0));
+        Object::ByGuid(kUnitOrPlayerMask, guid, nullptr, 0));
     if (unit == nullptr)
         return false;
     const auto *desc = *reinterpret_cast<const uint8_t *const *>(

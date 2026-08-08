@@ -76,6 +76,7 @@
 #include "bag/UpdateDelayed.h"
 #include "event/Custom.h"
 #include "item/Location.h"
+#include "object/Resolve.h"
 #include "tick/WorldTick.h"
 #include "unit/Identity.h"
 
@@ -265,16 +266,11 @@ void AppendGuidArray(const uint8_t *invMgr, int first, int last, uint64_t *out,
             AddUnique(out, count, arr[slot]);
 }
 
-using ResolveByGuid_t = void *(__fastcall *)(int type, const char *debugName,
-                                             uint32_t guidLo, uint32_t guidHi,
-                                             int priority);
 const uint8_t *ResolveByGuid(int type, uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    auto fn = reinterpret_cast<ResolveByGuid_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     return static_cast<const uint8_t *>(
-        fn(type, "ItemMgr", static_cast<uint32_t>(guid),
-           static_cast<uint32_t>(guid >> 32), 0x172));
+        Object::ByGuid(type, guid, "ItemMgr", 0x172));
 }
 
 // Appends every item the player owns that ISN'T in bags 0..4 — worn

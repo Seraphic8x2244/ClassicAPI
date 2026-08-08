@@ -40,6 +40,7 @@
 #include "../event/Custom.h"
 #include "../event/SignalHook.h"
 #include "../guid/Guid.h"
+#include "../object/Resolve.h"
 #include "../tick/WorldTick.h"
 
 #include <cstdint>
@@ -104,11 +105,6 @@ using ClntObjMgrEnumVisibleObjectsCallback_t = int(__fastcall *)(void *ctx,
                                                                   uint64_t guid);
 using ClntObjMgrEnumVisibleObjects_t =
     int(__fastcall *)(ClntObjMgrEnumVisibleObjectsCallback_t cb, void *ctx);
-using ClntObjMgrObjectPtr_t = void *(__fastcall *)(uint32_t typeMask,
-                                                    const char *debugMsg,
-                                                    uint32_t guidLo,
-                                                    uint32_t guidHi,
-                                                    int debugCode);
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 using LootUnit_t = void(__thiscall *)(void *player, void *target,
                                       char useDistanceCheck);
@@ -290,11 +286,7 @@ void TryStartNext() {
 }
 
 void StartLoot(uint64_t guid) {
-    auto ObjectPtr = reinterpret_cast<ClntObjMgrObjectPtr_t>(
-        Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *target = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                             static_cast<uint32_t>(guid),
-                             static_cast<uint32_t>(guid >> 32), 0);
+    void *target = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (target == nullptr) {
         TryStartNext();
         return;
@@ -423,11 +415,7 @@ struct EnumCtx {
 };
 
 int __fastcall EnumCallback(EnumCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
-    auto ObjectPtr = reinterpret_cast<ClntObjMgrObjectPtr_t>(
-        Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                          static_cast<uint32_t>(guid),
-                          static_cast<uint32_t>(guid >> 32), 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
     if (!IsLootableUnit(obj))

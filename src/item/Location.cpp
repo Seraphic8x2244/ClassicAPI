@@ -16,6 +16,7 @@
 #include "../Game.h"
 #include "../Offsets.h"
 #include "../guid/Guid.h"
+#include "../object/Resolve.h"
 #include "../unit/Identity.h"
 #include "Arg.h"
 #include "ID.h"
@@ -105,12 +106,8 @@ void *EquippedBagInventory(int bagID) {
     const uint64_t bagGuid = getBagGuid(static_cast<uint32_t>(bagID - 1));
     if (bagGuid == 0)
         return nullptr; // no bag equipped in that slot
-    using ResolveByGUID_t = void *(__fastcall *)(int, const char *, uint32_t,
-                                                  uint32_t, int);
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     auto *container = static_cast<const uint8_t *>(
-        resolve(Offsets::OBJ_TYPE_CONTAINER, "ItemMgr", static_cast<uint32_t>(bagGuid),
-                static_cast<uint32_t>(bagGuid >> 32), 0x172));
+        Object::ByGuid(Offsets::OBJ_TYPE_CONTAINER, bagGuid, "ItemMgr", 0x172));
     return ContainerInventory(container);
 }
 
@@ -170,13 +167,8 @@ bool ParseGUIDString(const char *s, uint64_t *out) {
 const uint8_t *ResolveByGUID(uint64_t guid) {
     if (guid == 0)
         return nullptr;
-    using ResolveByGUID_t = void *(__fastcall *)(int, const char *, uint32_t,
-                                                  uint32_t, int);
-    auto fn = reinterpret_cast<ResolveByGUID_t>(Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    return static_cast<const uint8_t *>(fn(Offsets::OBJ_TYPE_ITEM, "ItemMgr",
-                                            static_cast<uint32_t>(guid),
-                                            static_cast<uint32_t>(guid >> 32),
-                                            0x172));
+    return static_cast<const uint8_t *>(
+        Object::ByGuid(Offsets::OBJ_TYPE_ITEM, guid, "ItemMgr", 0x172));
 }
 
 bool FindByItemID(void *L, int itemID, ByGUIDResult *out) {

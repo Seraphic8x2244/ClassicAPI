@@ -53,6 +53,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "nameplate/Walk.h"
+#include "object/Resolve.h"
 #include "unit/Focus.h"
 #include "unit/RaidTarget.h"
 
@@ -95,9 +96,6 @@ using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
 // own cleanup, drifting ESP +12 per call and corrupting the caller's
 // frame.
 using SStrCmpI_t = int(__stdcall *)(const char *a, const char *b, int n);
-using ResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                              uint32_t guidLo, uint32_t guidHi,
-                                              int priority);
 
 constexpr const char kNamePlatePrefix[] = "nameplate";
 constexpr int kNamePlatePrefixLen = static_cast<int>(sizeof(kNamePlatePrefix) - 1);
@@ -118,18 +116,14 @@ constexpr int kResolvePriority = 0x6e;
 TokenToGUID_t Original_o = nullptr;
 
 uint64_t WalkSuffix(uint64_t guid, const char *suffix) {
-    auto resolve = reinterpret_cast<ResolveByGUID_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
     auto sstrcmpi = reinterpret_cast<SStrCmpI_t>(Offsets::FUN_SSTR_CMP_I);
     while (guid != 0 && *suffix != '\0') {
         if (sstrcmpi(suffix, kSuffixTarget, kSuffixTargetLen) != 0)
             return 0; // unknown suffix component — modern returns nil
         suffix += kSuffixTargetLen;
         auto *obj = static_cast<uint8_t *>(
-            resolve(Offsets::OBJ_TYPE_UNIT, "ClassicAPI",
-                    static_cast<uint32_t>(guid),
-                    static_cast<uint32_t>(guid >> 32),
-                    kResolvePriority));
+            Object::ByGuid(Offsets::OBJ_TYPE_UNIT, guid, "ClassicAPI",
+                           kResolvePriority));
         if (obj == nullptr)
             return 0;
         // `m_objectFields` is a *pointer* stored at `obj + 0x110`,

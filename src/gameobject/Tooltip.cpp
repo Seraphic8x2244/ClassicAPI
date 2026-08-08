@@ -14,6 +14,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "guid/Guid.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 
@@ -28,9 +29,6 @@ namespace GameObject::Tooltip {
 // on every subsequent `SetX` call — same gating pattern Has/GetUnitGUID,
 // Has/GetItem, and Has/GetSpell use.
 
-using ObjectResolveByGUID_t = void *(__fastcall *)(int type, const char *debugName,
-                                                   uint32_t guidLo, uint32_t guidHi,
-                                                   int priority);
 using GameObjectGetName_t = const char *(__fastcall *)(void *gameObject);
 
 // `GameTooltip:GetGameObject()` → (name, id, guid) for whichever gameobject
@@ -72,10 +70,9 @@ static int __fastcall Script_GameTooltipGetGameObject(void *L) {
     if (guidLo == 0 && guidHi == 0)
         return 0;
 
-    auto resolve = reinterpret_cast<ObjectResolveByGUID_t>(
-        Offsets::FUN_OBJECT_RESOLVE_BY_GUID);
-    void *obj = resolve(Offsets::OBJ_TYPE_GAMEOBJECT, "GameTooltip:GetGameObject",
-                        guidLo, guidHi, 0x172);
+    void *obj = Object::ByGuid(Offsets::OBJ_TYPE_GAMEOBJECT,
+                               (static_cast<uint64_t>(guidHi) << 32) | guidLo,
+                               "GameTooltip:GetGameObject", 0x172);
     if (obj == nullptr)
         return 0;
 

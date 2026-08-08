@@ -45,6 +45,7 @@
 #include "event/SignalHook.h"
 #include "guid/Guid.h"
 #include "item/Count.h"
+#include "object/Resolve.h"
 #include "spell/Lookup.h"
 #include "tick/WorldTick.h"
 #include "ui/ColorData.h"
@@ -165,9 +166,6 @@ uint32_t SpellDurationMs(const uint8_t *rec) {
 using EnumCallback_t = int(__fastcall *)(void *ctx, void *unusedEdx,
                                          uint64_t guid);
 using EnumVisibleObjects_t = int(__fastcall *)(EnumCallback_t cb, void *ctx);
-using ObjectPtr_t = void *(__fastcall *)(uint32_t typeMask, const char *dbg,
-                                         uint32_t guidLo, uint32_t guidHi,
-                                         int dbgCode);
 
 struct ScanCtx {
     uint64_t playerGuid;
@@ -192,11 +190,7 @@ int __fastcall ScanCallback(ScanCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
         return 1;
 
     // Confirm it's OUR totem: resolve + check CreatedBy == player.
-    auto ObjectPtr =
-        reinterpret_cast<ObjectPtr_t>(Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                          static_cast<uint32_t>(guid),
-                          static_cast<uint32_t>(guid >> 32), 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
     auto *desc = *reinterpret_cast<const uint8_t *const *>(
@@ -224,11 +218,7 @@ int __fastcall FindGuidCallback(FindGuidCtx *ctx, void * /*unusedEdx*/,
         return 1;
     if (static_cast<uint32_t>((guid >> 24) & 0xFFFFFFu) != ctx->entry)
         return 1;
-    auto ObjectPtr =
-        reinterpret_cast<ObjectPtr_t>(Offsets::FUN_CLNT_OBJ_MGR_OBJECT_PTR);
-    void *obj = ObjectPtr(Offsets::TYPEMASK_UNIT, nullptr,
-                          static_cast<uint32_t>(guid),
-                          static_cast<uint32_t>(guid >> 32), 0);
+    void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
     auto *desc = *reinterpret_cast<const uint8_t *const *>(
