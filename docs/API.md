@@ -9299,10 +9299,16 @@ sex, class) was reverse-engineered from the
 ### `UnitNameFromGUID(guid)`
 
 Returns `name, realm` for the player identified by `guid`, or `nil`
-if no player with that GUID has been encountered yet. Same lookup
-chain as [`GetPlayerInfoByGUID`](#getplayerinfobyguidguid) (engine
-NameCache, persistent on-disk fallback when enabled) — just narrower
-return shape for callers that only need the name.
+if no player with that GUID has been encountered yet.
+
+It tries three sources in order:
+
+1. The object manager — any currently-synced unit (a player you can
+   see, your target, a party or raid member, an NPC in range).
+2. Your friends list — it keeps name and GUID for online and offline
+   friends, so a friend resolves even when not synced and never seen
+   in chat. Always on.
+3. The persistent on-disk name cache, when you have enabled it.
 
 ```lua
 local name, realm = UnitNameFromGUID(UnitGUID("target"))

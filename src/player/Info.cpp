@@ -38,6 +38,7 @@
 #include "NameCache.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "friendlist/FriendList.h"
 #include "guid/Guid.h"
 #include "unit/Identity.h"
 
@@ -180,9 +181,12 @@ int PushFromNameCacheEntry(void *L, const char *name,
 //      `FUN_OBJECT_GET_NAME` on it; this routes through the player
 //      NameCache for players AND the creature cache for NPCs, so it
 //      works for both with a single call.
-//   2. If the unit isn't currently synced (ex-target who logged off,
-//      player encountered earlier in chat but no longer visible),
-//      fall back to the persistent NameCache (when enabled).
+//   2. Friends list. It keeps name + GUID for online AND offline
+//      friends (SMSG_FRIEND_LIST), so a friend resolves even while
+//      unsynced and never seen in chat. Always on (not opt-in).
+//   3. If still unresolved (ex-target who logged off, player
+//      encountered earlier in chat but no longer visible), fall back
+//      to the persistent NameCache (when enabled).
 //
 // `realm` is always `""` in vanilla — the engine doesn't populate
 // per-player realm names and 1.12 has no cross-realm interaction.
@@ -194,8 +198,8 @@ int PushFromNameCacheEntry(void *L, const char *name,
 //   - Missing or non-string arg (raises an error rather than return).
 //   - Unparseable GUID string.
 //   - Zero / NULL GUID.
-//   - GUID not resolvable in the object manager AND not in persistent
-//     NameCache (i.e., we've never seen this unit).
+//   - GUID not resolvable in the object manager, not on the friends
+//     list, AND not in the persistent NameCache (never seen this unit).
 //
 // Doesn't trigger a network query on miss — passive read, same as
 // `GetPlayerInfoByGUID`. Use `C_PlayerCache.RememberPlayer` or let
@@ -237,6 +241,16 @@ int __fastcall Script_UnitNameFromGUID(void *L) {
             Game::Lua::PushString(L, "");
             return 2;
         }
+    }
+
+    // Friends-list fallback: the friend list keeps name + GUID for online
+    // AND offline friends, so a friend resolves even while unsynced and
+    // uncached. It needs no race/sex (this API returns only name + realm).
+    if (const char *fname = FriendList::NameForGuid(
+            (static_cast<uint64_t>(hi) << 32) | lo)) {
+        Game::Lua::PushString(L, fname);
+        Game::Lua::PushString(L, "");
+        return 2;
     }
 
     // Object-manager miss / sentinel — fall back to the persistent

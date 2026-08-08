@@ -77,6 +77,27 @@ inline const uint8_t *EntryByIndex(int index) {
     return social + index * FRIEND_ENTRY_STRIDE;
 }
 
+// The inline name of the friend with GUID `guid`, or null if that GUID is
+// not on the friends list. The list keeps name + GUID for online AND offline
+// friends (SMSG_FRIEND_LIST), so this resolves a GUID to a name even when the
+// unit is not synced in the object manager and not in the name cache.
+inline const char *NameForGuid(uint64_t guid) {
+    if (guid == 0)
+        return nullptr;
+    const int count = Count();
+    for (int i = 0; i < count; ++i) {
+        const uint8_t *entry = EntryByIndex(i);
+        if (entry == nullptr)
+            break;
+        if (*reinterpret_cast<const uint64_t *>(entry + OFF_FRIEND_GUID) == guid) {
+            const char *name =
+                *reinterpret_cast<const char *const *>(entry + OFF_FRIEND_NAME);
+            return (name != nullptr && *name != '\0') ? name : nullptr;
+        }
+    }
+    return nullptr;
+}
+
 // The ignore-list GUID at 0-based `index`, or 0 if there is no list or the
 // index is past the fixed cap. Mirrors FUN_005AE570.
 inline uint64_t IgnoreGuidByIndex(int index) {
