@@ -171,6 +171,7 @@ build instructions.
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
   - [`C_FriendList.IsWhoQueryPending()`](#c_friendlistiswhoquerypending)
+  - [`C_FriendList.IsFriend(guid)`](#c_friendlistisfriendguid)
 
 - [GameObject](#gameobject)
   - [`C_GameObjectInfo.GetGameObjectInfoByID(gameObjectID)`](#c_gameobjectinfogetgameobjectinfobyidgameobjectid)
@@ -418,6 +419,7 @@ build instructions.
   - [`C_Spell.GetSpellDescription(spellID)`](#c_spellgetspelldescriptionspellid)
   - [`C_Spell.GetSpellMechanicByID(spellID)`](#c_spellgetspellmechanicbyidspellid)
   - [`C_Spell.GetSpellEffectMechanics(spellID)`](#c_spellgetspelleffectmechanicsspellid)
+  - [`C_Spell.GetSpellDispelType(spellID)`](#c_spellgetspelldispeltypespellid)
   - [`C_Spell.GetSpellRadius(spellID)` / `GetSpellRadius(slot, bookType)`](#c_spellgetspellradiusspellid--getspellradiusslot-booktype)
   - [`C_Spell.GetSpellPowerCost(spellIdentifier)`](#c_spellgetspellpowercostspellidentifier)
   - [`C_Spell.GetSpellReagents(spellID)`](#c_spellgetspellreagentsspellid)
@@ -438,6 +440,8 @@ build instructions.
   - [`C_Spell.IsSpellInRange(spellIdentifier, targetUnit)`](#c_spellisspellinrangespellidentifier-targetunit)
   - [`C_Spell.IsAutoAttackSpell(spellID)`](#c_spellisautoattackspellspellid)
   - [`C_Spell.IsRangedAutoAttackSpell(spellID)`](#c_spellisrangedautoattackspellspellid)
+  - [`C_Spell.IsNextMeleeSpell(spellID)`](#c_spellisnextmeleespellspellid)
+  - [`C_Spell.ResetsMeleeSwing(spellID)`](#c_spellresetsmeleeswingspellid)
   - [`IsHarmfulSpell(spell)` / `IsHelpfulSpell(spell)`](#isharmfulspellspell--ishelpfulspellspell)
   - [`C_Spell.IsSpellHarmful(spellID)` / `C_Spell.IsSpellHelpful(spellID)`](#c_spellisspellharmfulspellid--c_spellisspellhelpfulspellid)
   - [`GetSpellSchool(spellID)`](#getspellschoolspellid)
@@ -4057,6 +4061,26 @@ contribute to the same pending window. This is acceptable for the
 "suppress popup for any in-flight DLL-issued query" use case;
 addons that need per-call tracking should manage their own ticket
 state on top.
+
+### `C_FriendList.IsFriend(guid)`
+
+Returns `true` if the player with the given GUID is on your friends
+list, `false` if not.
+
+```lua
+C_FriendList.IsFriend(UnitGUID("target"))    -- true if the target is a friend
+C_FriendList.IsFriend("0x00000000000ABCDE")
+```
+
+`guid` is a GUID string — the `"0x…"` form that `UnitGUID` returns.
+You can also pass a plain character name, because vanilla's friends
+list is keyed by name (`AddFriend(name)`).
+
+The check reads the engine's friends list directly. It matches the
+input GUID against each friend's stored GUID. The server sends that
+GUID for both online and offline friends. As a fallback it also
+compares character names, so the answer holds for any friend the
+client saw this session.
 
 ## GameObject
 
@@ -10210,6 +10234,21 @@ Reads `Spell.dbc` directly (`EffectMechanic[3]` at `+0x13C`), so it covers
 every spell the client knows — not just the player's spellbook — with no
 caching or network round-trip.
 
+### `C_Spell.GetSpellDispelType(spellID)`
+
+Returns the spell's dispel type from `Spell.dbc`: `1` = Magic,
+`2` = Curse, `3` = Disease, `4` = Poison. Returns `0` for a spell
+that nothing can dispel, and for an unknown spell.
+
+```lua
+C_Spell.GetSpellDispelType(118)   -- Polymorph → 1 (Magic)
+C_Spell.GetSpellDispelType(980)   -- Curse of Agony → 2 (Curse)
+C_Spell.GetSpellDispelType(133)   -- Fireball → 0 (none)
+```
+
+Use the number to show what removes an effect, or to filter auras by
+dispel type. The values match the `DISPEL_*` set the server uses.
+
 ### `C_Spell.GetSpellRadius(spellID)` / `GetSpellRadius(slot, bookType)`
 
 Returns `(baseRadius, modifiedRadius)` — the spell's AOE radius in yards,
@@ -10694,14 +10733,49 @@ C_Spell.IsRangedAutoAttackSpell(5019)        -- true (Shoot wand)
 C_Spell.IsRangedAutoAttackSpell(6603)        -- false (melee)
 ```
 
-Tests `Spell.dbc.Attributes & 0x02` (the `SPELL_ATTR_AUTO_REPEAT`
-flag) — verified empirically against in-game spell data. Auto Shot
-(`0x00050012`) and Shoot wand (`0x00000012`) share bit 1; Heroic
-Strike (`0x00050014`) and other ranged abilities don't. Naturally
-covers any future auto-repeating spell a private server might add.
+Tests the auto-repeat flag in `Spell.dbc.AttributesEx2` (bit `0x20`).
+Only Auto Shot and Shoot carry it. The on-cast ranged abilities —
+Aimed Shot and Multi-Shot — set the general `RANGED` bit but not the
+auto-repeat flag, so they return `false`. The flag also covers any
+future auto-repeating spell a private server adds. Verified against
+`Spell.dbc`.
 
 See [`C_SpellBook.IsRangedAutoAttackSpellBookItem`](#c_spellbookisrangedautoattackspellbookitemslot-booktype)
 for the spellbook-slot variant.
+
+### `C_Spell.IsNextMeleeSpell(spellID)`
+
+Returns `true` if the spell is an "on next swing" melee ability.
+These abilities queue and land on your next weapon swing instead of
+an instant cast (Heroic Strike, Cleave, Maul, Raptor Strike).
+
+```lua
+C_Spell.IsNextMeleeSpell(78)     -- Heroic Strike → true
+C_Spell.IsNextMeleeSpell(6807)   -- Maul → true
+C_Spell.IsNextMeleeSpell(116)    -- Frostbolt → false
+```
+
+Tests the two on-next-swing bits in `Spell.dbc.Attributes`
+(`0x04` and `0x400`).
+
+### `C_Spell.ResetsMeleeSwing(spellID)`
+
+Returns `true` if casting the spell resets your melee swing timer.
+Cast-time spells reset it when you cast them (Fireball, Frostbolt,
+Polymorph, wand Shoot). Instant abilities like Sinister Strike do not,
+so a rogue can weave them between swings.
+
+```lua
+C_Spell.ResetsMeleeSwing(133)    -- Fireball → true
+C_Spell.ResetsMeleeSwing(1752)   -- Sinister Strike → false
+C_Spell.ResetsMeleeSwing(1464)   -- Slam → false (flagged "no reset")
+```
+
+Mirrors the server's `IsMeleeAttackResetSpell`: `true` when the
+spell's `InterruptFlags` has the auto-attack bit (`0x08`) and its
+`AttributesEx2` does not have the "no reset auto actions" bit
+(`0x20000`). Both fields come from `Spell.dbc`. Slam carries that
+second bit, so it keeps its swing.
 
 ### `C_Item.GetWeaponEnchantInfo()`
 
