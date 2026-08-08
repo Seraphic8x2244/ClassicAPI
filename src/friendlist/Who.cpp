@@ -121,7 +121,7 @@ using SendQuery_t = void(__thiscall *)(void *self, const char *queryStr);
 
 bool SendQueryInternal(const char *fullQuery) {
     auto *system = *reinterpret_cast<void *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_WHO_SYSTEM));
+        static_cast<uintptr_t>(Offsets::VAR_SOCIAL_SYSTEM));
     if (system == nullptr)
         return false;
     auto fn = reinterpret_cast<SendQuery_t>(Offsets::FUN_WHO_SYSTEM_SEND_QUERY);

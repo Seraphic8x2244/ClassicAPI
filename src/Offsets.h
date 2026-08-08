@@ -3095,11 +3095,16 @@ enum Offsets {
     VAR_FACTION_COLLAPSED_BITMASK = 0x0084A0A4,
     MAX_FACTION_HEADERS = 32,
 
-    // Who-query (the /who system).
+    // The social singleton (0x00C28168) — one object shared by the friend
+    // list, ignore list, and /who system. Layout: friend entries inline from
+    // offset 0 (stride 0x20, up to 50; each is {connected@+0x00, name char*
+    // @+0x04, GUID u64 @+0x08, level@+0x10, area@+0x14, class@+0x18}), the
+    // 25-entry ignore-GUID table at +0x650, and the who-query state. Read by
+    // GetNumFriends/GetFriendInfo, GetNumIgnores, and Script_SendWho.
     //
     // `Script_SendWho` (0x005AD3B0) is a 32-byte wrapper:
     //   - validate arg1 is a string via lua_isstring
-    //   - load WhoSystem singleton from `[VAR_WHO_SYSTEM]`
+    //   - load the singleton from `[VAR_SOCIAL_SYSTEM]`
     //   - if non-NULL, lua_tostring(L, 1) for the query string
     //   - tail-call `FUN_WHO_SYSTEM_SEND_QUERY` with
     //     `__thiscall(this = WhoSystem, queryStr)`
@@ -3120,9 +3125,13 @@ enum Offsets {
     // Server-side cooldown for CMSG_WHO is ~5 seconds — a faster
     // client gets silent-dropped, so any client-side gating just
     // matches that.
-    VAR_WHO_SYSTEM = 0x00C28168,
+    VAR_SOCIAL_SYSTEM = 0x00C28168,
     VAR_WHO_TO_UI_FLAG = 0x00C2A12C,
     FUN_WHO_SYSTEM_SEND_QUERY = 0x005AEBB0,
+    // Friend count: `__fastcall(socialSingleton) -> uint` — walks the inline
+    // entries and returns the number of populated friend slots. Backs
+    // GetNumFriends and C_FriendList.IsFriend.
+    FUN_FRIEND_LIST_COUNT = 0x005AE490,
 
     // SMSG_WHO opcode handler — opcode 0x63 (99) per the registration
     // in `FUN_005adc50`: `FUN_005ab650(99, FUN_005adf60, 0)`. Reads
