@@ -172,6 +172,9 @@ build instructions.
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
   - [`C_FriendList.IsWhoQueryPending()`](#c_friendlistiswhoquerypending)
   - [`C_FriendList.IsFriend(guid)`](#c_friendlistisfriendguid)
+  - [`C_FriendList.GetNumFriends()`](#c_friendlistgetnumfriends)
+  - [`C_FriendList.GetFriendInfo(name)`](#c_friendlistgetfriendinfoname)
+  - [`C_FriendList.GetFriendInfoByIndex(index)`](#c_friendlistgetfriendinfobyindexindex)
 
 - [GameObject](#gameobject)
   - [`C_GameObjectInfo.GetGameObjectInfoByID(gameObjectID)`](#c_gameobjectinfogetgameobjectinfobyidgameobjectid)
@@ -4081,6 +4084,65 @@ input GUID against each friend's stored GUID. The server sends that
 GUID for both online and offline friends. As a fallback it also
 compares character names, so the answer holds for any friend the
 client saw this session.
+
+### `C_FriendList.GetNumFriends()`
+
+Returns the number of players on your friends list. The vanilla global
+`GetNumFriends()` returns the same count — this is the modern
+namespaced form.
+
+```lua
+C_FriendList.GetNumFriends()   -- e.g. 12
+```
+
+### `C_FriendList.GetFriendInfo(name)`
+
+Returns a `FriendInfo` table for the friend with the given name, or
+`nil` if that name is not on your list. The name match is
+case-insensitive.
+
+```lua
+local info = C_FriendList.GetFriendInfo("Sarahnity")
+-- {
+--   name = "Sarahnity", connected = true, level = 60,
+--   className = "Druid", area = "Stratholme",
+--   guid = "0x000000003B9CB7BF",
+--   afk = false, dnd = false,
+--   mobile = false, referAFriend = false, rafLinkType = 0,
+-- }
+```
+
+Table fields:
+
+- `name` — the friend's character name.
+- `connected` — `true` when the friend is online.
+- `level` — the friend's level, or `0` when unknown.
+- `className` — localized class name, or `nil` when unknown.
+- `area` — localized zone name, resolved to the parent zone, or `nil`
+  when unknown.
+- `guid` — the friend's GUID string.
+- `afk` / `dnd` — the friend's status flags.
+- `mobile` / `referAFriend` / `rafLinkType` — always `false` / `false`
+  / `0`. Vanilla 1.12 has no mobile app, Recruit-A-Friend, or RAF link
+  data.
+
+Vanilla 1.12 stores no friend note, so `notes` is absent (`nil`).
+
+### `C_FriendList.GetFriendInfoByIndex(index)`
+
+The same `FriendInfo` table, addressed by a 1-based list index instead
+of a name. Returns `nil` for an index below 1 or above
+[`GetNumFriends`](#c_friendlistgetnumfriends).
+
+```lua
+for i = 1, C_FriendList.GetNumFriends() do
+    local info = C_FriendList.GetFriendInfoByIndex(i)
+    print(info.name, info.connected, info.className, info.area)
+end
+```
+
+See [`C_FriendList.GetFriendInfo`](#c_friendlistgetfriendinfoname) for
+the field list.
 
 ## GameObject
 
