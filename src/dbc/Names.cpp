@@ -15,8 +15,36 @@
 
 #include "Lookup.h"
 #include "Offsets.h"
+#include "baselib/Ascii.h"
 
 namespace DBC {
+
+namespace {
+
+// Reverse lookup shared by ClassIdForToken / RaceIdForToken: the id whose
+// single-string field at `offset` matches `token` (case-insensitive), or 0.
+uint32_t IdForStringField(uintptr_t recordsVar, uintptr_t countVar, int offset,
+                          const char *token) {
+    if (token == nullptr || *token == '\0')
+        return 0;
+    const int count = *reinterpret_cast<const int *>(countVar);
+    const uint8_t *const *records =
+        *reinterpret_cast<const uint8_t *const *const *>(recordsVar);
+    if (records == nullptr)
+        return 0;
+    for (int i = 1; i <= count; ++i) {
+        const uint8_t *rec = records[i];
+        if (rec == nullptr)
+            continue;
+        const char *field =
+            *reinterpret_cast<const char *const *>(rec + offset);
+        if (field != nullptr && Ascii::EqualCI(field, token))
+            return static_cast<uint32_t>(i);
+    }
+    return 0;
+}
+
+} // namespace
 
 const char *ClassName(uint32_t classID) {
     if (classID == 0)
@@ -48,6 +76,18 @@ const char *RaceToken(uint32_t raceID) {
     return StringField(Offsets::VAR_CHRRACES_RECORDS,
                        Offsets::VAR_CHRRACES_COUNT, raceID,
                        Offsets::OFF_CHRRACES_FILENAME);
+}
+
+uint32_t ClassIdForToken(const char *token) {
+    return IdForStringField(Offsets::VAR_CHRCLASSES_RECORDS,
+                            Offsets::VAR_CHRCLASSES_COUNT,
+                            Offsets::OFF_CHRCLASSES_FILENAME, token);
+}
+
+uint32_t RaceIdForToken(const char *token) {
+    return IdForStringField(Offsets::VAR_CHRRACES_RECORDS,
+                            Offsets::VAR_CHRRACES_COUNT,
+                            Offsets::OFF_CHRRACES_FILENAME, token);
 }
 
 const char *AreaName(uint32_t areaID, bool resolveToParent) {

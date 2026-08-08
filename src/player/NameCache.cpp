@@ -66,6 +66,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "dbc/Names.h"
 #include "guid/Guid.h"
 #include "settings/Account.h"
 #include "unit/Identity.h"
@@ -636,80 +637,6 @@ bool ParseGUID(const char *str, uint64_t *outGUID) {
     return Guid::Parse(str, outGUID);
 }
 
-// Returns the ChrClasses.dbc record ID for a class token like
-// `"WARRIOR"`, `"MAGE"`, etc. Case-insensitive. 0 if not matched.
-// 1.12 has 9 player classes; we walk the DBC each call (cheap — 9
-// records, each filename a few bytes) rather than building a static
-// table that risks getting out-of-sync.
-uint32_t ResolveClassToken(const char *token) {
-    if (token == nullptr || *token == '\0')
-        return 0;
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_COUNT));
-    const uint8_t *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRCLASSES_RECORDS));
-    if (records == nullptr)
-        return 0;
-    for (int i = 1; i <= count; ++i) {
-        const uint8_t *rec = records[i];
-        if (rec == nullptr)
-            continue;
-        const char *filename = *reinterpret_cast<const char *const *>(
-            rec + Offsets::OFF_CHRCLASSES_FILENAME);
-        if (filename == nullptr)
-            continue;
-        // Case-insensitive compare; vanilla tokens are uppercase
-        // ("WARRIOR", "MAGE", ...) and modern Classic uses the same.
-        const char *a = filename;
-        const char *b = token;
-        bool match = true;
-        while (*a && *b) {
-            char ca = *a, cb = *b;
-            if (ca >= 'a' && ca <= 'z') ca -= 32;
-            if (cb >= 'a' && cb <= 'z') cb -= 32;
-            if (ca != cb) { match = false; break; }
-            ++a; ++b;
-        }
-        if (match && *a == '\0' && *b == '\0')
-            return static_cast<uint32_t>(i);
-    }
-    return 0;
-}
-
-// Same shape as ResolveClassToken but walks ChrRaces.dbc.
-uint32_t ResolveRaceToken(const char *token) {
-    if (token == nullptr || *token == '\0')
-        return 0;
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRRACES_COUNT));
-    const uint8_t *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_CHRRACES_RECORDS));
-    if (records == nullptr)
-        return 0;
-    for (int i = 1; i <= count; ++i) {
-        const uint8_t *rec = records[i];
-        if (rec == nullptr)
-            continue;
-        const char *filename = *reinterpret_cast<const char *const *>(
-            rec + Offsets::OFF_CHRRACES_FILENAME);
-        if (filename == nullptr)
-            continue;
-        const char *a = filename;
-        const char *b = token;
-        bool match = true;
-        while (*a && *b) {
-            char ca = *a, cb = *b;
-            if (ca >= 'a' && ca <= 'z') ca -= 32;
-            if (cb >= 'a' && cb <= 'z') cb -= 32;
-            if (ca != cb) { match = false; break; }
-            ++a; ++b;
-        }
-        if (match && *a == '\0' && *b == '\0')
-            return static_cast<uint32_t>(i);
-    }
-    return 0;
-}
-
 // `C_PlayerCache.RememberPlayer(guid, name, classToken [, raceToken
 // [, sex]])` — stores the entry in the persistent cache. Class and
 // race tokens are uppercase engine tokens (`"WARRIOR"`, `"NIGHTELF"`,
@@ -740,13 +667,13 @@ int __fastcall Script_C_PlayerCache_RememberPlayer(void *L) {
         return 1;
     }
     const char *classToken = Game::Lua::ToString(L, 3);
-    const uint32_t classID = ResolveClassToken(classToken);
+    const uint32_t classID = DBC::ClassIdForToken(classToken);
     // Optional race + sex. Missing / non-string / unknown values
     // resolve to 0, which Remember() treats as "leave existing value
     // alone" — so a 3-arg call preserves any prior race/sex data.
     uint32_t raceID = 0;
     if (Game::Lua::IsString(L, 4))
-        raceID = ResolveRaceToken(Game::Lua::ToString(L, 4));
+        raceID = DBC::RaceIdForToken(Game::Lua::ToString(L, 4));
     uint32_t sex = 0;
     if (Game::Lua::IsNumber(L, 5)) {
         const double raw = Game::Lua::ToNumber(L, 5);

@@ -34,6 +34,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "baselib/Ascii.h"
 #include "dbc/Lookup.h"
 #include "dbc/Names.h"
 #include "map/Area.h"
@@ -67,24 +68,12 @@ int IntField(const uint8_t *rec, int off) {
 // suffix against AreaTable and fall back to the geometric resolver only when a
 // node has no ", Zone" suffix or the zone name doesn't match.
 
-char AsciiLower(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
-
-bool IEqual(const char *a, const char *b) {
-    while (*a && *b) {
-        if (AsciiLower(*a) != AsciiLower(*b))
-            return false;
-        ++a;
-        ++b;
-    }
-    return *a == *b;
-}
-
 // True if `name` begins with `prefix` followed by a space — a word-prefix, so
 // the abbreviated taxi suffixes ("Redridge", "Arathi") match the full
 // AreaTable names ("Redridge Mountains", "Arathi Highlands").
 bool IStartsWord(const char *name, const char *prefix) {
     while (*prefix) {
-        if (!*name || AsciiLower(*name) != AsciiLower(*prefix))
+        if (!*name || Ascii::ToLower(*name) != Ascii::ToLower(*prefix))
             return false;
         ++name;
         ++prefix;
@@ -135,7 +124,7 @@ int ResolveZoneByName(const char *zone) {
             DBC::AreaName(static_cast<uint32_t>(id), /*resolveToParent=*/false);
         if (nm == nullptr)
             continue;
-        if (IEqual(nm, zone))
+        if (Ascii::EqualCI(nm, zone))
             return id; // exact wins outright
         if (prefixHit == 0 && IStartsWord(nm, zone))
             prefixHit = id;

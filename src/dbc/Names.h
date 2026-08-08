@@ -39,6 +39,12 @@ const char *RaceName(uint32_t raceID);
 // `UnitRace`'s second return / GetPlayerInfoByGUID's englishRace use.
 const char *RaceToken(uint32_t raceID);
 
+// Reverse of ClassToken / RaceToken: the `ChrClasses.dbc` / `ChrRaces.dbc` id
+// whose client-filename token matches `token` (case-insensitive), or 0 if none
+// matches. Walks the table (cheap — a handful of records).
+uint32_t ClassIdForToken(const char *token);
+uint32_t RaceIdForToken(const char *token);
+
 // Localized zone name for an `AreaTable.dbc` id. When `resolveToParent` is
 // true, a sub-area reports its parent zone (so "Goldshire" → "Elwynn
 // Forest"); when false, the area's own name is returned (what the engine's

@@ -96,6 +96,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "baselib/Ascii.h"
 #include "cursor/Info.h"
 #include "spell/AtCursor.h"
 #include "spell/AtUnit.h"
@@ -145,15 +146,6 @@ void Compose3Lower(char *dst, size_t n, const char *a, const char *b, const char
         for (; s && *s && i + 1 < n; ++s)
             dst[i++] = static_cast<char>(std::tolower(static_cast<unsigned char>(*s)));
     dst[i] = '\0';
-}
-
-// ASCII case-insensitive full-string equality.
-bool EqI(const char *a, const char *b) {
-    for (; *a && *b; ++a, ++b)
-        if (std::tolower(static_cast<unsigned char>(*a)) !=
-            std::tolower(static_cast<unsigned char>(*b)))
-            return false;
-    return *a == *b;
 }
 
 // True if `lname` (already lowercase) is a click "type" action attribute: an
@@ -510,10 +502,10 @@ void BuildModifierPrefix(void *L, char *buf, size_t n) {
 
 // Button name -> attribute suffix (retail's convention: the button number).
 const char *ButtonSuffix(const char *btn) {
-    if (EqI(btn, "RightButton"))  return "2";
-    if (EqI(btn, "MiddleButton")) return "3";
-    if (EqI(btn, "Button4"))      return "4";
-    if (EqI(btn, "Button5"))      return "5";
+    if (Ascii::EqualCI(btn, "RightButton"))  return "2";
+    if (Ascii::EqualCI(btn, "MiddleButton")) return "3";
+    if (Ascii::EqualCI(btn, "Button4"))      return "4";
+    if (Ascii::EqualCI(btn, "Button5"))      return "5";
     return "1"; // LeftButton / unknown
 }
 
@@ -601,10 +593,10 @@ bool CallGlobalNum2(void *L, const char *name, double a, double b) {
 // Returns true if it owned the click (so the chained handler is skipped).
 bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
                   const char *verb, const char *unit) {
-    if (EqI(verb, "target")) {
+    if (Ascii::EqualCI(verb, "target")) {
         if (!unit) return false;
         // `unit="none"` clears the target (retail's SecureActionButton behavior).
-        if (EqI(unit, "none")) {
+        if (Ascii::EqualCI(unit, "none")) {
             Game::Lua::CallGlobal(L, "ClearTarget");
             return true;
         }
@@ -621,17 +613,17 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
             Game::Lua::CallGlobalString(L, "TargetUnit", unit);
         return true;
     }
-    if (EqI(verb, "assist")) {
+    if (Ascii::EqualCI(verb, "assist")) {
         if (!unit) return false;
         Game::Lua::CallGlobalString(L, "AssistUnit", unit);
         return true;
     }
-    if (EqI(verb, "focus")) {
+    if (Ascii::EqualCI(verb, "focus")) {
         if (!unit) return false;
         Unit::Focus::Set(Unit::Identity::GuidForToken(unit));
         return true;
     }
-    if (EqI(verb, "spell")) {
+    if (Ascii::EqualCI(verb, "spell")) {
         if (!unit) return false;
         char spell[128];
         if (!ReadModAttr(L, fi, prefix, "spell", suffix, spell, sizeof spell))
@@ -639,7 +631,7 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         Spell::AtUnit::CastByName(spell, unit);
         return true;
     }
-    if (EqI(verb, "item")) {
+    if (Ascii::EqualCI(verb, "item")) {
         char item[128];
         int bag, slot;
         if (ReadModAttr(L, fi, prefix, "item", suffix, item, sizeof item)) {
@@ -657,7 +649,7 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         }
         return false;
     }
-    if (EqI(verb, "macro")) {
+    if (Ascii::EqualCI(verb, "macro")) {
         char macro[512];
         if (!ReadModAttr(L, fi, prefix, "macrotext", suffix, macro, sizeof macro) &&
             !ReadModAttr(L, fi, prefix, "macro", suffix, macro, sizeof macro))
@@ -669,11 +661,11 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
             RunMacroTextC(L, macro);
         return true;
     }
-    if (EqI(verb, "stop") || EqI(verb, "stopcasting")) {
+    if (Ascii::EqualCI(verb, "stop") || Ascii::EqualCI(verb, "stopcasting")) {
         Game::Lua::CallGlobal(L, "SpellStopCasting");
         return true;
     }
-    if (EqI(verb, "menu") || EqI(verb, "togglemenu")) {
+    if (Ascii::EqualCI(verb, "menu") || Ascii::EqualCI(verb, "togglemenu")) {
         if (!unit) return false;
         // The unit dropdown is pure FrameXML work (UnitPopup + ToggleDropDown),
         // so it lives in the !!!ClassicAPI addon; we just pop it at the cursor.
@@ -793,7 +785,7 @@ int __fastcall FrameResolver_h(void *frame, void *edx, const char *name) {
     const int slot = g_frameResolverOriginal(frame, edx, name);
     if (slot != 0) // a real base-frame / subtype script — leave it
         return slot;
-    if (EqI(name, "onattributechanged"))
+    if (Ascii::EqualCI(name, "onattributechanged"))
         return reinterpret_cast<int>(AttrSlotFor(frame, /*create*/ true));
     return 0;
 }
