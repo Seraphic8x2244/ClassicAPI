@@ -16,6 +16,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "item/Arg.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
 #include "object/Resolve.h"
@@ -33,8 +34,7 @@ namespace {
 int GetStackCount(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(cgItem);
     if (descriptor == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(
@@ -52,8 +52,7 @@ int GetStackCount(const uint8_t *cgItem) {
 int GetUsesPerItem(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 1;
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(cgItem);
     if (descriptor == nullptr)
         return 1;
     const int32_t raw = *reinterpret_cast<const int32_t *>(

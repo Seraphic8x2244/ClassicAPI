@@ -20,6 +20,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -36,8 +37,7 @@ static int __fastcall Script_GetStackCount(void *L) {
         Game::Lua::PushNumber(L, 0.0);
         return 1;
     }
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(item);
     if (descriptor == nullptr) {
         Game::Lua::PushNumber(L, 0.0);
         return 1;

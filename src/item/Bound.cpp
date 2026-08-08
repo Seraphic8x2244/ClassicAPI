@@ -13,6 +13,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -20,8 +21,7 @@
 namespace Item::Bound {
 
 static bool ItemIsSoulbound(const uint8_t *item) {
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(item);
     if (descriptor == nullptr)
         return false;
     const uint32_t flags = *reinterpret_cast<const uint32_t *>(

@@ -32,6 +32,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 #include "unit/Identity.h"
 #include "tick/WorldTick.h"
@@ -63,8 +64,7 @@ bool MerchantOpen(uint32_t &outGuidLo, uint32_t &outGuidHi) {
 int ItemIDFromCGItem(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(cgItem);
     if (instance == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(
@@ -75,8 +75,7 @@ int ItemIDFromCGItem(const uint8_t *cgItem) {
 uint64_t ItemGUIDFromCGItem(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(cgItem);
     if (instance == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(

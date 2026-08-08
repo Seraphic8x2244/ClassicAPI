@@ -75,6 +75,7 @@
 #include "Offsets.h"
 #include "bag/UpdateDelayed.h"
 #include "event/Custom.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 #include "object/Resolve.h"
 #include "tick/WorldTick.h"
@@ -197,8 +198,7 @@ bool RemoveFrom(uint64_t *arr, int *count, uint64_t guid) {
 uint64_t ItemGUID(const uint8_t *item) {
     if (item == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(

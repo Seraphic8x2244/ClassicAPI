@@ -15,6 +15,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 #include "unit/Identity.h"
 
@@ -40,8 +41,7 @@ bool ReadGuid(const void *cgObject, uint32_t *lo, uint32_t *hi) {
     if (cgObject == nullptr)
         return false;
     auto *base = static_cast<const uint8_t *>(cgObject);
-    auto *inst = *reinterpret_cast<const uint8_t *const *>(
-        base + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *inst = Item::InstanceBlock(base);
     if (inst == nullptr)
         return false;
     *lo = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);
@@ -257,8 +257,7 @@ bool MoveCount(void *L, int srcBag, int srcSlot, int dstBag, int dstSlot, int co
     // server treats as a merge for same-item destinations (up to
     // maxStack). Route there for count == srcStack so callers don't
     // have to special-case "move everything".
-    auto *srcDescriptor = *reinterpret_cast<const uint8_t *const *>(
-        srcItem + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *srcDescriptor = Item::ObjectFields(srcItem);
     const int srcStack = srcDescriptor == nullptr ? 0 :
         static_cast<int>(*reinterpret_cast<const uint32_t *>(
             srcDescriptor + Offsets::OFF_DESCRIPTOR_STACK_COUNT));

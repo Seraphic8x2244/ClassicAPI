@@ -55,6 +55,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "event/Custom.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
 #include "item/Swap.h"
@@ -108,16 +109,14 @@ const uint8_t *PeekItemRecord(uint32_t itemID) {
 }
 
 int CGItemCount(const uint8_t *item) {
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *desc = Item::ObjectFields(item);
     if (desc == nullptr)
         return 0;
     return *reinterpret_cast<const int *>(desc + Offsets::OFF_DESCRIPTOR_STACK_COUNT);
 }
 
 uint64_t CGItemGuid(const uint8_t *item) {
-    auto *inst = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *inst = Item::InstanceBlock(item);
     if (inst == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);

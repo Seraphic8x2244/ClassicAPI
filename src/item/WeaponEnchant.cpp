@@ -13,6 +13,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -52,8 +53,7 @@ EnchantInfo ReadTempEnchant(int paperdollSlot) {
     const uint8_t *item = Item::Location::ResolveEquipmentSlot(paperdollSlot);
     if (item == nullptr)
         return r;
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *desc = Item::ObjectFields(item);
     if (desc == nullptr)
         return r;
     auto *slot = reinterpret_cast<const uint32_t *>(desc + OFF_TEMP_ENCHANT_SLOT);

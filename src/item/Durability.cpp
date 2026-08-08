@@ -15,6 +15,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -34,8 +35,7 @@ namespace Item::Durability {
 int PushDurabilityForItem(void *L, const uint8_t *item) {
     if (item == nullptr)
         return 0;
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(item);
     if (descriptor == nullptr)
         return 0;
     const uint32_t cur = *reinterpret_cast<const uint32_t *>(

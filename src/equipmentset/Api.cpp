@@ -35,6 +35,7 @@
 #include "Offsets.h"
 #include "Set.h"
 #include "event/Custom.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 #include "item/Swap.h"
 
@@ -72,8 +73,7 @@ const char *ArgString(void *L, int idx) {
 int ResolveItemID(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(cgItem);
     if (instance == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(

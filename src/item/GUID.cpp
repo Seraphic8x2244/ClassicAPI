@@ -14,6 +14,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "guid/Guid.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -27,8 +28,7 @@ namespace {
 uint64_t ReadItemGuid(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(cgItem);
     if (instance == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(

@@ -58,6 +58,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "item/Arg.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
 #include "item/StatAccum.h"
@@ -490,8 +491,7 @@ void PrependCurrentlyEquipped(void *self, void *L) {
 // descriptor — the same index ItemRandomProperties.dbc / ApplyRandomSuffix
 // use. 0 for a plain item or a null descriptor.
 int EquippedSuffix(const uint8_t *item) {
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *desc = Item::ObjectFields(item);
     if (desc == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(
@@ -499,8 +499,7 @@ int EquippedSuffix(const uint8_t *item) {
 }
 
 uint64_t EquippedGUID(const uint8_t *item) {
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(

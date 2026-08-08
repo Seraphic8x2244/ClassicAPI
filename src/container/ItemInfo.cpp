@@ -50,6 +50,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Link.h"
 #include "item/Location.h"
@@ -80,8 +81,7 @@ bool ItemReadable(const uint8_t *item, const uint8_t *record) {
     if (record != nullptr &&
         *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_PAGE_TEXT) != 0)
         return true;
-    const uint8_t *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    const uint8_t *descriptor = Item::ObjectFields(item);
     return descriptor != nullptr &&
            *reinterpret_cast<const uint32_t *>(
                descriptor + Offsets::OFF_DESCRIPTOR_READABLE_TEXT_ID) != 0;
@@ -111,8 +111,7 @@ int __fastcall Script_C_Container_GetContainerItemInfo(void *L) {
         : nullptr;
 
     // Live per-instance descriptor fields.
-    const uint8_t *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    const uint8_t *descriptor = Item::ObjectFields(item);
     int stackCount = 0;
     bool isBound = false;
     if (descriptor != nullptr) {

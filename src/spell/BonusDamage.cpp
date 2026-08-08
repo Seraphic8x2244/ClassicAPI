@@ -59,6 +59,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "dbc/Lookup.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
 #include "item/StatAccum.h"
@@ -121,8 +122,7 @@ long ItemFlatHealing(const uint8_t *cgItem) {
         Item::StatAccum::AccumulateRecord(
             acc, Item::StatAccum::FetchRecord(static_cast<uint32_t>(itemID)), +1);
 
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *desc = Item::ObjectFields(cgItem);
     if (desc != nullptr) {
         // Random suffix ("… of Restoration") + applied permanent (slot 0) and
         // temporary (slot 1) enchants (Healing Power, Mana Oil, …).

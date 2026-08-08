@@ -27,6 +27,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/Data.h"
 #include "item/ID.h"
 #include "item/Location.h"
@@ -59,8 +60,7 @@ namespace {
 uint32_t InstanceFlags(const uint8_t *cgItem) {
     if (cgItem == nullptr)
         return 0;
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        cgItem + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(cgItem);
     if (descriptor == nullptr)
         return 0;
     return *reinterpret_cast<const uint32_t *>(

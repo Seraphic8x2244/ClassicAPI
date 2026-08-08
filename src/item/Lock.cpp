@@ -32,6 +32,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "guid/Guid.h"
+#include "item/CGItem.h"
 #include "item/Location.h"
 
 #include <cstdint>
@@ -54,8 +55,7 @@ using UnlockAll_t = void(__cdecl *)();
 bool ReadItemGuid(const uint8_t *item, uint32_t *lo, uint32_t *hi) {
     if (item == nullptr)
         return false;
-    auto *inst = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *inst = Item::InstanceBlock(item);
     if (inst == nullptr)
         return false;
     *lo = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);

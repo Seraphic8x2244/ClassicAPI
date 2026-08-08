@@ -13,6 +13,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "unit/Flags.h"
 
 #include <cstdint>
@@ -41,8 +42,7 @@ int ItemIDForLocalPlayer(void *playerPtr, int slot1Based) {
     auto *item = static_cast<uint8_t *>(getBySlot(invMgr, slot1Based - 1));
     if (item == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(

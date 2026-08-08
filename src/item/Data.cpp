@@ -15,6 +15,7 @@
 #include "Offsets.h"
 #include "event/Custom.h"
 #include "item/Arg.h"
+#include "item/CGItem.h"
 #include "item/Data.h"
 #include "item/Location.h"
 #include "tick/WorldTick.h"
@@ -119,8 +120,7 @@ static int ResolveLocationToItemID(void *L, int idx) {
     const uint8_t *item = Item::Location::Resolve(L, idx);
     if (item == nullptr)
         return 0;
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
     return static_cast<int>(*reinterpret_cast<const uint32_t *>(

@@ -13,6 +13,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "item/CGItem.h"
 #include "item/ID.h"
 #include "item/Location.h"
 #include "spell/Arg.h"
@@ -97,8 +98,7 @@ int CountItemInBags(void *L, int targetItemID) {
                 continue;
             if (Item::ID::FromCGItem(item) != targetItemID)
                 continue;
-            auto *itemDesc = *reinterpret_cast<const uint8_t *const *>(
-                item + Offsets::OFF_ITEM_DESCRIPTOR);
+            auto *itemDesc = Item::ObjectFields(item);
             if (itemDesc == nullptr)
                 continue;
             total += static_cast<int>(*reinterpret_cast<const uint32_t *>(

@@ -15,6 +15,7 @@
 
 #include "../Game.h"
 #include "../Offsets.h"
+#include "CGItem.h"
 
 #include <cstdlib>
 
@@ -23,8 +24,7 @@ namespace Item::Charges {
 int PushChargesForItem(void *L, const uint8_t *item) {
     if (item == nullptr)
         return 0;
-    auto *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    auto *descriptor = Item::ObjectFields(item);
     if (descriptor == nullptr)
         return 0;
     const int32_t stack = static_cast<int32_t>(*reinterpret_cast<const uint32_t *>(

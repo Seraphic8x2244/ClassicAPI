@@ -54,6 +54,7 @@
 #include "Offsets.h"
 #include "equipmentset/Locations.h"
 #include "event/Custom.h"
+#include "item/CGItem.h"
 #include "object/Resolve.h"
 #include "player/StatSignal.h"
 #include "unit/Identity.h"
@@ -193,8 +194,7 @@ uint32_t ItemDurability(uint64_t guid) {
     const uint8_t *item = EquipmentSet::Locations::ResolveItemByGUID(guid);
     if (item == nullptr)
         return 0;
-    const uint8_t *descriptor = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_DESCRIPTOR);
+    const uint8_t *descriptor = Item::ObjectFields(item);
     if (descriptor == nullptr)
         return 0;
     return *reinterpret_cast<const uint32_t *>(

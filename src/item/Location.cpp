@@ -19,6 +19,7 @@
 #include "../object/Resolve.h"
 #include "../unit/Identity.h"
 #include "Arg.h"
+#include "CGItem.h"
 #include "ID.h"
 #include "Link.h"
 
@@ -65,8 +66,7 @@ const uint8_t *PeekItemRecord(uint32_t itemID) {
 }
 
 uint64_t ReadCGItemGUID(const uint8_t *item) {
-    auto *instance = *reinterpret_cast<const uint8_t *const *>(
-        item + Offsets::OFF_ITEM_INSTANCE_BLOCK);
+    auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(
