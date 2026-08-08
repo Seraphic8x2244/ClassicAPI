@@ -3149,6 +3149,25 @@ enum Offsets {
     // user actually wanted both.
     FUN_SMSG_WHO_RESPONSE = 0x005ADF60,
 
+    // /who result list — the buffer `Script_GetWhoInfo` (0x005AD6E0) and
+    // `Script_GetNumWhoResults` (0x005AD690) read. An array of fixed-size
+    // entries at `VAR_WHO_RESULTS`, stride `WHO_RESULT_STRIDE`; the field
+    // offsets below are all relative to an entry. `name`/`guildName` are
+    // inline C strings; `race`/`class` index ChrRaces/ChrClasses.dbc and
+    // `zone` indexes AreaTable.dbc (own name, not parent-resolved).
+    // `VAR_WHO_RESULT_COUNT` is the displayed count (the first of the two
+    // values GetNumWhoResults returns; the second, total matches, is at +4).
+    // Verified by decompiling both accessors.
+    VAR_WHO_RESULTS = 0x00C281B8,
+    VAR_WHO_RESULT_COUNT = 0x00C2A120,
+    WHO_RESULT_STRIDE = 0xA0,
+    OFF_WHO_NAME = 0x00,   // char[] inline
+    OFF_WHO_GUILD = 0x30,  // char[] inline
+    OFF_WHO_LEVEL = 0x90,  // i32
+    OFF_WHO_RACE = 0x94,   // i32 → ChrRaces.dbc
+    OFF_WHO_CLASS = 0x98,  // i32 → ChrClasses.dbc
+    OFF_WHO_ZONE = 0x9C,   // i32 → AreaTable.dbc
+
     // Per-faction current standing — `__fastcall(ecx = factionID) → int`.
     // Returns `base + delta` where the two values are stored at
     // `+0x08` / `+0x0C` of the player's rep slot (slot stride 0x10,

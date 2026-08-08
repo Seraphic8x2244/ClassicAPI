@@ -171,6 +171,8 @@ build instructions.
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
   - [`C_FriendList.IsWhoQueryPending()`](#c_friendlistiswhoquerypending)
+  - [`C_FriendList.GetNumWhoResults()`](#c_friendlistgetnumwhoresults)
+  - [`C_FriendList.GetWhoInfo(index)`](#c_friendlistgetwhoinfoindex)
   - [`C_FriendList.IsFriend(guid)`](#c_friendlistisfriendguid)
   - [`C_FriendList.IsIgnored(token)`](#c_friendlistisignoredtoken)
   - [`C_FriendList.IsIgnoredByGuid(guid)`](#c_friendlistisignoredbyguidguid)
@@ -4069,6 +4071,56 @@ contribute to the same pending window. This is acceptable for the
 "suppress popup for any in-flight DLL-issued query" use case;
 addons that need per-call tracking should manage their own ticket
 state on top.
+
+### `C_FriendList.GetNumWhoResults()`
+
+Returns two numbers: how many /who results you can read, and the total
+number the server matched.
+
+```lua
+local shown, total = C_FriendList.GetNumWhoResults()
+```
+
+The first value is the count you index with
+[`GetWhoInfo`](#c_friendlistgetwhoinfoindex). The server caps the shown
+list, so `total` can be larger. Run a `/who` (or
+[`SendWhoQueryByName`](#c_friendlistsendwhoquerybynamename)) first to
+populate the list.
+
+### `C_FriendList.GetWhoInfo(index)`
+
+Returns a table for the /who result at `index` (1-based), or `nil` when
+the index is out of range.
+
+```lua
+local info = C_FriendList.GetWhoInfo(1)
+-- {
+--   fullName = "Nadamage", fullGuildName = "",
+--   level = 26, raceStr = "Troll",
+--   classStr = "Mage", filename = "MAGE",
+--   area = "Hillsbrad Foothills",
+-- }
+```
+
+Table fields:
+
+- `fullName` — the character name.
+- `fullGuildName` — the guild name, or `""` when the player has no
+  guild.
+- `level` — the character level.
+- `raceStr` — localized race name, or `nil` when unknown.
+- `classStr` — localized class name, or `nil` when unknown.
+- `filename` — locale-independent class token (`"WARRIOR"`, `"MAGE"`,
+  …), or `nil` when unknown. This is the key for `RAID_CLASS_COLORS`.
+  Vanilla's own `GetWhoInfo` does not provide it, which is the main
+  reason to use this table form.
+- `area` — the zone name.
+
+There is no `gender` field — vanilla's /who result stores no sex.
+
+Vanilla also keeps the global `GetWhoInfo(index)`, which returns
+positional values and no class token. This namespaced form returns a
+table and adds `filename`.
 
 ### `C_FriendList.IsFriend(guid)`
 

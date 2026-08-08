@@ -28,8 +28,7 @@
 #include "Notes.h"
 
 #include "Game.h"
-#include "Offsets.h"
-#include "dbc/Lookup.h"
+#include "dbc/Names.h"
 #include "guid/Guid.h"
 
 #include <cstdint>
@@ -38,48 +37,6 @@
 namespace FriendList::Info {
 
 namespace {
-
-// Localized class name for the entry's ChrClasses index, or null if unknown.
-const char *ClassName(uint32_t classIndex) {
-    if (classIndex == 0)
-        return nullptr;
-    return DBC::LocalizedField(Offsets::VAR_CHRCLASSES_RECORDS,
-                               Offsets::VAR_CHRCLASSES_COUNT, classIndex,
-                               Offsets::OFF_CHRCLASSES_NAMES);
-}
-
-// English class token ("WARRIOR", "MAGE", …) for the entry's ChrClasses index
-// — the locale-independent key addons use to index RAID_CLASS_COLORS and the
-// like. Reads the same ChrClasses.dbc filename column as GetPlayerInfoByGUID's
-// englishClass. Null if unknown.
-const char *ClassToken(uint32_t classIndex) {
-    if (classIndex == 0)
-        return nullptr;
-    return DBC::StringField(Offsets::VAR_CHRCLASSES_RECORDS,
-                            Offsets::VAR_CHRCLASSES_COUNT, classIndex,
-                            Offsets::OFF_CHRCLASSES_FILENAME);
-}
-
-// Localized zone name for the entry's AreaTable index, resolved up to the
-// parent zone (so "Goldshire" reports "Elwynn Forest"). Null if unknown.
-const char *AreaName(uint32_t areaIndex) {
-    if (areaIndex == 0)
-        return nullptr;
-    const uint8_t *rec = DBC::Record(Offsets::VAR_AREATABLE_RECORDS,
-                                     Offsets::VAR_AREATABLE_COUNT, areaIndex);
-    if (rec == nullptr)
-        return nullptr;
-    uint32_t use = areaIndex;
-    const uint32_t parent = *reinterpret_cast<const uint32_t *>(
-        rec + Offsets::OFF_AREATABLE_PARENT_ID);
-    if (parent != 0 &&
-        DBC::Record(Offsets::VAR_AREATABLE_RECORDS, Offsets::VAR_AREATABLE_COUNT,
-                    parent) != nullptr)
-        use = parent;
-    return DBC::LocalizedField(Offsets::VAR_AREATABLE_RECORDS,
-                               Offsets::VAR_AREATABLE_COUNT, use,
-                               Offsets::OFF_AREATABLE_NAMES);
-}
 
 // Push the modern FriendInfo table for `entry` on top of the Lua stack.
 void PushFriendInfo(void *L, const uint8_t *entry) {
@@ -103,14 +60,16 @@ void PushFriendInfo(void *L, const uint8_t *entry) {
     // than "" — SetFieldString coerces null to "", which is truthy in Lua and
     // would fool an `if info.notes then` presence check. Matches retail, where
     // these are nil when absent.
-    if (const char *className = ClassName(classIndex))
+    if (const char *className = DBC::ClassName(classIndex))
         Game::Lua::SetFieldString(L, "className", className);
     // classFilename: the locale-independent class token ("MAGE", "WARRIOR"),
     // the key for RAID_CLASS_COLORS and other class tables. nil when unknown,
     // so `className` and `classFilename` appear together.
-    if (const char *classToken = ClassToken(classIndex))
+    if (const char *classToken = DBC::ClassToken(classIndex))
         Game::Lua::SetFieldString(L, "classFilename", classToken);
-    if (const char *area = AreaName(areaIndex))
+    // Resolve a sub-area to its parent zone for friends (e.g. "Goldshire" ->
+    // "Elwynn Forest"), matching what the friends UI shows.
+    if (const char *area = DBC::AreaName(areaIndex, /*resolveToParent=*/true))
         Game::Lua::SetFieldString(L, "area", area);
     if (guid != 0) {
         char buf[Guid::STRING_SIZE];
