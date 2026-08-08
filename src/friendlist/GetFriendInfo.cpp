@@ -114,6 +114,23 @@ int __fastcall Script_GetNumFriends(void *L) {
     return 1;
 }
 
+// `C_FriendList.GetNumOnlineFriends()` — how many friends are online. Vanilla
+// stores no online count, so we count entries whose `connected` byte is set
+// (the same flag GetFriendInfo reports as `connected`).
+int __fastcall Script_GetNumOnlineFriends(void *L) {
+    int online = 0;
+    const int count = FriendList::Count();
+    for (int i = 0; i < count; ++i) {
+        const uint8_t *entry = FriendList::EntryByIndex(i);
+        if (entry == nullptr)
+            break;
+        if (*(entry + OFF_FRIEND_CONNECTED) != 0)
+            ++online;
+    }
+    Game::Lua::PushNumber(L, static_cast<double>(online));
+    return 1;
+}
+
 int __fastcall Script_GetFriendInfoByIndex(void *L) {
     if (!Game::Lua::IsNumber(L, 1)) {
         Game::Lua::PushNil(L);
@@ -158,6 +175,8 @@ int __fastcall Script_GetFriendInfo(void *L) {
 void RegisterLuaFunctions() {
     Game::Lua::RegisterTableFunction("C_FriendList", "GetNumFriends",
                                      &Script_GetNumFriends);
+    Game::Lua::RegisterTableFunction("C_FriendList", "GetNumOnlineFriends",
+                                     &Script_GetNumOnlineFriends);
     Game::Lua::RegisterTableFunction("C_FriendList", "GetFriendInfoByIndex",
                                      &Script_GetFriendInfoByIndex);
     Game::Lua::RegisterTableFunction("C_FriendList", "GetFriendInfo",

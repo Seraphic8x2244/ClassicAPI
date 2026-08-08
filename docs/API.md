@@ -175,6 +175,7 @@ build instructions.
   - [`C_FriendList.IsIgnored(token)`](#c_friendlistisignoredtoken)
   - [`C_FriendList.IsIgnoredByGuid(guid)`](#c_friendlistisignoredbyguidguid)
   - [`C_FriendList.GetNumFriends()`](#c_friendlistgetnumfriends)
+  - [`C_FriendList.GetNumOnlineFriends()`](#c_friendlistgetnumonlinefriends)
   - [`C_FriendList.GetFriendInfo(name)`](#c_friendlistgetfriendinfoname)
   - [`C_FriendList.GetFriendInfoByIndex(index)`](#c_friendlistgetfriendinfobyindexindex)
   - [`C_FriendList.SetFriendNotes(name, notes)`](#c_friendlistsetfriendnotesname-notes)
@@ -4126,6 +4127,20 @@ namespaced form.
 ```lua
 C_FriendList.GetNumFriends()   -- e.g. 12
 ```
+
+### `C_FriendList.GetNumOnlineFriends()`
+
+Returns how many friends on your list are online. This is a subset of
+[`GetNumFriends`](#c_friendlistgetnumfriends), which counts online and
+offline friends together.
+
+```lua
+C_FriendList.GetNumOnlineFriends()   -- e.g. 3
+```
+
+Vanilla stores no online count, so the value is the number of friends
+whose `connected` flag is set — the same flag
+[`GetFriendInfo`](#c_friendlistgetfriendinfoname) reports.
 
 ### `C_FriendList.GetFriendInfo(name)`
 
