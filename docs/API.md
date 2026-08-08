@@ -4074,18 +4074,30 @@ state on top.
 
 ### `C_FriendList.GetNumWhoResults()`
 
-Returns two numbers: how many /who results you can read, and the total
-number the server matched.
+Returns two numbers: how many /who results you can read, and a
+server-reported count.
 
 ```lua
-local shown, total = C_FriendList.GetNumWhoResults()
+local shown, serverCount = C_FriendList.GetNumWhoResults()
 ```
 
-The first value is the count you index with
-[`GetWhoInfo`](#c_friendlistgetwhoinfoindex). The server caps the shown
-list, so `total` can be larger. Run a `/who` (or
+`shown` is the number of entries you can index with
+[`GetWhoInfo`](#c_friendlistgetwhoinfoindex). The server caps the list
+(50, or 49 on some cores), so `shown` is at most that. Run a `/who` (or
 [`SendWhoQueryByName`](#c_friendlistsendwhoquerybynamename)) first to
 populate the list.
+
+`serverCount` is the second header value the server sends, and its
+meaning depends on the server core:
+
+- Mangos and cmangos derived cores send the number of characters that
+  matched your query.
+- Turtle WoW (tortoise-wow) sends the whole realm's online population
+  when more than 49 players are online, ignoring your filter. Below
+  that count it sends the match count.
+
+Do not rely on one meaning across servers. On Turtle it is a live
+population counter for any query. On other cores it is a match total.
 
 ### `C_FriendList.GetWhoInfo(index)`
 
