@@ -75,7 +75,7 @@ local function AddFocusButton(unit)
     if UnitIsUnit(unit, "player") then
         return;
     end
-    local info = UIDropDownMenu_CreateInfo();
+    local info = {};
     info.notCheckable = 1;
     if UnitExists("focus") and UnitIsUnit(unit, "focus") then
         info.text = CLEAR_FOCUS;
@@ -88,7 +88,7 @@ local function AddFocusButton(unit)
 end
 
 local function AddCancelButton()
-    local info = UIDropDownMenu_CreateInfo();
+    local info = {};
     info.text = CANCEL;
     info.notCheckable = 1;
     info.func = function() end;
