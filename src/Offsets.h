@@ -2672,6 +2672,10 @@ enum Offsets {
     VAR_AREATABLE_RECORDS = 0x00C0E048,
     VAR_AREATABLE_COUNT = 0x00C0E04C,
     OFF_AREATABLE_NAMES = 0x2C,
+    // Parent AreaTable id @ +0x08 — a sub-area's enclosing zone (e.g. Goldshire
+    // → Elwynn Forest). GetFriendInfo resolves it to name the zone, not the
+    // sub-area. 0 for a top-level zone.
+    OFF_AREATABLE_PARENT_ID = 0x08,
     // AreaBit @ +0x0C: index into the player's explored-areas bitfield
     // (OFF_PLAYER_EXPLORED_BITS). Gate @ +0x28: when < 0 the area needs no
     // exploration (always counts explored); when >= 0 the AreaBit check
