@@ -107,4 +107,10 @@ int TokensForGUID(uint64_t guid, char (*out)[32], int maxTokens);
 // offsets. Called with a NULL callback, so it only peeks (never fires a query).
 const uint8_t *PlayerInfoRecord(uint64_t guid);
 
+// The cached character name for a player `guid` (the NameCache record's
+// `OFF_PLAYER_INFO_NAME`), or nullptr if the GUID isn't cached or the name is
+// empty. Passive peek — never fires a query. Convenience over PlayerInfoRecord
+// for callers that only want the name (friend/ignore GUID→name compares).
+const char *NameForGuid(uint64_t guid);
+
 } // namespace Unit::Identity

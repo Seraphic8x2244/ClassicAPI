@@ -182,6 +182,15 @@ const uint8_t *PlayerInfoRecord(uint64_t guid) {
               cookie, nullptr, nullptr, 0);
 }
 
+const char *NameForGuid(uint64_t guid) {
+    const uint8_t *rec = PlayerInfoRecord(guid);
+    if (rec == nullptr)
+        return nullptr;
+    const char *name =
+        reinterpret_cast<const char *>(rec + Offsets::OFF_PLAYER_INFO_NAME);
+    return (name != nullptr && *name != '\0') ? name : nullptr;
+}
+
 // `UnitGUID(unit)` — returns the unit's 64-bit GUID formatted as a
 // hex string `"0xHHHHHHHHLLLLLLLL"` (16 hex digits, hi dword first).
 //

@@ -26,7 +26,6 @@
 #include "FriendList.h"
 
 #include "Game.h"
-#include "Offsets.h"
 #include "guid/Guid.h"
 #include "unit/Identity.h"
 
@@ -36,17 +35,6 @@
 namespace FriendList::IsIgnored {
 
 namespace {
-
-// Cached character name for a player GUID, or nullptr if the GUID isn't in the
-// NameCache (never synced this session).
-const char *NameForGuid(uint64_t guid) {
-    const uint8_t *rec = Unit::Identity::PlayerInfoRecord(guid);
-    if (rec == nullptr)
-        return nullptr;
-    const char *name =
-        reinterpret_cast<const char *>(rec + Offsets::OFF_PLAYER_INFO_NAME);
-    return (name != nullptr && *name != '\0') ? name : nullptr;
-}
 
 // True if any ignored GUID matches `guid`, or (when `name` is given) resolves
 // to `name`. Single walk of the GUID array.
@@ -58,7 +46,7 @@ bool IgnoredByGuidOrName(uint64_t guid, const char *name) {
         if (guid != 0 && entry == guid)
             return true;
         if (name != nullptr) {
-            const char *ename = NameForGuid(entry);
+            const char *ename = Unit::Identity::NameForGuid(entry);
             if (ename != nullptr && _stricmp(ename, name) == 0)
                 return true;
         }
@@ -79,7 +67,7 @@ int __fastcall Script_IsIgnored(void *L) {
     uint64_t guid = 0;
     const char *name = nullptr;
     if (Guid::Parse(arg, &guid) && guid != 0)
-        name = NameForGuid(guid); // GUID input → name for the fallback compare
+        name = Unit::Identity::NameForGuid(guid); // GUID input → name for the fallback compare
     else
         name = arg; // not a GUID → treat the string as a character name
 
