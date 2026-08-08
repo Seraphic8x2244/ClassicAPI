@@ -48,6 +48,18 @@ const char *ClassName(uint32_t classIndex) {
                                Offsets::OFF_CHRCLASSES_NAMES);
 }
 
+// English class token ("WARRIOR", "MAGE", …) for the entry's ChrClasses index
+// — the locale-independent key addons use to index RAID_CLASS_COLORS and the
+// like. Reads the same ChrClasses.dbc filename column as GetPlayerInfoByGUID's
+// englishClass. Null if unknown.
+const char *ClassToken(uint32_t classIndex) {
+    if (classIndex == 0)
+        return nullptr;
+    return DBC::StringField(Offsets::VAR_CHRCLASSES_RECORDS,
+                            Offsets::VAR_CHRCLASSES_COUNT, classIndex,
+                            Offsets::OFF_CHRCLASSES_FILENAME);
+}
+
 // Localized zone name for the entry's AreaTable index, resolved up to the
 // parent zone (so "Goldshire" reports "Elwynn Forest"). Null if unknown.
 const char *AreaName(uint32_t areaIndex) {
@@ -93,6 +105,11 @@ void PushFriendInfo(void *L, const uint8_t *entry) {
     // these are nil when absent.
     if (const char *className = ClassName(classIndex))
         Game::Lua::SetFieldString(L, "className", className);
+    // classFilename: the locale-independent class token ("MAGE", "WARRIOR"),
+    // the key for RAID_CLASS_COLORS and other class tables. nil when unknown,
+    // so `className` and `classFilename` appear together.
+    if (const char *classToken = ClassToken(classIndex))
+        Game::Lua::SetFieldString(L, "classFilename", classToken);
     if (const char *area = AreaName(areaIndex))
         Game::Lua::SetFieldString(L, "area", area);
     if (guid != 0) {

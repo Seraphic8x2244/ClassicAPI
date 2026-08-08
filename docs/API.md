@@ -4152,7 +4152,7 @@ case-insensitive.
 local info = C_FriendList.GetFriendInfo("Sarahnity")
 -- {
 --   name = "Sarahnity", connected = true, level = 60,
---   className = "Druid", area = "Stratholme",
+--   className = "Druid", classFilename = "DRUID", area = "Stratholme",
 --   guid = "0x000000003B9CB7BF",
 --   afk = false, dnd = false,
 --   mobile = false, referAFriend = false, rafLinkType = 0,
@@ -4165,6 +4165,11 @@ Table fields:
 - `connected` — `true` when the friend is online.
 - `level` — the friend's level, or `0` when unknown.
 - `className` — localized class name, or `nil` when unknown.
+- `classFilename` — locale-independent class token (`"WARRIOR"`,
+  `"MAGE"`, …), or `nil` when unknown. Present whenever `className`
+  is. This is the key for `RAID_CLASS_COLORS` and other class tables,
+  so you can color a friend's name without matching the localized
+  class name.
 - `area` — localized zone name, resolved to the parent zone, or `nil`
   when unknown.
 - `guid` — the friend's GUID string.
