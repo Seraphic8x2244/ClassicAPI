@@ -175,6 +175,8 @@ build instructions.
   - [`C_FriendList.GetNumFriends()`](#c_friendlistgetnumfriends)
   - [`C_FriendList.GetFriendInfo(name)`](#c_friendlistgetfriendinfoname)
   - [`C_FriendList.GetFriendInfoByIndex(index)`](#c_friendlistgetfriendinfobyindexindex)
+  - [`C_FriendList.SetFriendNotes(name, notes)`](#c_friendlistsetfriendnotesname-notes)
+  - [`C_FriendList.SetFriendNotesByIndex(index, notes)`](#c_friendlistsetfriendnotesbyindexindex-notes)
 
 - [GameObject](#gameobject)
   - [`C_GameObjectInfo.GetGameObjectInfoByID(gameObjectID)`](#c_gameobjectinfogetgameobjectinfobyidgameobjectid)
@@ -4121,12 +4123,17 @@ Table fields:
 - `area` — localized zone name, resolved to the parent zone, or `nil`
   when unknown.
 - `guid` — the friend's GUID string.
+- `notes` — your note for this friend, or `nil` if none. Set it with
+  [`SetFriendNotes`](#c_friendlistsetfriendnotesname-notes).
 - `afk` / `dnd` — the friend's status flags.
 - `mobile` / `referAFriend` / `rafLinkType` — always `false` / `false`
   / `0`. Vanilla 1.12 has no mobile app, Recruit-A-Friend, or RAF link
   data.
 
-Vanilla 1.12 stores no friend note, so `notes` is absent (`nil`).
+Notes are a ClassicAPI addition — vanilla has no note field. ClassicAPI
+persists them per character in
+`WTF\Account\<acct>\<realm>\<char>\ClassicAPI_FriendNotes.txt`, local to
+this client (not stored on the server, not shared with other machines).
 
 ### `C_FriendList.GetFriendInfoByIndex(index)`
 
@@ -4143,6 +4150,33 @@ end
 
 See [`C_FriendList.GetFriendInfo`](#c_friendlistgetfriendinfoname) for
 the field list.
+
+### `C_FriendList.SetFriendNotes(name, notes)`
+
+Sets your note for the friend with the given name. Pass an empty string
+or `nil` to clear it. There is no return value, and the name must
+already be on your friends list.
+
+```lua
+C_FriendList.SetFriendNotes("Sarahnity", "raid healer")
+C_FriendList.SetFriendNotes("Sarahnity", "")   -- clears the note
+```
+
+The note is stored client-side and read back through the `notes` field
+of [`GetFriendInfo`](#c_friendlistgetfriendinfoname). Setting a note
+fires `FRIENDLIST_UPDATE` so the friends UI and note-aware addons
+refresh. See the persistence note under `GetFriendInfo`.
+
+### `C_FriendList.SetFriendNotesByIndex(index, notes)`
+
+The same as
+[`SetFriendNotes`](#c_friendlistsetfriendnotesname-notes), addressed by
+a 1-based list index instead of a name. An out-of-range index does
+nothing.
+
+```lua
+C_FriendList.SetFriendNotesByIndex(1, "tank")
+```
 
 ## GameObject
 
