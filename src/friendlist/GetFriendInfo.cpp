@@ -25,6 +25,7 @@
 // none of those systems; the fields exist so modern consumers do not nil-out.
 
 #include "FriendList.h"
+#include "Notes.h"
 
 #include "Game.h"
 #include "Offsets.h"
@@ -86,13 +87,21 @@ void PushFriendInfo(void *L, const uint8_t *entry) {
     Game::Lua::SetFieldString(L, "name", name);
     Game::Lua::SetFieldBool(L, "connected", connected);
     Game::Lua::SetFieldNumber(L, "level", static_cast<double>(level));
-    Game::Lua::SetFieldString(L, "className", ClassName(classIndex));
-    Game::Lua::SetFieldString(L, "area", AreaName(areaIndex));
+    // Optional strings: leave the field nil (unset) when unresolved rather
+    // than "" — SetFieldString coerces null to "", which is truthy in Lua and
+    // would fool an `if info.notes then` presence check. Matches retail, where
+    // these are nil when absent.
+    if (const char *className = ClassName(classIndex))
+        Game::Lua::SetFieldString(L, "className", className);
+    if (const char *area = AreaName(areaIndex))
+        Game::Lua::SetFieldString(L, "area", area);
     if (guid != 0) {
         char buf[Guid::STRING_SIZE];
         Game::Lua::SetFieldString(L, "guid",
                                   Guid::FormatAsString(guid, buf, sizeof buf));
     }
+    if (const char *note = Notes::Get(guid)) // client-side note (see Notes.h)
+        Game::Lua::SetFieldString(L, "notes", note);
     Game::Lua::SetFieldBool(L, "afk", (status & FRIEND_STATUS_AFK) != 0);
     Game::Lua::SetFieldBool(L, "dnd", (status & FRIEND_STATUS_DND) != 0);
     Game::Lua::SetFieldBool(L, "mobile", false);
