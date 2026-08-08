@@ -172,6 +172,8 @@ build instructions.
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
   - [`C_FriendList.IsWhoQueryPending()`](#c_friendlistiswhoquerypending)
   - [`C_FriendList.IsFriend(guid)`](#c_friendlistisfriendguid)
+  - [`C_FriendList.IsIgnored(token)`](#c_friendlistisignoredtoken)
+  - [`C_FriendList.IsIgnoredByGuid(guid)`](#c_friendlistisignoredbyguidguid)
   - [`C_FriendList.GetNumFriends()`](#c_friendlistgetnumfriends)
   - [`C_FriendList.GetFriendInfo(name)`](#c_friendlistgetfriendinfoname)
   - [`C_FriendList.GetFriendInfoByIndex(index)`](#c_friendlistgetfriendinfobyindexindex)
@@ -4086,6 +4088,34 @@ input GUID against each friend's stored GUID. The server sends that
 GUID for both online and offline friends. As a fallback it also
 compares character names, so the answer holds for any friend the
 client saw this session.
+
+### `C_FriendList.IsIgnored(token)`
+
+Returns `true` if the player is on your ignore list, `false` if not.
+
+```lua
+C_FriendList.IsIgnored("Bob")
+C_FriendList.IsIgnored("0x00000000000ABCDE")
+```
+
+`token` is a character name or a GUID string. The ignore list stores
+GUIDs, not names. A GUID always matches. A name matches only a player
+the client has seen this session — the same players `GetIgnoreName` can
+name — because the name comes from the client's name cache.
+
+### `C_FriendList.IsIgnoredByGuid(guid)`
+
+Returns `true` if the player with the given GUID is on your ignore
+list, `false` if not.
+
+```lua
+C_FriendList.IsIgnoredByGuid(UnitGUID("target"))
+C_FriendList.IsIgnoredByGuid("0x00000000000ABCDE")
+```
+
+`guid` is a GUID string — the `"0x…"` form that `UnitGUID` returns.
+This is the exact key the ignore list uses, so it works for every
+ignored player.
 
 ### `C_FriendList.GetNumFriends()`
 

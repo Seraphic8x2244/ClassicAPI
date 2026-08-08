@@ -22,6 +22,13 @@
 // and /who): up to 50 entries from offset 0, stride 0x20. The field offsets
 // are verified from GetNumFriends (FUN_005AD000), GetFriendInfo
 // (FUN_005AD060), and the count walker FUN_005AE490.
+//
+// The ignore list lives in the same singleton: a flat array of u64 GUIDs at
+// `+0x650`, stride 8, up to 25 entries, terminated by the first zero GUID.
+// Vanilla ignores are GUID-keyed, not name-keyed — GetIgnoreName (0x005AD460)
+// reads the GUID via FUN_005AE570 (`social + 0x650 + index*8`) and resolves it
+// to a name through the NameCache, and GetNumIgnores (0x005AD400 → the count
+// walker FUN_005AE550) stops at the first zero GUID and caps at 25.
 
 namespace FriendList {
 
@@ -38,6 +45,10 @@ constexpr int OFF_FRIEND_AREA_INDEX = 0x18;  // i32 → AreaTable.dbc
 
 constexpr uint8_t FRIEND_STATUS_AFK = 0x02;
 constexpr uint8_t FRIEND_STATUS_DND = 0x04;
+
+constexpr int OFF_IGNORE_LIST = 0x650;   // u64 GUID array in the social singleton
+constexpr int IGNORE_ENTRY_STRIDE = 0x8; // one packed u64 GUID per entry
+constexpr int MAX_IGNORES = 25;          // 0x19 — GetNumIgnores' cap
 
 // The social singleton, or null before login.
 inline const uint8_t *Social() {
@@ -64,6 +75,32 @@ inline const uint8_t *EntryByIndex(int index) {
     if (social == nullptr || index < 0 || index >= MAX_FRIENDS)
         return nullptr;
     return social + index * FRIEND_ENTRY_STRIDE;
+}
+
+// The ignore-list GUID at 0-based `index`, or 0 if there is no list or the
+// index is past the fixed cap. Mirrors FUN_005AE570.
+inline uint64_t IgnoreGuidByIndex(int index) {
+    const uint8_t *social = Social();
+    if (social == nullptr || index < 0 || index >= MAX_IGNORES)
+        return 0;
+    return *reinterpret_cast<const uint64_t *>(
+        social + OFF_IGNORE_LIST + index * IGNORE_ENTRY_STRIDE);
+}
+
+// True if `guid` is on the ignore list. Walks the GUID array, stopping at the
+// first zero entry (the list is contiguous — same terminate-on-zero contract
+// GetNumIgnores relies on).
+inline bool IsGuidIgnored(uint64_t guid) {
+    if (guid == 0)
+        return false;
+    for (int i = 0; i < MAX_IGNORES; ++i) {
+        const uint64_t entry = IgnoreGuidByIndex(i);
+        if (entry == 0)
+            break;
+        if (entry == guid)
+            return true;
+    }
+    return false;
 }
 
 } // namespace FriendList
