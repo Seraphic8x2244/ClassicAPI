@@ -578,7 +578,7 @@ build instructions.
   - [`C_UnitAuras.GetPlayerAuraBySpellID(spellID)`](#c_unitaurasgetplayeraurabyspellidspellid)
   - [`C_UnitAuras.GetAuraDataBySpellName(unit, spellName [, filter])`](#c_unitaurasgetauradatabyspellnameunit-spellname--filter)
   - [`C_UnitAuras.RegisterComboDuration(spellID, baseSeconds, maxSeconds)`](#c_unitaurasregistercombodurationspellid-baseseconds-maxseconds)
-  - [`C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`](#c_unitaurasregisterauradurationmodifiertriggerspellid-affectedfamily-affectedfamilyflags-affectedicon-op--valueseconds)
+  - [`C_UnitAuras.RegisterAuraDurationModifierByTrigger(triggerFamily, triggerSchool, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`](#c_unitaurasregisterauradurationmodifierbytriggertriggerfamily-triggerschool-affectedfamily-affectedfamilyflags-affectedicon-op--valueseconds)
   - [`C_UnitAuras.GetUnitAuras(unit [, filter])`](#c_unitaurasgetunitaurasunit--filter)
   - [`C_UnitAuras.GetAuraDispelTypeColor(dispelName)`](#c_unitaurasgetauradispeltypecolordispelname)
 
@@ -14109,7 +14109,7 @@ is the escape hatch for *other* custom servers with the same class of
 gap — call it from your own config or addon; a registered override
 beats both the DBC and the built-in values.
 
-### `C_UnitAuras.RegisterAuraDurationModifier(triggerSpellID, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`
+### `C_UnitAuras.RegisterAuraDurationModifierByTrigger(triggerFamily, triggerSchool, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`
 
 ClassicAPI extension for **server-side DoT-duration changes on another
 unit that the client is never told about**. Returns `true` on success.
@@ -14128,8 +14128,9 @@ trigger lands:
 
 | Arg | Meaning |
 |-----|---------|
-| `triggerSpellID` | The spell whose cast triggers the change (match one rank per call — use the exact IDs the server binds). |
-| `affectedFamily` | `SpellFamilyName` of the affected aura (e.g. `5` warlock, `11` shaman, `7` druid). |
+| `triggerFamily` | `SpellFamilyName` of the triggering cast (e.g. `6` priest). |
+| `triggerSchool` | School index the trigger must be (`0` physical … `2` fire, `5` shadow, `6` arcane), or `< 0` for any. Matching by family + school covers a whole class of spells at once — every rank, plus server-added ones — rather than a named ability. |
+| `affectedFamily` | `SpellFamilyName` of the affected aura (e.g. `5` warlock, `11` shaman, `6` priest). |
 | `affectedFamilyFlags` | A `SpellFamilyFlags` bitmask; the affected aura matches if it overlaps. Family + flag is rank-proof (covers every rank at once). |
 | `affectedIcon` | `SpellIconID` the affected aura must have, or `0` to match any. |
 | `op` | `"refresh"` (reset to full duration), `"reduce"` (subtract `valueSeconds`, removing the aura if it would go non-positive), `"set"` (to `valueSeconds`), `"remove"`. |
@@ -14139,34 +14140,26 @@ The rule only fires for the aura **cast by the same unit** as the trigger
 (these mechanics act on the caster's own DoT), and misses are excluded for
 free (a missed trigger isn't in the packet's hit list).
 
-**`C_UnitAuras.RegisterAuraDurationModifierByTrigger(triggerFamily, triggerSchool, affectedFamily, affectedFamilyFlags, affectedIcon, op [, valueSeconds])`**
-is the same, but matches the *trigger* by `SpellFamilyName` + school index
-(`0` physical … `2` fire, `5` shadow, `6` arcane; `< 0` = any) instead of an
-exact spellID — one rule covers a whole class of spells (every rank, plus
-server-added ones). Use it when the trigger is a category rather than a named
-ability.
+Rules keyed to an **exact trigger spellID** (rather than a family + school
+category) are registered inside the DLL instead. `!!!ClassicAPI`'s built-in
+Turtle mods — Conflagrate shaving 3s off the caster's Immolate, Molten Blast
+refreshing the caster's Flame Shock — live in `src/turtle/DurationMods.cpp`,
+and Carnage's roll-gated Rip/Rake refresh in `src/turtle/Carnage.cpp`.
 
-`!!!ClassicAPI` ships a default Turtle ruleset
-([Util/AuraDurationModifiers.lua](../AddOns/!!!ClassicAPI/Util/AuraDurationModifiers.lua)):
-Conflagrate shaves 3s off the caster's Immolate, Molten Blast refreshes the
-caster's Flame Shock, and — for a 5/5 Shadow Weaving priest (talent `15334`,
-where the proc is 100%) — any shadow-school priest cast refreshes the target's
-Shadow Vulnerability (`15258`). Deliberately excluded: probabilistic effects
-(Carnage's roll-gated Rip/Rake refresh, and Shadow Weaving below 5/5) — the
-client can't see the server's roll, so inferring them would show wrong timers.
-Two accepted best-effort caveats on the Shadow Weaving rule: DoT *ticks*
-(SW:P / Devouring Plague) also refresh it server-side but emit no cast packet,
-so a pure DoT-only phase under-counts slightly; and a full-consume Conflagrate
-variant on other servers *removes* Immolate, which ClassicAPI already evicts
-via the normal removal path (so the reduce rule is harmless there).
+The one rule registered from Lua
+([Util/AuraDurationModifiers.lua](../AddOns/!!!ClassicAPI/Util/AuraDurationModifiers.lua))
+is Shadow Weaving: for a 5/5 priest (talent `15334`, where the proc is 100%),
+any shadow-school priest cast refreshes the target's Shadow Vulnerability
+(`15258`). Below 5/5 it's roll-gated and deliberately not inferred — the client
+can't see the server's roll, so inferring it would show wrong timers. One
+accepted best-effort caveat: DoT *ticks* (SW:P / Devouring Plague) also refresh
+it server-side but emit no cast packet, so a pure DoT-only phase under-counts
+slightly.
 
 ```lua
 -- Flags are hex; Lua 5.0 has no 0x literals, so use tonumber(hex, 16).
--- Conflagrate (Rank 4) shaves 3s off the caster's Immolate (warlock, flag 0x4):
-C_UnitAuras.RegisterAuraDurationModifier(18932, 5, tonumber("4", 16), 0, "reduce", 3)
--- Molten Blast refreshes the caster's Flame Shock (shaman, flag 0x10000000):
-C_UnitAuras.RegisterAuraDurationModifier(36916, 11, tonumber("10000000", 16), 0, "refresh")
--- Any priest (6) shadow-school (5) cast refreshes Shadow Vulnerability (15258):
+-- Any priest (6) shadow-school (5) cast refreshes Shadow Vulnerability
+-- (affected priest 6, flag 0x4000000, icon 9):
 C_UnitAuras.RegisterAuraDurationModifierByTrigger(6, 5, 6, tonumber("4000000", 16), 9, "refresh")
 ```
 

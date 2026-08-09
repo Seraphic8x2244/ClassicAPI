@@ -1069,6 +1069,10 @@ enum Offsets {
     // derive `dispelName` from `Spell.dbc[+0x10]` (see
     // `OFF_SPELL_DISPEL_TYPE` below), not from the flags nibble.
     OFF_UNIT_FIELD_AURA = 0xA4,                // u32 spell ID per slot, 48 slots total
+    // UNIT_AURA event id for FUN_UNIT_EVENT_BROADCAST. The per-token unit
+    // events use field-index == event-id; the aura field is index 0x29
+    // (OFF_UNIT_FIELD_AURA 0xA4 >> 2), per Unit::TokenObserver's watched set.
+    UNIT_EVENT_UNIT_AURA = 0x29,
     OFF_UNIT_FIELD_AURAFLAGS = 0x164,          // 4 bits per aura, 2 per byte, covers all 48
     OFF_UNIT_FIELD_AURALEVELS = 0x17C,         // u8 caster level per aura, 48 bytes
     OFF_UNIT_FIELD_AURAAPPLICATIONS = 0x1AC,   // u8 (stacks-1) per aura, display value = byte+1
@@ -4506,6 +4510,14 @@ enum Offsets {
     // No `%b` for boolean — pass `%d` with 0/1; the engine has no native
     // bool concept here. No bounds check on eventID; pass valid indices.
     FUN_FIRE_EVENT = 0x00703F50,
+    // Per-token unit-event broadcast. Fires unit event `eventCode` for every
+    // unit token currently mapping to `*guid` (target / party / raid /
+    // nameplateN / mouseover / focus), via the engine's own GUID->token reverse
+    // map -- the same path the descriptor-field observers drive on a real field
+    // change. `void __fastcall(uint64_t *guid, uint32_t eventCode)`; verified
+    // against nampower's SendUnitSignal (0x00515e50). `eventCode` is the unit
+    // field index, which doubles as the event id (see UNIT_EVENT_UNIT_AURA).
+    FUN_UNIT_EVENT_BROADCAST = 0x00515E50,
     // Event name strings live in `.data` (mostly clustered around
     // 0x00851000..0x00855000); event-name string pointers also reach into
     // `.rdata` (starts at 0x007FF000) for some entries. Bound the dereference
