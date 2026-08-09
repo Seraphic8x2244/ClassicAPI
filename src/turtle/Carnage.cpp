@@ -43,6 +43,7 @@
 #include "Offsets.h"
 #include "net/PacketReader.h"
 #include "net/SendObserver.h"
+#include "spell/Lookup.h"
 #include "tick/WorldTick.h"
 #include "unit/Identity.h"
 
@@ -58,9 +59,26 @@ constexpr uint32_t kRipIcon = 108;
 constexpr uint64_t kRakeFlag = 0x1000;
 constexpr uint32_t kRakeIcon = 494;
 
+// Ferocious Bite, identified structurally the way the server's
+// IsDruidFerociousBite (spell_druid.cpp) does: druid family + the Rip/Bite
+// family flag + a direct-damage effect. The damage effect is what separates
+// Bite from Rip, its DoT sibling that shares the flag (Rip's effect is
+// APPLY_AURA, not SCHOOL_DAMAGE). Rank-proof -- covers every rank and any
+// Turtle-added one with no ID list. Verified against the client Spell.dbc:
+// all five FB ranks are {family 7, flag 0x800000, Effect[0] 2}; Rip shares the
+// flag but has no damage effect, and Rake carries a different flag.
 bool IsFerociousBite(uint32_t spellId) {
-    return spellId == 22568 || spellId == 22827 || spellId == 22828 ||
-           spellId == 22829 || spellId == 31018;
+    const uint8_t *rec = Spell::Lookup::RecordForID(static_cast<int>(spellId));
+    if (!Spell::Lookup::IsFitToFamily(rec, kDruidFamily, kRipFlag))
+        return false;
+    // The direct-damage effect separates Bite from Rip, its DoT sibling that
+    // shares the flag (Rip's effect is APPLY_AURA, not SCHOOL_DAMAGE).
+    const auto *effects = reinterpret_cast<const int32_t *>(
+        rec + Offsets::OFF_SPELL_RECORD_EFFECT);
+    for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i)
+        if (effects[i] == Offsets::SPELL_EFFECT_SCHOOL_DAMAGE)
+            return true;
+    return false;
 }
 
 // Long enough to absorb latency, short enough that the GCD the Bite just

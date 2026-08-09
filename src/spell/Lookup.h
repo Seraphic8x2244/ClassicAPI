@@ -22,6 +22,15 @@ namespace Spell::Lookup {
 // always invalid.
 const uint8_t *RecordForID(int spellID);
 
+// True if `spellRecord`'s SpellFamilyName equals `family` and its
+// SpellFamilyFlags overlap `flagMask` — the client-side form of the server's
+// `SpellEntry::IsFitToFamily<FAMILY, FLAG>()`. `flagMask` must be non-zero
+// (the callers always identify a spell by a specific flag bit). Returns false
+// for a null record. Callers add any extra discriminators (icon, effect type)
+// themselves.
+bool IsFitToFamily(const uint8_t *spellRecord, uint32_t family,
+                   uint64_t flagMask);
+
 // Resolves a 1-based Lua-facing spellbook slot to the spellID stored
 // there. `bookType` is `0` for the player spellbook, `1` for the pet
 // spellbook (matches the engine's encoding from `Script_GetSpellName`).

@@ -26,6 +26,18 @@ const uint8_t *RecordForID(int spellID) {
                        static_cast<uint32_t>(spellID));
 }
 
+bool IsFitToFamily(const uint8_t *spellRecord, uint32_t family,
+                   uint64_t flagMask) {
+    if (spellRecord == nullptr)
+        return false;
+    if (*reinterpret_cast<const uint32_t *>(
+            spellRecord + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != family)
+        return false;
+    const uint64_t flags = *reinterpret_cast<const uint64_t *>(
+        spellRecord + Offsets::OFF_SPELL_RECORD_FAMILY_FLAGS);
+    return (flags & flagMask) != 0;
+}
+
 int SpellbookSlotToID(int slot1Based, int bookType) {
     const int slot = slot1Based - 1;
     if (slot < 0 || slot >= Offsets::SPELLBOOK_MAX_SLOTS)

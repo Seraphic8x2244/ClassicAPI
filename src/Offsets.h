@@ -5766,6 +5766,7 @@ enum Offsets {
     // ENCHANT_ITEM / _TEMPORARY (enchants), and LEARN_SPELL (Turtle's custom
     // recipes, e.g. "Steel Plate Boots" = effect 36).
     OFF_SPELL_RECORD_EFFECT = 0xF4,                   // int32[3]
+    SPELL_EFFECT_SCHOOL_DAMAGE = 2,                    // direct damage (verified vs server SpellDefines.h)
     SPELL_EFFECT_CREATE_ITEM = 24,
     SPELL_EFFECT_LEARN_SPELL = 36,
     SPELL_EFFECT_ENCHANT_ITEM = 53,

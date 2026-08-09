@@ -362,14 +362,7 @@ int g_modCount = 0;
 // refresh so the two cannot disagree about what they match.
 bool AffectedMatchesRaw(const uint8_t *rec, uint32_t family, uint64_t mask,
                         uint32_t icon) {
-    if (rec == nullptr)
-        return false;
-    if (*reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != family)
-        return false;
-    const uint64_t flags = *reinterpret_cast<const uint64_t *>(
-        rec + Offsets::OFF_SPELL_RECORD_FAMILY_FLAGS);
-    if ((flags & mask) == 0)
+    if (!Spell::Lookup::IsFitToFamily(rec, family, mask))
         return false;
     if (icon != 0 &&
         *reinterpret_cast<const uint32_t *>(
