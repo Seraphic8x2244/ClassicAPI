@@ -665,6 +665,26 @@ void OnWorldTick() {
         *reinterpret_cast<const int *>(Offsets::VAR_CURRENT_CAST_SPELL) == 0)
         g_cast.spellID = 0;
 
+    // A target-selection spell (Disenchant, ground-target AoE, …) stamps
+    // g_cast at the green-cursor step, NOT when the cast actually begins:
+    // Spell_C_CastSpell (0x006E4B60) calls the cast-start writer
+    // (FUN_CAST_START_SET) BEFORE Spell_C_TargetSpell raises the reticle, and
+    // the later item/ground click re-enters Spell_C_CastSpell only to hit its
+    // "already this spell" short-circuit — so the writer never re-fires for the
+    // real start. Left alone, g_cast would surface a premature cast (UnitCasting-
+    // Info + UNIT_SPELLCAST_START) during targeting, seconds early, and a cancel
+    // would even fire a phantom START/INTERRUPTED/STOP. So drop the client stamp
+    // while the reticle is up for that spell: on selection the server's
+    // SMSG_SPELL_START re-stamps it cleanly (g_cast is 0, so HandleSpellStart
+    // takes the fresh-stamp path and START fires with the correct time + the
+    // SENT castGUID); on cancel it simply stays cleared. Gated on
+    // !g_castFromServer so it can never touch that server re-stamp.
+    if (g_cast.spellID != 0 && !g_castFromServer &&
+        *reinterpret_cast<const int *>(Offsets::VAR_SPELL_TARGETING_FLAGS) != 0 &&
+        g_cast.spellID ==
+            *reinterpret_cast<const int *>(Offsets::VAR_PENDING_CAST_SPELL))
+        g_cast.spellID = 0;
+
     // Detect a player CHANNEL that ended before its computed endMs — the
     // summon-ritual case (UNIT_FIELD_CHANNEL_SPELL = 698, cleared when the
     // summon fills), and equally an interrupted / cancelled / LoS-broken
