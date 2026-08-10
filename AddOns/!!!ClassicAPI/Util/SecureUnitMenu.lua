@@ -101,12 +101,14 @@ function ClassicAPI_ToggleUnitMenu(unit)
     end
     local which = ResolveMenu(unit);
     local dd = EnsureDropdown();
-    dd.initialize = function()
-        -- Copy the base menu without its trailing CANCEL so we can place Focus
-        -- and Cancel ourselves, in the right order. Blizzard's own
-        -- UnitPopupMenus[which] is left untouched. ShowMenu adds nothing when
-        -- every base entry is hidden (e.g. an NPC's markers while solo) -- our
-        -- appended buttons still open the menu.
+    dd.initialize = function(level)
+        level = level or UIDROPDOWNMENU_MENU_LEVEL or 1;
+
+        if level > 1 then
+            UnitPopup_ShowMenu(dd, which, unit);
+            return;
+        end
+
         local base = UnitPopupMenus[which];
         local scratch = {};
         for _, value in ipairs(base) do
