@@ -144,5 +144,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "ClassicAPI")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MT")
 set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /Ob2 /DNDEBUG")
 set(CMAKE_SHARED_LINKER_FLAGS
-    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT"
+    # /MAP emits build/Release/ClassicAPI.map — a linker-only output (no effect
+    # on code layout) that maps `0001:offset` addresses from WoW's ERROR #132
+    # crash dumps back to functions. Published as a build/release artifact so
+    # any crash from a shipped DLL can be triaged exactly. (/OPT:ICF folds
+    # identical functions, so a few map symbols share an address — harmless.)
+    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT /MAP"
 )
