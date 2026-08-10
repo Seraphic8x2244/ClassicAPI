@@ -109,5 +109,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          files: build/Release/ClassicAPI.dll
+          files: |
+            build/Release/ClassicAPI.dll
+            build/Release/ClassicAPI.map
           generate_release_notes: true
