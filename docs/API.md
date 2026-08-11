@@ -217,6 +217,8 @@ build instructions.
   - [`Enum.ItemClass`](#enumitemclass)
   - [`Enum.ItemQuality`](#enumitemquality)
   - [`Enum.PowerType`](#enumpowertype)
+  - [`Enum.SpellBookSpellBank`](#enumspellbookspellbank)
+  - [`Enum.SpellBookItemType`](#enumspellbookitemtype)
 
 - [Glue](#glue)
   - [`C_Glue.IsFirstLoadThisSession()`](#c_glueisfirstloadthissession)
@@ -467,6 +469,7 @@ build instructions.
 
 - [SpellBook](#spellbook)
   - [`FindSpellBookSlotByID(spellID)`](#findspellbookslotbyidspellid)
+  - [`C_SpellBook.GetSpellBookItemInfo(slotIndex, spellBank)`](#c_spellbookgetspellbookiteminfoslotindex-spellbank)
   - [`C_SpellBook.GetSpellLevelLearned(spellID)`](#c_spellbookgetspelllevellearnedspellid)
   - [`C_SpellBook.GetCurrentLevelSpells([level])`](#c_spellbookgetcurrentlevelspellslevel)
   - [`C_SpellBook.GetSkillLineName(skillLineID)`](#c_spellbookgetskilllinenameskilllineid)
@@ -5332,6 +5335,32 @@ not modern's `ComboPoints` reuse of the same number.
 ```lua
 local rage = UnitPower("player", Enum.PowerType.Rage)
 ```
+
+### `Enum.SpellBookSpellBank`
+
+Selects which spellbook a `C_SpellBook.*` slot query reads. Passed as the
+`spellBank` argument to
+[`C_SpellBook.GetSpellBookItemInfo`](#c_spellbookgetspellbookiteminfoslotindex-spellbank).
+
+| Value | Field    |
+|------:|----------|
+| `0`   | `Player` |
+| `1`   | `Pet`    |
+
+### `Enum.SpellBookItemType`
+
+Categorizes a spellbook slot. Vanilla's spellbook only ever holds real
+spells, so `C_SpellBook.GetSpellBookItemInfo` returns `Spell` for a
+player-book slot and `PetAction` for a pet-book slot. The other values
+exist for signature parity with retail but never occur in 1.12.
+
+| Value | Field         | Notes |
+|------:|---------------|-------|
+| `0`   | `None`        | Empty slot. Never returned — an empty slot yields `nil` instead. |
+| `1`   | `Spell`       | A player-book spell. |
+| `2`   | `FutureSpell` | A not-yet-learned trainer spell. Never occurs in 1.12. |
+| `3`   | `PetAction`   | A pet-book spell. |
+| `4`   | `Flyout`      | A flyout group — a later-expansion concept. Never occurs. |
 
 ## Glue
 
@@ -11696,6 +11725,40 @@ end
 
 Equivalent to the legacy function of the same name introduced in 3.0
 (later renamed to `FindSpellBookSlotBySpellID` in 5.x).
+
+### `C_SpellBook.GetSpellBookItemInfo(slotIndex, spellBank)`
+
+Returns a table describing the spell in a spellbook slot. `slotIndex` is
+1-based across the whole book. `spellBank` picks the book —
+[`Enum.SpellBookSpellBank.Player`](#enumspellbookspellbank) (`0`) or
+`Enum.SpellBookSpellBank.Pet` (`1`).
+
+```lua
+local info = C_SpellBook.GetSpellBookItemInfo(1, Enum.SpellBookSpellBank.Player)
+-- info.name, info.spellID, info.itemType, info.isPassive, info.iconID, ...
+```
+
+Table fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `itemType` | [`Enum.SpellBookItemType`](#enumspellbookitemtype) | `Spell` (1) for the player book, `PetAction` (3) for the pet book. |
+| `actionID` | number | The spellID. Equals `spellID` — vanilla has no spell-override system. |
+| `spellID` | number | The spellID in the slot. |
+| `name` | string | The localized spell name. |
+| `subName` | string | The rank text (e.g. `"Rank 3"`), or `""` when the spell has no rank. |
+| `iconID` | string | The icon **path** — feed it straight to `texture:SetTexture(...)`. |
+| `isPassive` | boolean | `true` for a passive spell. |
+| `isOffSpec` | boolean | Always `false`. |
+
+Returns `nil` for an empty or out-of-range slot, matching the modern API.
+
+> **Deviations from retail, forced by 1.12's data.** `iconID` is a
+> texture path, not a `fileID` (vanilla has no fileID system) — the same
+> deviation as [`C_Spell.GetSpellInfo`](#c_spellgetspellinfospellid).
+> `skillLineIndex` is not returned (`nil`); spellbook tabs aren't
+> SkillLines. `isOffSpec` is always `false` — vanilla has no
+> specializations.
 
 ### `C_SpellBook.GetSpellLevelLearned(spellID)`
 

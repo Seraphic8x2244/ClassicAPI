@@ -617,6 +617,69 @@ static const Game::HookAutoRegister _hookUnlearnSpell{
     Offsets::FUN_UNLEARN_SPELL, reinterpret_cast<void *>(&UnlearnSpell_h),
     reinterpret_cast<void **>(&g_origUnlearnSpell)};
 
+// Enum.SpellBookItemType values (retail). Vanilla's spellbook only ever
+// produces real spells, so we emit Spell (player book) or PetAction (pet
+// book); None/FutureSpell/Flyout don't occur in 1.12.
+static constexpr int kSpellBookItemTypeSpell = 1;
+static constexpr int kSpellBookItemTypePetAction = 3;
+
+static const Game::Lua::EnumIntegerEntry kSpellBookSpellBankEntries[] = {
+    {"Player", 0}, {"Pet", 1},
+};
+static const Game::Lua::EnumIntegerEntry kSpellBookItemTypeEntries[] = {
+    {"None", 0}, {"Spell", 1}, {"FutureSpell", 2}, {"PetAction", 3},
+    {"Flyout", 4},
+};
+
+// `C_SpellBook.GetSpellBookItemInfo(slotIndex, spellBank)` -> table.
+// `slotIndex` is 1-based across the whole book; `spellBank` is
+// Enum.SpellBookSpellBank (0 = Player, 1 = Pet). Returns nil for an empty or
+// out-of-range slot. Vanilla's spellbook holds only real spells, so `itemType`
+// is always Spell (player) or PetAction (pet).
+//
+// Field deviations from retail, all forced by 1.12 lacking the data:
+//   - `iconID` is the icon PATH string (vanilla has no fileID), same as
+//     C_Spell.GetSpellInfo.iconID -- feed it straight to texture:SetTexture.
+//   - `isOffSpec` is always false (vanilla has no specializations).
+//   - `skillLineIndex` is omitted (nil) -- spellbook tabs aren't SkillLines.
+static int __fastcall Script_C_SpellBook_GetSpellBookItemInfo(void *L) {
+    if (!Game::Lua::IsNumber(L, 1))
+        return 0; // modern returns nil (not an error) for a bad index
+    const int slot = static_cast<int>(Game::Lua::ToNumber(L, 1));
+    const int bank = Game::Lua::IsNumber(L, 2)
+                         ? static_cast<int>(Game::Lua::ToNumber(L, 2))
+                         : 0;
+    const int bookType = (bank == 1) ? 1 : 0; // 1 = pet book, else player
+
+    const int spellID = Spell::Lookup::SpellbookSlotToID(slot, bookType);
+    if (spellID <= 0)
+        return 0; // empty slot / out of range -> nil
+
+    SpellInfoData info;
+    if (!ReadSpellInfo(spellID, info))
+        return 0;
+
+    const uint8_t *record = Spell::Lookup::RecordForID(spellID);
+    const uint32_t attr =
+        record ? *reinterpret_cast<const uint32_t *>(
+                     record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES)
+               : 0u;
+
+    Game::Lua::NewTable(L);
+    SetField(L, "itemType",
+             static_cast<double>(bookType == 1 ? kSpellBookItemTypePetAction
+                                               : kSpellBookItemTypeSpell));
+    SetField(L, "actionID", static_cast<double>(spellID));
+    SetField(L, "spellID", static_cast<double>(spellID));
+    SetField(L, "name", info.name);
+    // subName carries the rank text ("Rank N"); modern uses "" when absent.
+    SetField(L, "subName", info.rank ? info.rank : "");
+    SetField(L, "iconID", info.iconPath); // path string -- see note above
+    SetFieldBool(L, "isPassive", (attr & Offsets::SPELL_ATTR_PASSIVE) != 0);
+    SetFieldBool(L, "isOffSpec", false);
+    return 1;
+}
+
 static void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("GetSpellInfo", &Script_GetSpellInfo);
     Game::Lua::RegisterGlobalFunction("GetSpellLink", &Script_GetSpellLink);
@@ -637,6 +700,12 @@ static void RegisterLuaFunctions() {
                                       &Script_C_Spell_IsSpellHarmful);
     Game::Lua::RegisterTableFunction("C_Spell", "IsSpellHelpful",
                                       &Script_C_Spell_IsSpellHelpful);
+    Game::Lua::RegisterTableFunction("C_SpellBook", "GetSpellBookItemInfo",
+                                      &Script_C_SpellBook_GetSpellBookItemInfo);
+    Game::Lua::RegisterIntegerEnum("Enum", "SpellBookSpellBank",
+                                   kSpellBookSpellBankEntries, 2);
+    Game::Lua::RegisterIntegerEnum("Enum", "SpellBookItemType",
+                                   kSpellBookItemTypeEntries, 5);
 }
 
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
