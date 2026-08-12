@@ -79,6 +79,7 @@
 #include "item/Location.h"
 #include "object/Resolve.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -128,10 +129,7 @@ bool g_seeded = false;     // true once the login baseline has been taken
 uint64_t g_playerGuid = 0; // re-arm the baseline when this changes (relog)
 uint32_t g_loginMs = 0;    // engine ms at which the current player resolved
 
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(Offsets::FUN_OS_TICKCOUNT_MS)();
-}
+using Time::Clock::NowMs;
 
 bool Contains(const uint64_t *arr, int count, uint64_t guid) {
     for (int i = 0; i < count; ++i)

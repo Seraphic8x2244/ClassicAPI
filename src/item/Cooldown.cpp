@@ -42,16 +42,22 @@ namespace {
 // `uint *` (the ItemStats cache lookup uses the integer both as a
 // hash key and as the field-zero match target, which is how it
 // inherits the pointer typing in the decomp).
+//
+// `outDuration`/`outStart` are *unsigned* millisecond ticks (same OS counter
+// and epoch as `GetTime()`). Reading `outStart` into a signed `int` makes
+// every timestamp negative once the machine has been up past 2^31 ms
+// (~24.9 days), so `startTime + duration` lands in the past and every item
+// reads as off cooldown. Keep them unsigned; see `Time::Clock`.
 using QueryItemCooldown_t = bool(__fastcall *)(uint32_t itemID,
-                                                int *outDuration,
-                                                int *outStart,
+                                                uint32_t *outDuration,
+                                                uint32_t *outStart,
                                                 uint32_t *outEnable);
 
 } // namespace
 
 void PushCooldown(void *L, int itemID) {
-    int durationMs = 0;
-    int startMs = 0;
+    uint32_t durationMs = 0;
+    uint32_t startMs = 0;
     uint32_t enable = 0;
     if (itemID > 0) {
         auto fn = reinterpret_cast<QueryItemCooldown_t>(

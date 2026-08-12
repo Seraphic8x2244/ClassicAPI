@@ -45,6 +45,7 @@
 #include "net/SendObserver.h"
 #include "spell/Lookup.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -89,11 +90,7 @@ uint64_t g_target = 0;   // unit the armed Bite's combo points / DoTs belong to
 uint32_t g_untilMs = 0;  // window expiry
 uint8_t g_lastCp = 0;    // last combo-point value seen since arming
 
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+using Time::Clock::NowMs;
 
 // The CGPlayer +0xE68 sub-struct that holds combo points + combo target
 // (Script_GetComboPoints, 0x0051A190). Null pre-world.
@@ -129,7 +126,7 @@ void OnSend(uint32_t opcode, Net::CDataStore *packet) {
 void OnTick() {
     if (g_target == 0)
         return;
-    if (static_cast<int32_t>(NowMs() - g_untilMs) >= 0) {
+    if (Time::Clock::Reached(g_untilMs)) {
         g_target = 0;
         return;
     }

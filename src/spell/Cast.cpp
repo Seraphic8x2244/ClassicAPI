@@ -76,6 +76,7 @@
 #include "spell/Lookup.h"
 #include "spell/CastEvents.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -85,7 +86,6 @@ namespace Spell::Cast {
 namespace {
 
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
-using TickMs_t = uint32_t(__fastcall *)();
 using GetCastTime_t = uint32_t(__fastcall *)(int spellID, int unit, int flag);
 using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, int skipMod);
 
@@ -132,7 +132,11 @@ void StampChannel(int spellID, int startMs, int endMs) {
     g_cast.spellID = 0;
 }
 
-int NowMs() { return static_cast<int>(reinterpret_cast<TickMs_t>(Offsets::FUN_OS_TICKCOUNT_MS)()); }
+// Cast tracking keeps ticks in a signed int internally by design — see PushMs
+// for why that's safe (small deltas cancel; the Lua boundary re-casts to
+// uint32 so it matches GetTime()*1000 across the wrap). The reader itself
+// still comes from the one canonical source.
+int NowMs() { return static_cast<int>(Time::Clock::NowMs()); }
 
 // Pushes an engine-ms timestamp to Lua as an UNSIGNED 32-bit value.
 //

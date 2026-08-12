@@ -23,6 +23,7 @@
 #include "net/PacketReader.h"
 #include "net/SendObserver.h"
 #include "spell/Mod.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -32,12 +33,7 @@ namespace Aura::ComboDuration {
 namespace {
 
 using Net::CDataStore;
-
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+using Time::Clock::NowMs;
 
 // ---- Combo-point snapshot (NetClient send co-hook) ------------------------
 

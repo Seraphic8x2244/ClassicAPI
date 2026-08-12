@@ -49,6 +49,7 @@
 #include "Offsets.h"
 #include "dbc/Names.h"
 #include "event/Custom.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -63,14 +64,7 @@ T Read(const void *base, int off) {
     return *reinterpret_cast<const T *>(static_cast<const uint8_t *>(base) + off);
 }
 
-// Engine millisecond clock — same source (and epoch) as Lua's `GetTime()`
-// (which reads this scaled by 0.001), so a value stored here is directly
-// comparable to `GetTime()` once divided by 1000.
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+using Time::Clock::NowMs;
 
 // Modern rollType constants (what C_LootHistory.GetPlayerInfo returns).
 constexpr int ROLL_PASS = 0;

@@ -19,6 +19,7 @@
 #include "net/PacketReader.h"
 #include "net/SendObserver.h"
 #include "spell/Lookup.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdio>
@@ -261,11 +262,10 @@ bool IsChanneledSpell(int spellID) {
             Offsets::SPELL_ATTR_EX_CHANNELED) != 0;
 }
 
-int NowMs() {
-    using TickMs_t = uint32_t(__fastcall *)();
-    return static_cast<int>(reinterpret_cast<TickMs_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))());
-}
+// Only used for relative windows (`now - stampMs < window`), where the int
+// deltas cancel and stay correct across the wrap. Reader from the one
+// canonical source; see `Time::Clock`.
+int NowMs() { return static_cast<int>(Time::Clock::NowMs()); }
 
 // ---- UNIT_SPELLCAST_FAILED (client-side cast rejection) ----------------
 // Co-hook `Spell_C_SpellFailed` — the local player's own cast failures

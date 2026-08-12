@@ -48,6 +48,7 @@
 #include "object/Resolve.h"
 #include "spell/Lookup.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 #include "ui/ColorData.h"
 #include "unit/Identity.h"
 
@@ -87,11 +88,7 @@ uint32_t g_lastScanMs = 0;
 uint32_t g_toolItem[kSlots] = {};
 int g_spellsChangedId = -1;
 
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+using Time::Clock::NowMs;
 
 // The totem tool item a spell requires (`Totem[0]`), or 0.
 uint32_t TotemToolItem(const uint8_t *rec) {
@@ -428,10 +425,9 @@ int __fastcall Script_GetTotemTimeLeft(void *L) {
     if (slot >= 1 && slot <= kSlots) {
         const Slot &t = g_slots[slot - 1];
         if (t.active && t.durationMs != 0) {
-            const uint32_t now = NowMs();
-            const uint32_t end = t.startMs + t.durationMs;
-            if (now < end)
-                seconds = static_cast<double>(end - now) / 1000.0;
+            const uint32_t left = Time::Clock::Remaining(t.startMs + t.durationMs);
+            if (left != 0)
+                seconds = static_cast<double>(left) / 1000.0;
         }
     }
     Game::Lua::PushNumber(L, seconds);
@@ -552,12 +548,8 @@ int __fastcall Script_GameTooltipSetTotem(void *L) {
 
     // Milliseconds remaining (0 = unknown / expired duration).
     uint32_t msLeft = 0;
-    if (t.durationMs != 0) {
-        const uint32_t now = NowMs();
-        const uint32_t end = t.startMs + t.durationMs;
-        if (now < end)
-            msLeft = end - now;
-    }
+    if (t.durationMs != 0)
+        msLeft = Time::Clock::Remaining(t.startMs + t.durationMs);
 
     reinterpret_cast<ClearTooltip_t>(Offsets::FUN_GAMETOOLTIP_CLEAR)(self);
     AddColoredLine(self, name, kNameColor);

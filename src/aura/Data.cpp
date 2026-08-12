@@ -21,6 +21,7 @@
 #include "guid/Guid.h"
 #include "spell/CrowdControl.h"
 #include "spell/IsSelfBuff.h"
+#include "time/Clock.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -144,12 +145,10 @@ double PlayerBuffExpirationSeconds(const uint8_t *entry) {
     // Permanent auras (paladin auras, passives, racials) carry an infinite
     // Spell.dbc duration (SpellDuration base -1); the server stores the fixed
     // cast-time in this slot for them, so it's always "already elapsed" and the
-    // engine shows no countdown. The signed `(int)` compare also absorbs the
-    // ~24.86-day GetTickCount wrap (both operands wrap together).
-    using TickCount_t = uint32_t(__fastcall *)();
-    const uint32_t nowMs = reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-    if (static_cast<int32_t>(nowMs - expirationMs) >= 0)
+    // engine shows no countdown. `Time::Clock::Reached` takes the signed diff, so
+    // it also absorbs the ~24.86-day GetTickCount wrap (both operands wrap
+    // together).
+    if (Time::Clock::Reached(expirationMs))
         return 0.0; // expiration reached/passed → permanent or no timer
     return static_cast<double>(expirationMs) * 0.001;
 }
@@ -209,12 +208,7 @@ double SpellBaseDurationSeconds(uint32_t spellID, int unitLevel) {
 // the ~24.86-day GetTickCount wrap). An already-elapsed cached expiration is
 // not meaningful — the caster is kept regardless, but the time is reported as
 // unknown rather than as a negative remaining.
-bool ExpirationElapsed(uint32_t expMs) {
-    using TickCount_t = uint32_t(__fastcall *)();
-    const uint32_t nowMs = reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-    return static_cast<int32_t>(nowMs - expMs) >= 0;
-}
+bool ExpirationElapsed(uint32_t expMs) { return Time::Clock::Reached(expMs); }
 
 int PlayerLevel(const uint8_t *player) {
     auto *desc = Descriptor(player);

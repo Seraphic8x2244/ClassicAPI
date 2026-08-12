@@ -44,6 +44,7 @@
 #include "Offsets.h"
 #include "guid/Guid.h"
 #include "object/Resolve.h"
+#include "time/Clock.h"
 #include "unit/Position.h"
 
 #include <cmath>
@@ -77,7 +78,7 @@ using Predicate_t = int(__fastcall *)(void *player, void *cand, int mode);
 using SetTargetByGuid_t = void(__fastcall *)(const uint64_t *guid);
 using EnumCallback_t = int(__fastcall *)(void *ctx, void *unusedEdx, uint64_t guid);
 using EnumVisibleObjects_t = int(__fastcall *)(EnumCallback_t cb, void *ctx);
-using TickMs_t = uint32_t(__fastcall *)();
+using Time::Clock::NowMs;
 
 bool PassesFilter(void *player, void *cand, uint64_t guid, Filter f) {
     auto valid = reinterpret_cast<Predicate_t>(Offsets::FUN_TARGET_CANDIDATE_VALID);
@@ -174,10 +175,6 @@ uint64_t CurrentSelection() {
     const uint32_t hi = *reinterpret_cast<volatile uint32_t *>(
         Offsets::VAR_CURRENT_SELECTION_GUID_HI);
     return (static_cast<uint64_t>(hi) << 32) | lo;
-}
-
-uint32_t NowMs() {
-    return reinterpret_cast<TickMs_t>(Offsets::FUN_OS_TICKCOUNT_MS)();
 }
 
 // Ascending insertion sort by 3D distance (candidate counts are tiny).

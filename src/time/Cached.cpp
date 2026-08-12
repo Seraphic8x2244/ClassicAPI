@@ -31,6 +31,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 
 #include <cstdint>
 
@@ -41,15 +42,11 @@ namespace {
 // OS millisecond counter sampled at the last frame boundary. 0 until the
 // first world tick fires (pre-world). Read as uint32 — `GetTickCount`
 // wraps at ~24.86 days, matching how the rest of the codebase treats this
-// counter (see aura/Data.cpp), and how `Script_GetTime` masks it to 32
+// counter (see `Time::Clock`), and how `Script_GetTime` masks it to 32
 // bits before scaling.
 uint32_t g_frameMs = 0;
 
-uint32_t SampleTickMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+uint32_t SampleTickMs() { return Time::Clock::NowMs(); }
 
 // Tail-of-frame refresh. Tail-of-frame-N ≈ start-of-frame-(N+1) minus the
 // inter-frame gap, which is all a frame-stable timestamp needs: every read

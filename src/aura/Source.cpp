@@ -26,6 +26,7 @@
 #include "spell/CastEvents.h"
 #include "spell/Lookup.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
 #include "totem/Tracker.h"
 #include "unit/Identity.h"
 
@@ -54,11 +55,7 @@ bool SpellAppliesAura(const uint8_t *spellRecord) {
     return false;
 }
 
-uint32_t NowMs() {
-    using TickCount_t = uint32_t(__fastcall *)();
-    return reinterpret_cast<TickCount_t>(
-        static_cast<uintptr_t>(Offsets::FUN_OS_TICKCOUNT_MS))();
-}
+using Time::Clock::NowMs;
 
 // Server-authoritative duration (ms). When the local player is the caster
 // we let the engine fold in the player's duration modifiers (skipMod = 0);
@@ -618,7 +615,7 @@ void OnWorldTick() {
 
     const uint32_t now = NowMs();
     for (auto &e : g_cache) {
-        if (!e.used || e.expirationMs == 0 || now < e.expirationMs)
+        if (!e.used || e.expirationMs == 0 || !Time::Clock::Reached(now, e.expirationMs))
             continue;
         // A timer elapse doesn't prove the aura is gone — expirationMs is only
         // a base-duration estimate for non-player casters. Keep any entry whose
