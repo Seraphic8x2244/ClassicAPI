@@ -647,15 +647,25 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
     }
     if (Ascii::EqualCI(verb, "macro")) {
         char macro[512];
-        if (!ReadModAttr(L, fi, prefix, "macrotext", suffix, macro, sizeof macro) &&
-            !ReadModAttr(L, fi, prefix, "macro", suffix, macro, sizeof macro))
-            return false;
-        // Prefer an addon-provided RunMacro (SuperCleveRoidMacros, pfUI, …) — it
-        // handles named macros and extended macro text; fall back to the stock
-        // ChatEdit_ParseText path when no RunMacro global is present.
-        if (!Game::Lua::CallGlobalString(L, "RunMacro", macro))
+        // `macrotext` is raw macro text (the modern default). Run it as text
+        // through the stock chat parser so each line dispatches via
+        // SlashCmdList — that routes /cast etc. through any addon slash hooks
+        // (e.g. SuperCleveRoidMacros' conditional /cast). A name-based RunMacro
+        // (which is what SuperCleveRoidMacros ships) can't interpret text and
+        // would silently resolve nothing.
+        if (ReadModAttr(L, fi, prefix, "macrotext", suffix, macro, sizeof macro)) {
             RunMacroTextC(L, macro);
-        return true;
+            return true;
+        }
+        // Deprecated `macro` form: a saved-macro name/index. Prefer an
+        // addon-provided RunMacro (SuperCleveRoidMacros, pfUI, …) to run the
+        // named macro's body; fall back to the stock parser when none exists.
+        if (ReadModAttr(L, fi, prefix, "macro", suffix, macro, sizeof macro)) {
+            if (!Game::Lua::CallGlobalString(L, "RunMacro", macro))
+                RunMacroTextC(L, macro);
+            return true;
+        }
+        return false;
     }
     if (Ascii::EqualCI(verb, "stop") || Ascii::EqualCI(verb, "stopcasting")) {
         Game::Lua::CallGlobal(L, "SpellStopCasting");
