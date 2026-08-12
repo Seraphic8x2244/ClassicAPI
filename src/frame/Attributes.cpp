@@ -646,6 +646,15 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         return false;
     }
     if (Ascii::EqualCI(verb, "macro")) {
+        // Give the macro a unit to act on. Vanilla macros have no `@unit`
+        // conditional, and unlike the `spell` verb (which feeds a GUID straight
+        // to the cast dispatcher) we can't inject a target into arbitrary macro
+        // text — so a plain `/cast Flash Heal` would hit the current target, not
+        // the clicked unit. Emulate the classic Clique / pfUIevan click-heal:
+        // target the clicked unit first, then run the macro. Like pfUIevan, the
+        // previous target is NOT restored (the click doubles as a target swap).
+        if (unit)
+            Game::Lua::CallGlobalString(L, "TargetUnit", unit);
         char macro[512];
         // `macrotext` is raw macro text (the modern default). Run it as text
         // through the stock chat parser so each line dispatches via
