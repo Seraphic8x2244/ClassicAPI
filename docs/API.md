@@ -4039,7 +4039,7 @@ modifier/button-qualified, same precedence as `type`):
 | `focus` | — | Sets the ClassicAPI focus to the `unit`. |
 | `spell` | `spell` | Casts the `spell` on the `unit` via [`C_Spell.CastAtUnit`](#c_spellcastatunitspellidorname-unit) — the unit's GUID goes straight to the cast dispatcher (no target juggling), and ground-target spells land at the unit's feet. |
 | `item` | `item`, or `bag`+`slot` | Uses an item on the `unit`. `item` may be a name / itemID / link (used via `C_Item.UseItemByName`, unit as the target) or a `"bag slot"` string like `"0 1"` (used via `UseContainerItem`). The deprecated `bag`+`slot` attributes are used when `item` is unset. |
-| `macro` | `macrotext` or `macro` | Runs the macro text. Prefers an addon `RunMacro` (e.g. SuperCleveRoidMacros — named macros + extended conditionals); otherwise runs the text natively, line by line, through the stock `ChatEdit_ParseText`. |
+| `macro` | `macrotext` or `macro` | Runs the macro text. To give the macro a unit, the handler selects the clicked `unit`, runs the macro, then restores the target from before the click. It prefers an addon `RunMacro` (for example, SuperCleveRoidMacros — named macros and extended conditionals). If no addon `RunMacro` exists, it runs the text natively, line by line, through the stock `ChatEdit_ParseText`. |
 | `stopcasting` | — | Stops the current cast. |
 | `menu` / `togglemenu` | — | Pops the standard unit dropdown at the cursor (whisper / inspect / trade / invite / …, the same menu `PlayerFrame` / `TargetFrame` / `PartyMemberFrame` show). |
 

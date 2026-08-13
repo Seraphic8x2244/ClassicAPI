@@ -650,12 +650,25 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         // conditional, and unlike the `spell` verb (which feeds a GUID straight
         // to the cast dispatcher) we can't inject a target into arbitrary macro
         // text — so a plain `/cast Flash Heal` would hit the current target, not
-        // the clicked unit. Emulate the classic Clique / pfUIevan click-heal:
-        // target the clicked unit first, then run the macro. Like pfUIevan, the
-        // previous target is NOT restored (the click doubles as a target swap).
-        if (unit)
+        // the clicked unit. Emulate the classic Clique click-heal: snapshot the
+        // current target, retarget the clicked unit, run the macro, then restore
+        // the previous target so the click doesn't leave the player retargeted.
+        // The macro's actions (/cast etc.) dispatch against the clicked unit
+        // synchronously while it's selected, so restoring the target afterward
+        // doesn't affect them.
+        uint64_t prevTarget = 0;
+        const bool swapped = unit != nullptr;
+        if (swapped) {
+            prevTarget =
+                (static_cast<uint64_t>(*reinterpret_cast<volatile uint32_t *>(
+                     Offsets::VAR_CURRENT_SELECTION_GUID_HI))
+                 << 32) |
+                *reinterpret_cast<volatile uint32_t *>(
+                    Offsets::VAR_CURRENT_SELECTION_GUID_LO);
             Game::Lua::CallGlobalString(L, "TargetUnit", unit);
+        }
         char macro[512];
+        bool handled = false;
         // `macrotext` is raw macro text (the modern default). Run it as text
         // through the stock chat parser so each line dispatches via
         // SlashCmdList — that routes /cast etc. through any addon slash hooks
@@ -664,17 +677,28 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         // would silently resolve nothing.
         if (ReadModAttr(L, fi, prefix, "macrotext", suffix, macro, sizeof macro)) {
             RunMacroTextC(L, macro);
-            return true;
+            handled = true;
         }
         // Deprecated `macro` form: a saved-macro name/index. Prefer an
         // addon-provided RunMacro (SuperCleveRoidMacros, pfUI, …) to run the
         // named macro's body; fall back to the stock parser when none exists.
-        if (ReadModAttr(L, fi, prefix, "macro", suffix, macro, sizeof macro)) {
+        else if (ReadModAttr(L, fi, prefix, "macro", suffix, macro, sizeof macro)) {
             if (!Game::Lua::CallGlobalString(L, "RunMacro", macro))
                 RunMacroTextC(L, macro);
-            return true;
+            handled = true;
         }
-        return false;
+        // Restore the target the click swapped away from. `FUN_TARGET_BY_GUID`
+        // validates the GUID resolves to a live unit and bails otherwise, so a
+        // target that despawned mid-macro is dropped cleanly rather than
+        // committed; a zero prior target means "no target" → ClearTarget.
+        if (swapped) {
+            if (prevTarget)
+                reinterpret_cast<void(__fastcall *)(const uint64_t *)>(
+                    Offsets::FUN_TARGET_BY_GUID)(&prevTarget);
+            else
+                Game::Lua::CallGlobal(L, "ClearTarget");
+        }
+        return handled;
     }
     if (Ascii::EqualCI(verb, "stop") || Ascii::EqualCI(verb, "stopcasting")) {
         Game::Lua::CallGlobal(L, "SpellStopCasting");
