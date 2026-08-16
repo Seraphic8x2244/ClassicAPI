@@ -218,23 +218,33 @@ int PlayerLevel(const uint8_t *player) {
         desc + Offsets::OFF_UNIT_FIELD_LEVEL);
 }
 
-// The caster GUID attributed to `(guid, spellID)`: the observed caster from
-// the Aura::Source cache, else — when we never saw the cast — the unit itself
-// if the spell is a self-only-target buff (self-buffs can't be cross-cast).
-// 0 when genuinely unknown. Single source of truth for both display
-// (sourceGUID/sourceUnit) and the PLAYER caster filter, so a self-buff shows a
-// source AND matches HELPFUL|PLAYER instead of the two paths disagreeing.
-uint64_t EffectiveCaster(uint64_t guid, uint32_t spellID) {
+// Caster + timing attributed to ONE aura instance — the aura `spellID` sitting
+// in absolute descriptor `slot` on `guid` (`Aura::Source::SLOT_UNBOUND` when
+// the caller has no slot: the out-of-range group array, the cache fallback).
+// The slot is what tells two casters' copies of one spell apart; without it
+// they are indistinguishable from a spell ID alone.
+//
+// The caster is the observed one from the Aura::Source cache, else — when we
+// never saw the cast — the unit itself if the spell is a self-only-target buff
+// (self-buffs can't be cross-cast), else 0. Single source of truth for both
+// display (sourceGUID/sourceUnit) and the PLAYER caster filter, so a self-buff
+// shows a source AND matches HELPFUL|PLAYER instead of the two paths
+// disagreeing.
+struct Attribution {
+    uint64_t caster;
+    uint32_t expirationMs;
+    uint32_t durationMs;
+};
+
+Attribution Attribute(uint64_t guid, uint32_t spellID, int slot) {
+    Attribution a = {0, 0, 0};
     if (guid == 0 || spellID == 0)
-        return 0;
-    uint64_t c = 0;
-    uint32_t expMs = 0;
-    uint32_t durMs = 0;
-    if (Aura::Source::Get(guid, spellID, &c, &expMs, &durMs) && c != 0)
-        return c; // observed caster
-    if (Spell::IsSelfBuff::IsSelfBuff(spellID))
-        return guid; // self-only-target aura → cast by the unit itself
-    return 0;
+        return a;
+    Aura::Source::Get(guid, spellID, slot, &a.caster, &a.expirationMs,
+                      &a.durationMs);
+    if (a.caster == 0 && Spell::IsSelfBuff::IsSelfBuff(spellID))
+        a.caster = guid; // self-only-target aura → cast by the unit itself
+    return a;
 }
 
 } // namespace
@@ -271,7 +281,7 @@ bool IsPlayerCast(const uint8_t *unit, int slot) {
     if (spellID == 0)
         return false;
     const uint64_t player = Unit::Identity::PlayerGuid();
-    return player != 0 && EffectiveCaster(UnitGuid(unit), spellID) == player;
+    return player != 0 && Attribute(UnitGuid(unit), spellID, slot).caster == player;
 }
 
 // Applies the PLAYER / !PLAYER caster restriction. `isPlayerCast` is the
@@ -321,12 +331,13 @@ bool MatchesAura(const Match &match, bool isPlayerCast, uint32_t spellID) {
            CcMatches(match.cc, spellID);
 }
 
-// Group-array analog of IsPlayerCast: the group aura carries no caster, so we
-// consult the Aura::Source cache by (guid, spellID). A miss counts as "not the
-// player" (same as IsPlayerCast).
+// Group-array analog of IsPlayerCast: the member has no descriptor, so there is
+// no slot to attribute by and the cache is consulted by (guid, spellID) alone.
+// A miss counts as "not the player" (same as IsPlayerCast).
 bool GroupIsPlayerCast(uint64_t guid, uint32_t spellID) {
     const uint64_t player = Unit::Identity::PlayerGuid();
-    return player != 0 && EffectiveCaster(guid, spellID) == player;
+    return player != 0 &&
+           Attribute(guid, spellID, Aura::Source::SLOT_UNBOUND).caster == player;
 }
 
 int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
@@ -521,10 +532,21 @@ static void BuildTable(void *L, uint32_t spellID, int applications,
 // buff table (gated on `isPlayer`); for everyone else it, the caster, and the
 // applied (caster-modified) duration come from the `Aura::Source` SMSG_SPELL_GO
 // cache when it observed the cast — a miss leaves the modern-truthful defaults
-// (expiration 0, no sourceUnit/GUID).
+// (expiration 0, no sourceUnit/GUID). `slot` is the absolute descriptor slot
+// the aura occupies, which is what attributes it to the right caster when two
+// of them hold the same spell on the unit; `Aura::Source::SLOT_UNBOUND` for the
+// paths with no descriptor to read one from.
+//
+// `known` short-circuits the by-(guid,spell,slot) resolve: the cache-fallback
+// paths already hold the exact entry's attribution (Enumerate copied it out),
+// so they pass it straight through. Re-resolving there would call `Get` a second
+// time and, for an unbound entry sharing its spell with another caster's entry,
+// return a miss — dropping a caster Enumerate already knew. Null for the
+// descriptor / group-array paths, which have no per-entry attribution in hand.
 static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
                          bool isHelpful, int applications, int unitLevel,
-                         bool isPlayer) {
+                         bool isPlayer, int slot,
+                         const Attribution *known = nullptr) {
     double duration = 0.0;
     double expirationTime = 0.0;
     uint64_t casterGuid = 0;
@@ -536,28 +558,34 @@ static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
             expirationTime = PlayerBuffExpirationSeconds(entry);
     }
     if (spellID != 0 && guid != 0) {
-        uint64_t c = 0;
-        uint32_t expMs = 0;
-        uint32_t durMs = 0;
-        if (Aura::Source::Get(guid, spellID, &c, &expMs, &durMs)) {
-            // A cached expiration that already elapsed while the aura is still
-            // present (non-player casters get an underestimated base duration)
-            // is not meaningful — report unknown (0) rather than a negative
-            // remaining time.
-            if (expirationTime == 0.0 && expMs != 0 && !ExpirationElapsed(expMs))
-                expirationTime = static_cast<double>(expMs) * 0.001;
-            if (durMs != 0)
-                duration = static_cast<double>(durMs) * 0.001;
-        }
-        // Caster (sourceGUID/sourceUnit): observed caster, else the self-buff
-        // inference — same resolution the PLAYER filter uses, so a self-buff
-        // both shows a source and matches HELPFUL|PLAYER. Timing stays unknown
-        // when we never saw the cast; only the caster is inferred, and it's
-        // exact.
-        casterGuid = EffectiveCaster(guid, spellID);
+        // Caster (sourceGUID/sourceUnit) and timing resolved together, so a
+        // self-buff both shows a source and matches HELPFUL|PLAYER instead of
+        // the two paths disagreeing.
+        Attribution a = (known != nullptr) ? *known : Attribute(guid, spellID, slot);
+        // Self-buff inference for a pre-resolved entry whose caster the cache
+        // never learned (idempotent on the Attribute() path, which already
+        // applied it — the caster is nonzero there when it matched).
+        if (a.caster == 0 && Spell::IsSelfBuff::IsSelfBuff(spellID))
+            a.caster = guid;
+        // A cached expiration that already elapsed while the aura is still
+        // present (non-player casters get an underestimated base duration)
+        // is not meaningful — report unknown (0) rather than a negative
+        // remaining time.
+        if (expirationTime == 0.0 && a.expirationMs != 0 &&
+            !ExpirationElapsed(a.expirationMs))
+            expirationTime = static_cast<double>(a.expirationMs) * 0.001;
+        if (a.durationMs != 0)
+            duration = static_cast<double>(a.durationMs) * 0.001;
+        casterGuid = a.caster;
     }
     BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
                casterGuid);
+}
+
+// Attribution held directly by an `Aura::Source` cache entry (from `Enumerate`),
+// for the cache-fallback push paths to hand to `PushEnriched` as `known`.
+static Attribution CachedAttribution(const Aura::Source::CachedAura &c) {
+    return {c.casterGuid, c.expirationMs, c.durationMs};
 }
 
 void Push(void *L, const uint8_t *unit, int slot) {
@@ -565,7 +593,7 @@ void Push(void *L, const uint8_t *unit, int slot) {
     const bool isHelpful = slot < Offsets::UNIT_AURA_BUFF_COUNT;
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
     PushEnriched(L, UnitGuid(unit), spellID, isHelpful, ReadStacks(unit, slot),
-                 unitLevel, unit != nullptr && unit == LocalPlayer());
+                 unitLevel, unit != nullptr && unit == LocalPlayer(), slot);
 }
 
 namespace {
@@ -576,12 +604,15 @@ namespace {
 // applied (caster-modified) ms when known, else the Spell.dbc base.
 void PushFromCache(void *L, const uint8_t *unit,
                    const Aura::Source::CachedAura &c, bool isHelpful) {
-    // `PushEnriched` re-reads the same cache entry `c` came from (by
-    // guid+spellID) to fill caster / expiration / applied duration, so the
-    // result is identical to reading `c`'s fields directly. Stacks aren't in
-    // SMSG_SPELL_GO, so `applications` is 1.
+    // `c` already carries this exact instance's caster + timing (Enumerate
+    // copied it out), so hand it to `PushEnriched` as `known` rather than
+    // re-resolving by (guid, spell, slot) — an unbound entry sharing its spell
+    // with another caster's would otherwise resolve to a miss and drop the
+    // caster. Stacks aren't in SMSG_SPELL_GO, so `applications` is 1.
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
-    PushEnriched(L, UnitGuid(unit), c.spellId, isHelpful, 1, unitLevel, false);
+    const Attribution a = CachedAttribution(c);
+    PushEnriched(L, UnitGuid(unit), c.spellId, isHelpful, 1, unitLevel, false,
+                 c.slot, &a);
 }
 
 // Reconciles the `Aura::Source` cache against `unit`'s descriptor: when the
@@ -598,15 +629,9 @@ void ReconcileCache(const uint8_t *unit) {
     if (unit == nullptr)
         return;
     uint32_t present[Offsets::UNIT_AURA_TOTAL];
-    int n = 0;
-    for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot) {
-        const uint32_t id = ReadSpellID(unit, slot);
-        if (id != 0)
-            present[n++] = id;
-    }
-    if (n == 0)
-        return;
-    Aura::Source::EvictAbsent(UnitGuid(unit), present, n);
+    for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot)
+        present[slot] = ReadSpellID(unit, slot);
+    Aura::Source::EvictAbsent(UnitGuid(unit), present);
 }
 
 // True if `unit`'s descriptor currently exposes any visible aura in either
@@ -812,8 +837,9 @@ bool PushNthGroupCacheFallback(void *L, uint64_t guid, const uint16_t *arr,
         if (!GroupFallbackEligible(arr, buf[i], match))
             continue;
         if (++seen == oneBasedIndex) {
+            const Attribution a = CachedAttribution(buf[i]);
             PushEnriched(L, guid, buf[i].spellId, filter == Filter::Helpful, 1,
-                         GroupMemberLevel(guid), false);
+                         GroupMemberLevel(guid), false, buf[i].slot, &a);
             return true;
         }
     }
@@ -832,8 +858,9 @@ void AppendGroupCacheFallbacks(void *L, uint64_t guid, const uint16_t *arr,
         if (!GroupFallbackEligible(arr, buf[i], match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
+        const Attribution a = CachedAttribution(buf[i]);
         PushEnriched(L, guid, buf[i].spellId, filter == Filter::Helpful, 1, level,
-                     false);
+                     false, buf[i].slot, &a);
         Game::Lua::SetTable(L, outerIdx);
     }
 }
@@ -855,8 +882,9 @@ bool PushGroupCacheFallbackMatch(void *L, uint64_t guid, const uint16_t *arr,
         }
         if (!GroupFallbackEligible(arr, buf[i], match))
             continue;
+        const Attribution a = CachedAttribution(buf[i]);
         PushEnriched(L, guid, buf[i].spellId, !harmful, 1, GroupMemberLevel(guid),
-                     false);
+                     false, buf[i].slot, &a);
         return true;
     }
     return false;
@@ -881,7 +909,7 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
         if (++matches == oneBasedIndex) {
             PushEnriched(L, guid, GroupSpellID(arr, slot),
                          filter == Filter::Helpful, 1, GroupMemberLevel(guid),
-                         false);
+                         false, Aura::Source::SLOT_UNBOUND);
             return true;
         }
     }
@@ -912,7 +940,7 @@ bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
         if (!GroupSlotEligible(guid, arr, slot, match))
             continue;
         PushEnriched(L, guid, spellID, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
-                     GroupMemberLevel(guid), false);
+                     GroupMemberLevel(guid), false, Aura::Source::SLOT_UNBOUND);
         return true;
     }
     if (!GroupArrayHasVisibleAura(arr)) {
@@ -953,7 +981,7 @@ bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
         if (!GroupSlotEligible(guid, arr, slot, match))
             continue;
         PushEnriched(L, guid, id, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
-                     GroupMemberLevel(guid), false);
+                     GroupMemberLevel(guid), false, Aura::Source::SLOT_UNBOUND);
         return true;
     }
     if (!GroupArrayHasVisibleAura(arr)) {
@@ -986,7 +1014,8 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, Match match,
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         PushEnriched(L, guid, GroupSpellID(arr, slot),
-                     filter == Filter::Helpful, 1, level, false);
+                     filter == Filter::Helpful, 1, level, false,
+                     Aura::Source::SLOT_UNBOUND);
         Game::Lua::SetTable(L, outerIdx);
     }
     // Empty array (server delta-resend gap): supplement from the cache.
