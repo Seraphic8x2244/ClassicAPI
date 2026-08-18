@@ -471,7 +471,6 @@ build instructions.
   - [`C_Spell.CancelSpellByID(spellID)` / `CancelSpellByName(name)`](#c_spellcancelspellbyidspellid--cancelspellbynamename)
   - [`C_Spell.UnitCastingInfo(unit)` / `C_Spell.CastingInfo()`](#c_spellunitcastinginfounit--c_spellcastinginfo)
   - [`C_Spell.UnitChannelInfo(unit)` / `C_Spell.ChannelInfo()`](#c_spellunitchannelinfounit--c_spellchannelinfo)
-  - [`UnitSpellTargetName(unit)`](#unitspelltargetnameunit)
   - [`C_Spell.GetSpellLevelInfo(spellID)`](#c_spellgetspelllevelinfospellid)
   - [`GetSpellRequiredTargetLevel(spellID)`](#getspellrequiredtargetlevelspellid)
 
@@ -581,6 +580,7 @@ build instructions.
   - [`UnitPowerMissing(unit [, powerType [, unmodified]])`](#unitpowermissingunit--powertype--unmodified)
   - [`UnitPowerType(unit)`](#unitpowertypeunit)
   - [`UnitSpellHaste(unit)`](#unitspellhasteunit)
+  - [`UnitSpellTargetName(unit)`](#unitspelltargetnameunit)
 
 - [UnitAuras](#unitauras)
   - [`C_UnitAuras.GetAuraDataByIndex(unit, index [, filter])`](#c_unitaurasgetauradatabyindexunit-index--filter)
@@ -11901,41 +11901,6 @@ otherwise it falls back to `name`/`displayName`/`textureID`/`spellID` with
 **`nil` times**. The player path is unchanged (full timing). Same
 placeholder fields as `C_Spell.UnitCastingInfo`.
 
-### `UnitSpellTargetName(unit)`
-
-Returns the name of the unit that `unit` is casting or channeling a spell
-**at**, or `nil`. This is a ClassicAPI extension — vanilla 1.12 exposes no
-cast-target accessor.
-
-```
-targetName = UnitSpellTargetName(unit)
-```
-
-```lua
-UnitSpellTargetName("target")   -- "Playername" while the mob casts at you
-UnitSpellTargetName("player")   -- your current cast's target, or nil
-```
-
-Returns `nil` when:
-
-- `unit` is not casting or channeling.
-- The spell has no unit target. This covers a self-cast, a ground-target
-  spell (Blizzard, Rain of Fire), and an item or lock cast.
-- The target's name can't be resolved (an off-screen stranger).
-
-The target comes from the cast's `SMSG_SPELL_START` packet. ClassicAPI
-captures it for the player and for any remote unit whose cast you observed
-since it began. So the same limit as
-[`C_Spell.UnitCastingInfo`](#c_spellunitcastinginfounit--c_spellcastinginfo)
-applies: a remote unit's target is known only while you saw its cast. The
-name is resolved through the object manager (players and creatures), then the
-friends list, then the persistent name cache — the same chain as
-[`UnitNameFromGUID`](#unitnamefromguidguid).
-
-The player's target lands with the confirming packet, about one round-trip
-after the cast starts. So `UnitSpellTargetName("player")` can read `nil` for
-the first part of your own cast, then return the name.
-
 ### `C_Spell.GetSpellLevelInfo(spellID)`
 
 Returns the raw `Spell.dbc` level fields for a spell:
@@ -14213,6 +14178,41 @@ This is the Blizzard-shaped surface over the field nampower exposes raw as
 `GetUnitField(unit, "modCastSpeed")`, so addons can drop that dependency.
 Consumers that need the raw multiplier back can recover it as
 `1 / (1 + UnitSpellHaste(unit) / 100)`. Returns `0` for invalid units.
+
+### `UnitSpellTargetName(unit)`
+
+Returns the name of the unit that `unit` is casting or channeling a spell
+**at**, or `nil`. This is a ClassicAPI extension — vanilla 1.12 exposes no
+cast-target accessor.
+
+```
+targetName = UnitSpellTargetName(unit)
+```
+
+```lua
+UnitSpellTargetName("target")   -- "Playername" while the mob casts at you
+UnitSpellTargetName("player")   -- your current cast's target, or nil
+```
+
+Returns `nil` when:
+
+- `unit` is not casting or channeling.
+- The spell has no unit target. This covers a self-cast, a ground-target
+  spell (Blizzard, Rain of Fire), and an item or lock cast.
+- The target's name can't be resolved (an off-screen stranger).
+
+The target comes from the cast's `SMSG_SPELL_START` packet. ClassicAPI
+captures it for the player and for any remote unit whose cast you observed
+since it began. So the same limit as
+[`C_Spell.UnitCastingInfo`](#c_spellunitcastinginfounit--c_spellcastinginfo)
+applies: a remote unit's target is known only while you saw its cast. The
+name is resolved through the object manager (players and creatures), then the
+friends list, then the persistent name cache — the same chain as
+[`UnitNameFromGUID`](#unitnamefromguidguid).
+
+The player's target lands with the confirming packet, about one round-trip
+after the cast starts. So `UnitSpellTargetName("player")` can read `nil` for
+the first part of your own cast, then return the name.
 
 ## UnitAuras
 
