@@ -35,6 +35,7 @@
 // them, or they appear in guild login spam), they will be.
 
 #include "Game.h"
+#include "Info.h"
 #include "NameCache.h"
 #include "Offsets.h"
 #include "dbc/Names.h"
@@ -49,6 +50,17 @@
 namespace Player::Info {
 
 namespace {
+
+// Bounded, always-terminated copy. Returns true iff a non-empty name landed.
+bool CopyName(char *dst, const char *src, size_t n) {
+    if (dst == nullptr || n == 0)
+        return false;
+    size_t i = 0;
+    for (; src && src[i] && i + 1 < n; ++i)
+        dst[i] = src[i];
+    dst[i] = '\0';
+    return dst[0] != '\0';
+}
 
 // Thin shim: parses a GUID string and splits to hi/lo dwords. Shared parser
 // lives in `Guid::Parse`.
@@ -194,54 +206,14 @@ int __fastcall Script_UnitNameFromGUID(void *L) {
         Game::Lua::Error(L, "Usage: UnitNameFromGUID(\"0x...\")");
         return 0;
     }
-    const char *guidStr = Game::Lua::ToString(L, 1);
     uint32_t hi, lo;
-    if (!ParseGUID(guidStr, hi, lo))
+    if (!ParseGUID(Game::Lua::ToString(L, 1), hi, lo))
         return 0;
-    if (hi == 0 && lo == 0)
+    char name[64];
+    if (!NameFromGuid((static_cast<uint64_t>(hi) << 32) | lo, name, sizeof name))
         return 0;
-
-    // Object-manager path — TYPEMASK_OBJECT (0x01) is permissive; the
-    // name getter at `FUN_OBJECT_GET_NAME` does its own type check and
-    // safely returns the "UNKNOWNOBJECT" sentinel for non-unit
-    // objects (gameobjects etc.), so we just gate on the sentinel
-    // rather than pre-filtering by typemask.
-    using GetName_t = const char *(__thiscall *)(void *obj, int *outFlags);
-
-    void *obj = Object::ByGuid(Offsets::TYPEMASK_OBJECT,
-                               (static_cast<uint64_t>(hi) << 32) | lo, nullptr, 0);
-    if (obj != nullptr) {
-        auto getName = reinterpret_cast<GetName_t>(Offsets::FUN_OBJECT_GET_NAME);
-        const char *name = getName(obj, nullptr);
-        if (name != nullptr && *name != '\0' &&
-            std::strcmp(name, "UNKNOWNOBJECT") != 0 &&
-            std::strcmp(name, "Unknown Being") != 0) {
-            Game::Lua::PushString(L, name);
-            Game::Lua::PushString(L, "");
-            return 2;
-        }
-    }
-
-    // Friends-list fallback: the friend list keeps name + GUID for online
-    // AND offline friends, so a friend resolves even while unsynced and
-    // uncached. It needs no race/sex (this API returns only name + realm).
-    if (const char *fname = FriendList::NameForGuid(
-            (static_cast<uint64_t>(hi) << 32) | lo)) {
-        Game::Lua::PushString(L, fname);
-        Game::Lua::PushString(L, "");
-        return 2;
-    }
-
-    // Object-manager miss / sentinel — fall back to the persistent
-    // NameCache (when enabled). Covers ex-units no longer in the
-    // engine's sync window.
-    const std::string *cachedName = nullptr;
-    const NameCache::Entry *cached = NameCache::Lookup(
-        (static_cast<uint64_t>(hi) << 32) | lo, &cachedName);
-    if (cached == nullptr || cachedName == nullptr || cachedName->empty())
-        return 0;
-    Game::Lua::PushString(L, cachedName->c_str());
-    Game::Lua::PushString(L, "");
+    Game::Lua::PushString(L, name);
+    Game::Lua::PushString(L, ""); // realm — always "" in vanilla
     return 2;
 }
 
@@ -271,6 +243,42 @@ int __fastcall Script_C_PlayerCache_GetPlayerInfoByName(void *L) {
 }
 
 } // namespace
+
+// Resolution order matches vanilla's own `Script_UnitName` (0x00517020):
+//   1. Object manager — TYPEMASK_OBJECT (0x01) is permissive; the name getter
+//      at `FUN_OBJECT_GET_NAME` does its own type check and routes through the
+//      player NameCache for players AND the creature cache for NPCs, so it
+//      resolves both with a single call. It returns the "UNKNOWNOBJECT"
+//      sentinel for non-unit objects (gameobjects etc.), so we gate on that
+//      rather than pre-filtering by typemask.
+//   2. Friends list — keeps name + GUID for online AND offline friends, so a
+//      friend resolves even while unsynced and never seen in chat.
+//   3. Persistent NameCache (when enabled) — ex-units no longer in the sync
+//      window (an ex-target who logged off, a chat name no longer visible).
+bool NameFromGuid(uint64_t guid, char *buf, size_t bufSize) {
+    if (guid == 0 || buf == nullptr || bufSize == 0)
+        return false;
+
+    using GetName_t = const char *(__thiscall *)(void *obj, int *outFlags);
+    if (void *obj = Object::ByGuid(Offsets::TYPEMASK_OBJECT, guid, nullptr, 0)) {
+        auto getName = reinterpret_cast<GetName_t>(Offsets::FUN_OBJECT_GET_NAME);
+        const char *name = getName(obj, nullptr);
+        if (name != nullptr && *name != '\0' &&
+            std::strcmp(name, "UNKNOWNOBJECT") != 0 &&
+            std::strcmp(name, "Unknown Being") != 0)
+            return CopyName(buf, name, bufSize);
+    }
+
+    if (const char *fname = FriendList::NameForGuid(guid))
+        return CopyName(buf, fname, bufSize);
+
+    const std::string *cachedName = nullptr;
+    const NameCache::Entry *cached = NameCache::Lookup(guid, &cachedName);
+    if (cached != nullptr && cachedName != nullptr && !cachedName->empty())
+        return CopyName(buf, cachedName->c_str(), bufSize);
+
+    return false;
+}
 
 static void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("GetPlayerInfoByGUID",

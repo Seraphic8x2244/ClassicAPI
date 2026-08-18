@@ -73,6 +73,7 @@
 #include "dbc/Lookup.h"
 #include "net/PacketDispatch.h"
 #include "net/PacketReader.h"
+#include "player/Info.h"
 #include "spell/Lookup.h"
 #include "spell/CastEvents.h"
 #include "tick/WorldTick.h"
@@ -100,6 +101,13 @@ constexpr uint32_t SPELL_ATTR_TRADESPELL = 0x20;
 // shots (Auto Shot / Shoot, AttributesEx2 bit 0x20) are the one exclusion.
 constexpr uint32_t SPELL_ATTR_RANGED = 0x2;
 
+// SMSG_SPELL_START target block: SpellCastTargets writes a u16 target mask,
+// then a packed GUID for the unit target when this bit is set (1.12 server
+// SpellCastTargets::write). Self / ground / item targets carry no unit GUID —
+// a cast with none reports no target. Per project convention TARGET_* flags
+// stay local (single-use, no drift).
+constexpr uint16_t TARGET_FLAG_UNIT = 0x2;
+
 struct TrackedSpell {
     int spellID; // 0 = not casting / channeling
     int startMs;
@@ -109,6 +117,13 @@ struct TrackedSpell {
 
 TrackedSpell g_cast{0, 0, 0, 0};
 TrackedSpell g_channel{0, 0, 0, 0};
+
+// The unit GUID the player is currently casting / channeling AT (from the
+// SMSG_SPELL_START target block), or 0 for a self / ground / untargeted cast.
+// Reset on each fresh client-side stamp; filled when the confirming packet's
+// target lands. Read by `UnitSpellTargetName` and gated there on g_cast /
+// g_channel being active, so a stale value from a finished cast is never read.
+uint64_t g_castTargetGuid = 0;
 
 // True when g_cast was stamped from SMSG_SPELL_START (a chained same-spell
 // recast the client cast path bailed on) rather than the client-side
@@ -364,6 +379,7 @@ void __fastcall CastStartSet_h(int spellID, int targetState) {
             g_castFromServer = false;  // client-tracked; VAR==0 clears it
             g_castMoveDropped = false; // fresh cast — clear the move-drop latch
             g_channel.spellID = 0;     // a cast supersedes any channel
+            g_castTargetGuid = 0;      // target arrives with the confirming packet
         }
         // dur == 0: instant (no bar) or channel (handled via +0x228 poll);
         // leave g_cast — don't clobber an unrelated active cast.
@@ -398,6 +414,7 @@ int RemoteChannelDurationMs(const uint8_t *rec) {
 
 struct RemoteCast {
     uint64_t casterGuid;
+    uint64_t targetGuid; // unit the caster is casting at, 0 if none
     int spellID;
     int startMs;
     int endMs;
@@ -409,9 +426,10 @@ constexpr int kRemoteCastSlots = 64;
 RemoteCast g_remoteCasts[kRemoteCastSlots];
 int g_remoteCursor = 0;
 
-void StoreRemoteCast(uint64_t caster, int spellID, int startMs, int endMs,
-                     bool isChannel) {
-    const RemoteCast entry{caster, spellID, startMs, endMs, isChannel, true};
+void StoreRemoteCast(uint64_t caster, uint64_t targetGuid, int spellID,
+                     int startMs, int endMs, bool isChannel) {
+    const RemoteCast entry{caster, targetGuid, spellID,
+                           startMs, endMs, isChannel, true};
     // One active cast per unit — replace any existing entry for this caster.
     for (auto &e : g_remoteCasts) {
         if (e.used && e.casterGuid == caster) {
@@ -447,7 +465,8 @@ const RemoteCast *FindRemoteCast(uint64_t caster) {
 // time so genuine chained casts aren't wrongly deduped.
 constexpr int kCastStartDedupMs = 500;
 
-void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
+void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime,
+                      uint64_t targetGuid) {
     if (caster == 0 || spellID == 0)
         return;
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
@@ -469,8 +488,10 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
             // Info) at endMs. (MSG_CHANNEL_START re-stamps moments later with
             // the server's duration — see ChannelStart_h.)
             const int dur = ChannelDurationMs(spellID);
-            if (dur > 0)
+            if (dur > 0) {
                 StampChannel(spellID, now, now + dur);
+                g_castTargetGuid = targetGuid;
+            }
             return;
         }
         // channel && castTime > 0 → a CAST-THEN-CHANNEL spell (Mind Control:
@@ -503,12 +524,14 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
             // pushback already accumulated). A no-op when client and server agree.
             g_cast.endMs =
                 g_cast.startMs + static_cast<int>(castTime) + g_cast.delayMs;
+            g_castTargetGuid = targetGuid; // confirming packet carries the target
             return;
         }
         g_cast = TrackedSpell{spellID, now, now + static_cast<int>(castTime), 0};
         g_castFromServer = true;
         g_castMoveDropped = false; // fresh cast — clear the move-drop latch
         g_channel.spellID = 0;     // a cast supersedes any channel
+        g_castTargetGuid = targetGuid;
         return;
     }
     // A channeled spell with a cast time (Mind Control) is in its CAST phase
@@ -518,7 +541,7 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
     const bool instantChannel = channel && castTime == 0;
     const int endMs = instantChannel ? now + RemoteChannelDurationMs(rec)
                                      : now + static_cast<int>(castTime);
-    StoreRemoteCast(caster, spellID, now, endMs, instantChannel);
+    StoreRemoteCast(caster, targetGuid, spellID, now, endMs, instantChannel);
     // Phase 2 events: START (cast) or CHANNEL_START (channel). Skip pure
     // instants (non-channel, castTime 0 → no bar); their SUCCEEDED still fires
     // from the SPELL_GO hook.
@@ -529,15 +552,23 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
 
 // SMSG_SPELL_START parse. Body (mirrored from nampower's SpellStartHandler):
 // itemGuid(packed), casterGuid(packed), spellId(u32), castFlags(u16),
-// castTime(u32). Runs from the Net::PacketDispatch funnel with the cursor
-// already positioned at the body.
+// castTime(u32), then the SpellCastTargets block: targetMask(u16) and — when
+// TARGET_FLAG_UNIT is set — a packed target GUID (the unit the cast is aimed
+// at; the field that backs UnitSpellTargetName). Runs from the
+// Net::PacketDispatch funnel with the cursor already positioned at the body.
 void ParseSpellStart(Net::CDataStore *packet) {
     Net::ReadPackedGuid(packet); // itemGuid (unused)
     const uint64_t caster = Net::ReadPackedGuid(packet);
     const int spellID = static_cast<int>(Net::Read<uint32_t>(packet));
     Net::Read<uint16_t>(packet); // castFlags (unused)
     const uint32_t castTime = Net::Read<uint32_t>(packet);
-    HandleSpellStart(caster, spellID, castTime);
+    // TARGET_FLAG_UNIT is the first field the server writes after the mask, so
+    // the packed GUID sits immediately after it (SpellCastTargets::write). Other
+    // target kinds (ground coords, item) carry no unit GUID → target is 0.
+    const uint16_t targetMask = Net::Read<uint16_t>(packet);
+    const uint64_t targetGuid =
+        (targetMask & TARGET_FLAG_UNIT) ? Net::ReadPackedGuid(packet) : 0;
+    HandleSpellStart(caster, spellID, castTime, targetGuid);
 }
 
 // SMSG_SPELL_DELAYED — cast pushback. The server only sends it to the
@@ -879,6 +910,49 @@ static int __fastcall Script_UnitChannelInfo(void *L) {
     return PushChannelInfo(L, spellID, 0, 0, /*haveTimes*/ false);
 }
 
+// The unit GUID `caster` is currently casting / channeling AT, or 0 when it
+// isn't casting or the spell has no unit target (self / ground / item). The
+// player comes from g_cast / g_channel + g_castTargetGuid, gated on an active
+// cast so a stale target from a finished cast is never returned; other units
+// come from the SMSG_SPELL_START cache while inside their cast window.
+static uint64_t TargetGuidForCaster(uint64_t caster) {
+    if (caster == 0)
+        return 0;
+    if (caster == Unit::Identity::PlayerGuid()) {
+        const int now = NowMs();
+        const bool casting = g_cast.spellID != 0 && now < g_cast.endMs;
+        const bool channeling =
+            g_channel.spellID != 0 && (g_channel.endMs == 0 || now < g_channel.endMs);
+        return (casting || channeling) ? g_castTargetGuid : 0;
+    }
+    const RemoteCast *rc = FindRemoteCast(caster);
+    return (rc != nullptr && NowMs() < rc->endMs) ? rc->targetGuid : 0;
+}
+
+// `UnitSpellTargetName(unit)` — name of the unit that `unit` is currently
+// casting / channeling a spell at, or nil when `unit` isn't casting, the spell
+// has no unit target (self / ground / item), or the target's name can't be
+// resolved (an off-screen stranger). ClassicAPI extension; the cast's target
+// comes from the SMSG_SPELL_START target block, captured for the player and
+// any remote unit whose cast we've observed.
+static int __fastcall Script_UnitSpellTargetName(void *L) {
+    if (!Game::Lua::IsString(L, 1)) {
+        Game::Lua::Error(L, "Usage: UnitSpellTargetName(\"unit\")");
+        return 0;
+    }
+    const char *token = Game::Lua::ToString(L, 1);
+    const uint64_t caster =
+        (token != nullptr) ? Unit::Identity::GuidForToken(token) : 0;
+    const uint64_t targetGuid = TargetGuidForCaster(caster);
+    char name[64];
+    if (targetGuid == 0 || !Player::Info::NameFromGuid(targetGuid, name, sizeof name)) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    Game::Lua::PushString(L, name);
+    return 1;
+}
+
 static void RegisterLuaFunctions() {
     // Registered under C_Spell rather than as globals to avoid clobbering
     // the global `UnitCastingInfo` / `UnitChannelInfo` names. Addons that
@@ -892,6 +966,9 @@ static void RegisterLuaFunctions() {
     Game::Lua::RegisterTableFunction("C_Spell", "CastingInfo", &Script_CastingInfo);
     Game::Lua::RegisterTableFunction("C_Spell", "UnitChannelInfo", &Script_UnitChannelInfo);
     Game::Lua::RegisterTableFunction("C_Spell", "ChannelInfo", &Script_ChannelInfo);
+    // A novel ClassicAPI name (no addon ships its own), so it's safe as a
+    // global — and it matches the `UnitSpellTargetName(unit)` call shape.
+    Game::Lua::RegisterGlobalFunction("UnitSpellTargetName", &Script_UnitSpellTargetName);
 }
 
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
