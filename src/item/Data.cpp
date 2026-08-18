@@ -17,8 +17,11 @@
 #include "item/Arg.h"
 #include "item/CGItem.h"
 #include "item/Data.h"
+#include "item/ID.h"
 #include "item/Location.h"
 #include "tick/WorldTick.h"
+#include "time/Clock.h"
+#include "unit/Identity.h"
 
 #include <cstdint>
 
@@ -64,21 +67,10 @@ static void FireItemDataLoadResult(int itemID, bool success) {
                                  itemID, success);
 }
 
-// Engine callback for **implicit** cache fills (transparent warmup
-// triggered by our `Script_GetItemInfo` hook or `SetItemByID`). Fires
-// only the broad `GET_ITEM_INFO_RECEIVED` event — `ITEM_DATA_LOAD_RESULT`
-// is reserved for explicit `RequestLoadItemData(ByID)` paths to match
-// modern API semantics.
-//
-// Calling convention is __stdcall, 2 args / 8 bytes — matching the
+// Item-load callbacks are __stdcall, 2 args / 8 bytes — matching the
 // callback at 0x004FDC30 (used by 4 sites in the binary) which ends in
-// `ret 8`. If the engine called us with a different convention, that
-// callback would crash the engine, so stdcall is verified by induction.
-static void __stdcall ItemLoadCallback_Implicit(void *userData, int success) {
-    const auto itemID = static_cast<int>(reinterpret_cast<uintptr_t>(userData));
-    FireGetItemInfoReceived(itemID, success != 0);
-}
-
+// `ret 8`. If the engine called us with a different convention it would
+// crash, so stdcall is verified by induction.
 using ItemLoadCallback_t = void(__stdcall *)(void *userData, int success);
 
 // Calls DBCache_ItemStats_C_GetRecord. With `callback=nullptr`,
@@ -191,10 +183,42 @@ constexpr int kMaxWaitTicks = 1200;
 // One-way latch; see the relog note in `WarmCache`.
 constexpr int kSettleTicks = 60;
 
+// Minimum spacing between outgoing *background* SMSG_ITEM_QUERY_SINGLE
+// requests. A single /reload can make addons (pfQuest / Questie / Bagnon)
+// look up hundreds of items in one frame. Unthrottled, every cache miss
+// fired its own packet at once: a reported burst of 1,325 requests in
+// ~14 ms exhausted a consumer router's NAT table and dropped the
+// machine's internet connectivity (issue #25). 50 ms caps the sustained
+// background rate at 20 requests / second. OnWorldTick is the single
+// point that issues queries, so this one floor governs the bulk path.
+constexpr uint32_t kMinRequestSpacingMs = 50;
+
+// Priority tier. The player's carried items (equipment + backpack +
+// equipped bags) are what the bag / paperdoll UI shows immediately on
+// login; behind the background floor they showed as "unknown" for a
+// second or two while a bulk addon scan drained ahead of them. These
+// are issued on a separate, more generous budget so they resolve fast.
+// The set is bounded (~120 items) and the engine prefetches inventory in
+// parallel, so a small per-tick cap keeps them near-instant without
+// re-introducing a burst: worst case is kOwnedPerTick + 1 packets per
+// frame (~7), far below the flood that broke connectivity.
+constexpr int kOwnedPerTick = 6;
+constexpr int kMaxOwned = 256;
+constexpr uint32_t kOwnedRefreshMs = 1000; // carried set changes slowly
+
 static Pending g_pending[kMaxPending];
 static int g_pendingCount = 0;
 static bool g_settled = false;
 static int g_worldTicks = 0;
+static uint32_t g_lastRequestMs = 0;
+
+// Snapshot of the itemIDs the player currently carries. Rebuilt by a
+// pure-C inventory walk (no Lua stack — safe at world-tick time) at most
+// once per kOwnedRefreshMs, and only while there is queued work.
+static uint32_t g_owned[kMaxOwned];
+static int g_ownedCount = 0;
+static uint32_t g_ownedBuiltMs = 0;
+static bool g_ownedEverBuilt = false;
 
 static int FindPending(uint32_t itemID) {
     for (int i = 0; i < g_pendingCount; ++i) {
@@ -335,69 +359,170 @@ static const Game::HookAutoRegister _hookCacheResponse{
     reinterpret_cast<void *>(&ItemStatsCacheResponse_h),
     reinterpret_cast<void **>(&ItemStatsCacheResponse_o)};
 
-// Escalation + timeout. The hook covers the happy path (engine fills
-// cache → we fire). This tick is only responsible for:
+// --- Owned-item priority set --------------------------------------------
+//
+// Determines which pending items are the player's carried inventory so
+// OnWorldTick can issue them ahead of background bulk lookups. The walk
+// reads the engine's GUID arrays directly (no Lua stack, no GetItemBySlot
+// bank gate) — the same pure-C pattern `item/Count` uses — so it is safe
+// to run at world-tick time.
+
+static void AddOwned(uint32_t itemID) {
+    if (itemID == 0)
+        return;
+    for (int i = 0; i < g_ownedCount; ++i)
+        if (g_owned[i] == itemID)
+            return; // dedup — stacks / duplicates collapse to one entry
+    if (g_ownedCount < kMaxOwned)
+        g_owned[g_ownedCount++] = itemID;
+}
+
+// Collects itemIDs from linear slots [first, last] of an inventory
+// manager's GUID array (invMgr+OFF_INVMGR_GUID_ARRAY). Empty slots hold a
+// zero GUID and are skipped.
+static void CollectOwnedFrom(const uint8_t *invMgr, int first, int last) {
+    if (invMgr == nullptr)
+        return;
+    auto *guids = *reinterpret_cast<const uint64_t *const *>(
+        invMgr + Offsets::OFF_INVMGR_GUID_ARRAY);
+    if (guids == nullptr)
+        return;
+    for (int slot = first; slot <= last; ++slot) {
+        const uint8_t *item = Item::Location::ResolveByGUID(guids[slot]);
+        if (item != nullptr)
+            AddOwned(static_cast<uint32_t>(Item::ID::FromCGItem(item)));
+    }
+}
+
+static void RebuildOwned() {
+    g_ownedCount = 0;
+    auto *invMgr = Unit::Identity::PlayerInventoryManager();
+    if (invMgr != nullptr) {
+        // Player invMgr linear slots 0..38: equipment + bag-slot items +
+        // backpack (bank starts at INVMGR_BANK_MAIN_FIRST_SLOT = 39).
+        CollectOwnedFrom(invMgr, 0,
+                         Offsets::BACKPACK_LINEAR_BASE + Offsets::BACKPACK_NUM_SLOTS - 1);
+        // Contents of each equipped bag (its own invMgr, slot count at +0).
+        for (int bagID = 1; bagID <= 4; ++bagID) {
+            auto *bagInv =
+                static_cast<const uint8_t *>(Item::Location::EquippedBagInventory(bagID));
+            if (bagInv == nullptr)
+                continue;
+            const int count = static_cast<int>(
+                *reinterpret_cast<const uint32_t *>(bagInv + Offsets::OFF_INVMGR_SLOT_COUNT));
+            if (count > 0)
+                CollectOwnedFrom(bagInv, 0, count - 1);
+        }
+    }
+    g_ownedEverBuilt = true;
+}
+
+static bool IsOwned(uint32_t itemID) {
+    for (int i = 0; i < g_ownedCount; ++i)
+        if (g_owned[i] == itemID)
+            return true;
+    return false;
+}
+
+// Escalation + timeout — and the ONE place any item query is issued, so
+// the rate limiter here governs every path into the cache. This tick is
+// responsible for:
 //   1. Latching the startup gate via a tick-count fallback, in case no
 //      engine response arrives early enough to latch it first.
-//   2. Issuing a query for items the engine doesn't naturally prefetch
-//      (e.g. quest rewards) — but only once `g_settled`, so we don't
-//      race the engine's startup-time state machine. The engine sends
-//      the SMSG, the response handler hook fires the event when the
-//      response lands.
+//   2. Issuing queries — for items the engine doesn't naturally prefetch
+//      (quest rewards) AND for every `WarmCache` miss — but only once
+//      `g_settled` (don't race the engine's startup state machine). The
+//      player's carried items go out first, up to `kOwnedPerTick` per
+//      tick; everything else is background, one per `kMinRequestSpacingMs`
+//      (don't flood the network; issue #25). The engine sends the SMSG;
+//      the response handler hook fires the event when the response lands.
 //   3. Firing failure immediately for items the server rejected (the
 //      escalation callback marked them `failed`), and as a last resort
-//      giving up after `kMaxWaitTicks` for items that never resolve at
-//      all (lost query, server silent) — fire failure.
+//      giving up after `kMaxWaitTicks` for items whose query was already
+//      sent but never resolved (lost query, server silent).
 static void OnWorldTick() {
     if (!g_settled && ++g_worldTicks >= kSettleTicks)
         g_settled = true;
+
+    const uint32_t now = Time::Clock::NowMs();
+
+    // Refresh the carried-item set while there is queued work, at most
+    // once per kOwnedRefreshMs — the set changes slowly and the walk is
+    // pointer-chasing, not free.
+    if (g_settled && g_pendingCount > 0 &&
+        (!g_ownedEverBuilt || Time::Clock::Elapsed(g_ownedBuiltMs, now) >= kOwnedRefreshMs)) {
+        RebuildOwned();
+        g_ownedBuiltMs = now;
+    }
+
+    // Two independent issue budgets this tick:
+    //   - owned (carried) items: up to kOwnedPerTick, no spacing floor —
+    //     bounded and player-visible, so they resolve fast.
+    //   - background items: one, and only once the spacing floor elapsed.
+    // World ticks fire once per frame (~10-16 ms), so the background floor
+    // is wall-clock, not a tick count, to bound its rate regardless of FPS.
+    int ownedBudget = g_settled ? kOwnedPerTick : 0;
+    bool bgAvailable =
+        g_settled && Time::Clock::Elapsed(g_lastRequestMs, now) >= kMinRequestSpacingMs;
+
     for (int i = 0; i < g_pendingCount;) {
-        if (!g_pending[i].requestIssued && g_settled) {
-            CacheFetch(g_pending[i].itemID, &ItemLoadCallback_Escalated);
-            g_pending[i].requestIssued = true;
+        if (g_settled && !g_pending[i].requestIssued) {
+            const bool owned = IsOwned(g_pending[i].itemID);
+            bool issue = false;
+            if (owned && ownedBudget > 0) {
+                issue = true;
+                --ownedBudget;
+            } else if (!owned && bgAvailable) {
+                issue = true;
+                bgAvailable = false;
+                g_lastRequestMs = now;
+            }
+            if (issue) {
+                CacheFetch(g_pending[i].itemID, &ItemLoadCallback_Escalated);
+                g_pending[i].requestIssued = true;
+            }
         }
-        // A server rejection (marked by the escalation callback) resolves
-        // the item as failure without waiting out the timeout.
+        // A fill (engine response) or a server rejection (escalation
+        // callback set `failed`) resolves the item either way.
         if (TryCompletePending(i))
             continue;
-        if (g_pending[i].ticksWaiting >= kMaxWaitTicks) {
-            const uint32_t itemID = g_pending[i].itemID;
-            const bool implicit = g_pending[i].implicit;
-            RemovePendingAt(i);
-            FireByTag(itemID, false, implicit);
-            continue;
+        // Only time out items whose query is actually in flight. Counting
+        // from track-time would fire spurious failures for items still
+        // waiting their turn behind the rate limiter.
+        if (g_pending[i].requestIssued) {
+            if (g_pending[i].ticksWaiting >= kMaxWaitTicks) {
+                const uint32_t itemID = g_pending[i].itemID;
+                const bool implicit = g_pending[i].implicit;
+                RemovePendingAt(i);
+                FireByTag(itemID, false, implicit);
+                continue;
+            }
+            ++g_pending[i].ticksWaiting;
         }
-        ++g_pending[i].ticksWaiting;
         ++i;
     }
 }
 
 static const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
-// Public C++ API — see Item/Data.h. Implicit (transparent) warmup
-// path used by the `Script_GetItemInfo` hook and `SetItemByID`. Fires
-// the cache request only if the item isn't already cached; uses the
-// implicit callback which fires only `GET_ITEM_INFO_RECEIVED` (not
-// `ITEM_DATA_LOAD_RESULT`), matching modern semantics for ambient
-// cache fills.
+// Public C++ API — see Item/Data.h. Implicit (transparent) warmup path
+// used by the `Script_GetItemInfo` hook and `SetItemByID`. Routes every
+// call through the pending queue so OnWorldTick's single rate-limited
+// issue point governs all outgoing item queries (issue #25). `Track`
+// resolves an already-cached item for free (a pure lookup, no SMSG) and
+// queues only a genuine miss; the response-handler sweep then fires
+// `GET_ITEM_INFO_RECEIVED` (implicit), never `ITEM_DATA_LOAD_RESULT`.
 void WarmCache(uint32_t itemID) {
-    // Post-settle (steady state): query immediately for lowest latency.
-    // The engine invokes our implicit callback when the data lands.
-    if (g_settled) {
-        CacheFetch(itemID, &ItemLoadCallback_Implicit);
-        return;
-    }
-    // Startup window: do NOT eagerly create the cache entry — that
-    // orphans it (the engine's prefetch skips already-existing entries,
-    // and our SMSG goes into a hole while dispatch isn't ready), leaving
-    // the item permanently nil for the session. This is the exact race
-    // that broke pfQuest/Questie scanning at PLAYER_ENTERING_WORLD. Defer
-    // through the pending set instead; OnWorldTick issues the query once
-    // settled and the response-handler sweep fires GET_ITEM_INFO_RECEIVED.
-    //
-    // NOTE: g_settled is a one-way latch per process. The race this
-    // guards is the initial-login cold-WDB window. On relog the WDB is
-    // already warm so cold-fetch pressure is minimal; we don't re-arm it.
+    // Do NOT issue the query here. Two reasons converge on the queue:
+    //   - Network: a post-settle immediate CacheFetch let a reload-time
+    //     lookup burst fire one SMSG per item in a single frame and flood
+    //     the network (issue #25). The queue's rate limiter prevents it.
+    //   - Startup race: eagerly creating the cache entry before the engine
+    //     settles orphans it — the engine's prefetch skips already-existing
+    //     entries and our SMSG goes into a hole while dispatch isn't ready,
+    //     leaving the item permanently nil. This broke pfQuest/Questie
+    //     scanning at PLAYER_ENTERING_WORLD. OnWorldTick issues only once
+    //     `g_settled`, so deferring here fixes that too.
     Track(itemID, /*implicit=*/true);
 }
 
