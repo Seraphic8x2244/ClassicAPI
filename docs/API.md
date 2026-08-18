@@ -14182,8 +14182,7 @@ Consumers that need the raw multiplier back can recover it as
 ### `UnitSpellTargetName(unit)`
 
 Returns the name of the unit that `unit` is casting or channeling a spell
-**at**, or `nil`. This is a ClassicAPI extension — vanilla 1.12 exposes no
-cast-target accessor.
+**at**, or `nil`.
 
 ```
 targetName = UnitSpellTargetName(unit)
