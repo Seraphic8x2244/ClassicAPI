@@ -465,7 +465,7 @@ build instructions.
   - [`IsHarmfulSpell(spell)` / `IsHelpfulSpell(spell)`](#isharmfulspellspell--ishelpfulspellspell)
   - [`C_Spell.IsSpellHarmful(spellID)` / `C_Spell.IsSpellHelpful(spellID)`](#c_spellisspellharmfulspellid--c_spellisspellhelpfulspellid)
   - [`GetSpellSchool(spellID)`](#getspellschoolspellid)
-  - [`CastSpellNoToggle(name | spellID)`](#castspellnotogglename--spellid)
+  - [`CastSpellNoToggle(name | spellID [, unit])`](#castspellnotogglename--spellid--unit)
   - [`C_Spell.CastAtCursor(spellIDOrName)`](#c_spellcastatcursorspellidorname)
   - [`C_Spell.CastAtUnit(spellIDOrName, unit)`](#c_spellcastatunitspellidorname-unit)
   - [`C_Spell.CancelSpellByID(spellID)` / `CancelSpellByName(name)`](#c_spellcancelspellbyidspellid--cancelspellbynamename)
@@ -11572,7 +11572,7 @@ resistance-aware aura libraries, and damage-meter school tagging.
 Previously addons either maintained hardcoded `spellID → school`
 tables or scanned tooltips for the first-line color tag.
 
-### `CastSpellNoToggle(name | spellID)`
+### `CastSpellNoToggle(name | spellID [, unit])`
 
 Spam-safe variant of `CastSpellByName` that won't toggle off an
 already-active spell. Covers both kinds of vanilla-toggle abilities:
@@ -11624,6 +11624,27 @@ CastSpellNoToggle("Aspect of the Hawk")
 CastSpellNoToggle("Battle Stance")
 ```
 
+#### Optional unit target
+
+A second argument casts the spell at a unit, without changing your
+current target:
+
+```lua
+CastSpellNoToggle("Auto Shot", "focus")       -- Auto Shot on your focus
+CastSpellNoToggle("Shoot", "targettarget")    -- wand your target's target
+```
+
+The unit is any standard token — `"focus"`, `"targettarget"`,
+`"party1"`, `"mouseover"`, a player name, and so on. A unit-target or
+auto-repeat spell fires straight at that unit. A ground-target spell
+lands at the unit's feet. This is the same cast-at-unit path as
+[`C_Spell.CastAtUnit`](#c_spellcastatunitspellidorname-unit).
+
+The toggle gates run first, so the unit only matters when the spell
+actually casts. If the spell is already toggled on, the call stays a
+no-op and ignores the unit. An unknown unit token raises the engine's
+standard "Unknown unit" error, the same as `UnitHealth`.
+
 String input matches case-insensitively and tolerates a trailing
 `(Rank N)` suffix the same way `CastSpellByName` itself does —
 `"Shoot"` and `"Shoot(Rank 1)"` both compare equal to a Shoot that's
@@ -11633,8 +11654,9 @@ Reads `[VAR_ACTIVE_AUTO_REPEAT_SPELL]` (`0x00CEAC30`) for the auto-
 repeat check, and the engine's `FUN_SPELL_IS_TOGGLE_AURA_ACTIVE`
 (`0x004B36F0`) for the aura-active check. Delegates to
 `Script_CastSpellByName` (`0x004B4AB0`) for the actual cast — same
-resolution semantics (rank picking, target rules, etc.) as the
-engine's own global.
+resolution semantics (rank picking, target rules, and more) as the
+engine's own global. With a unit argument, it dispatches through the
+same cast-at-unit path as `C_Spell.CastAtUnit` instead.
 
 Using this from inside a macro action slot? See
 [`CastSpellNoToggle` as a macro cast line](#castspellnotoggle-as-a-macro-cast-line) below for the additional
