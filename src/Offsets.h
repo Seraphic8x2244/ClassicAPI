@@ -5262,6 +5262,13 @@ enum Offsets {
     MOVEFLAG_FALLING = 0x2000,
     MOVEFLAG_FALLING_FAR = 0x4000,
     MOVEFLAG_SWIMMING = 0x200000,
+    // The player-movement bits that drop an in-progress cast — the exact mask
+    // the engine's CheckCast (FUN_006094f0) tests (0x200f). Spell::Cast uses it
+    // to tell a spurious movement drop of a movement-immune cast (grenades)
+    // from a real cancel/interrupt, which happens with the player stationary.
+    MOVEFLAG_MASK_CAST_DROP = MOVEFLAG_FORWARD | MOVEFLAG_BACKWARD |
+                              MOVEFLAG_STRAFE_LEFT | MOVEFLAG_STRAFE_RIGHT |
+                              MOVEFLAG_FALLING, // = 0x200f
 
     // CGPlayer-local pointer to the GameObject the current spell cast
     // is targeting. Holds a heap pointer (high bits in the user-mode
@@ -6068,6 +6075,12 @@ enum Offsets {
     SPELL_ATTR_EX_CHANNELED = 0x4 | 0x40,
     SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x20,
     OFF_SPELL_RECORD_INTERRUPT_FLAGS = 0x54,          // u32 (column 21)
+    // Bit 0 of InterruptFlags: the cast is interrupted when the caster moves.
+    // Both the server (HandleMovementOpcodes → InterruptSpellsWithInterruptFlags,
+    // tortoise-wow) and the client's own CheckCast (FUN_006094f0 gates its MOVING
+    // failure on this bit) use it; thrown items (grenades — e.g. spell 4068)
+    // lack it, so movement must not end their cast. See Spell::Cast (issue #23).
+    SPELL_INTERRUPT_FLAG_MOVEMENT = 0x1,
 
     // Remaining Spell.dbc record fields — the single source of truth for the
     // record layout (byte = column * 4). Modules must use these rather than

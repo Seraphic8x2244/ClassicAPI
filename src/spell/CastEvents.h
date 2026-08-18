@@ -69,6 +69,13 @@ void PollReticle();
 // order matches modern (CHANNEL_START → SUCCEEDED).
 void OnPlayerSucceeded(int spellID);
 
+// True once a SPELL_GO has been seen for the currently-tracked player cast
+// (set by OnPlayerSucceeded, reset when a new cast starts). `Spell::Cast` reads
+// it to tell a completed cast from an interrupted one when deciding whether to
+// keep a movement-immune cast alive through a spurious cast-global drop (the
+// grenade case, issue #23).
+bool PlayerCastSucceeded();
+
 // Fire `UNIT_SPELLCAST_CHANNEL_UPDATE` for the local player. Called from the
 // MSG_CHANNEL_UPDATE hook (`Spell::Cast`) when a pushback re-anchors the
 // player's active channel end. Reuses the tracked channel's castGUID (set by

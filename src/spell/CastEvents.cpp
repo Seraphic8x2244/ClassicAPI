@@ -179,6 +179,17 @@ int g_castGuid = 0;    // castGUID counter value for the tracked cast
 int g_castDelay = 0;   // last-seen accumulated pushback (ms)
 bool g_castSucceeded = false; // SPELL_GO seen for the tracked cast this cast
 
+// UNIT_SPELLCAST_INTERRUPTED de-dup. SpellFailed_h and PollPlayer can both
+// surface the same interrupt: the client fires Spell_C_SpellFailed AND drops the
+// tracked cast (e.g. an Esc cancel of a normal spell, or a movement interrupt).
+// SpellFailed_h stamps here when it fires INTERRUPTED; PollPlayer skips its own
+// for the same spell within the window, so one interrupt = one event. A
+// SuperWoW-style kick clears the cast WITHOUT a Spell_C_SpellFailed, so no stamp
+// is made and PollPlayer still owns those.
+int g_lastInterruptSpell = 0;
+int g_lastInterruptTMs = 0;
+constexpr int kInterruptDedupMs = 1000;
+
 int g_chanSpell = 0;
 int g_chanGuid = 0;
 
@@ -305,6 +316,8 @@ void __fastcall SpellFailed_h(uint32_t spellId, int result, int unk1, int unk2,
         int guid = g_castSpell == sid ? g_castGuid
                    : recentCast       ? g_endedGuid
                                       : NextCastGuid(sid);
+        g_lastInterruptSpell = sid;
+        g_lastInterruptTMs = now;
         Fire(kInterrupted, sid, guid);
         return;
     }
@@ -426,6 +439,8 @@ RemoteEvt *AllocRemoteEvt(uint64_t guid) {
 
 } // namespace
 
+bool PlayerCastSucceeded() { return g_castSucceeded; }
+
 void PollPlayer(int castSpellID, int castStartMs, int castDelayMs,
                 int channelSpellID, int channelStartMs) {
     // ---- Regular cast -------------------------------------------------
@@ -441,7 +456,13 @@ void PollPlayer(int castSpellID, int castStartMs, int castDelayMs,
         // completion's SPELL_GO (and thus OnPlayerSucceeded) has already run
         // a frame earlier, so the flag reliably tells the two apart even
         // though the engine routes both through the same abort choke point.
-        if (!g_castSucceeded)
+        // Skip if SpellFailed_h already fired INTERRUPTED for this cast (de-dup
+        // — see g_lastInterruptSpell); still fire STOP.
+        const bool alreadyInterrupted =
+            g_lastInterruptSpell == g_castSpell &&
+            Time::Clock::Elapsed(static_cast<uint32_t>(g_lastInterruptTMs)) <
+                static_cast<uint32_t>(kInterruptDedupMs);
+        if (!g_castSucceeded && !alreadyInterrupted)
             Fire(kInterrupted, g_castSpell, g_castGuid);
         Fire(kStop, g_castSpell, g_castGuid);
         g_endedSpell = g_castSpell; // for SpellFailed_h's interrupt-vs-fail gate

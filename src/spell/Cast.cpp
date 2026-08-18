@@ -116,6 +116,14 @@ TrackedSpell g_channel{0, 0, 0, 0};
 // the WorldTick VAR==0 clear must not touch them.
 bool g_castFromServer = false;
 
+// Set when a movement-immune cast's engine cast-state was dropped by the player
+// MOVING (issue #23 — grenades). Such a cast isn't really interrupted; the
+// server completes it. So we keep tracking it instead of ending it, and clear
+// it on its SPELL_GO completion (→ STOP, no INTERRUPTED) or a grace past its end.
+// A real cancel / interrupt happens with the player stationary, so it clears
+// normally. Reset on every fresh cast stamp.
+bool g_castMoveDropped = false;
+
 // Armed once the broadcast UNIT_FIELD_CHANNEL_SPELL (+0x228) has been seen to
 // reflect g_channel's spell — the enable for OnWorldTick's channel-stop poll.
 // StampChannel re-arms it (false) on every channel stamp so that field's
@@ -137,6 +145,43 @@ void StampChannel(int spellID, int startMs, int endMs) {
 // uint32 so it matches GetTime()*1000 across the wrap). The reader itself
 // still comes from the one canonical source.
 int NowMs() { return static_cast<int>(Time::Clock::NowMs()); }
+
+// A cast is interrupted by the caster moving only if its Spell.dbc InterruptFlags
+// carry SPELL_INTERRUPT_FLAG_MOVEMENT (the server's HandleMovementOpcodes and the
+// client's own CheckCast both gate the movement interrupt on this bit). Thrown
+// items — grenades — lack it. Unknown spell → assume interruptible (the safe
+// default: never keeps a phantom bar alive).
+bool MovementInterruptible(int spellID) {
+    const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
+    if (rec == nullptr)
+        return true;
+    return (*reinterpret_cast<const uint32_t *>(
+                rec + Offsets::OFF_SPELL_RECORD_INTERRUPT_FLAGS) &
+            Offsets::SPELL_INTERRUPT_FLAG_MOVEMENT) != 0;
+}
+
+// Grace past a move-dropped cast's computed end before we give up on its
+// SPELL_GO and end it anyway (covers the SPELL_GO landing ~1 RTT after the
+// bar's computed end).
+constexpr int kMoveDroppedGraceMs = 750;
+
+// Is the local player moving in a way that drops an in-progress cast? Mirrors
+// the engine's own cast-drop movement test (CheckCast masks the player movement
+// flags with MOVEFLAG_MASK_CAST_DROP). Used to tell a spurious movement drop of
+// a movement-immune cast (grenades) from a real cancel/interrupt (stationary).
+// False (the safe answer — clear normally) when the player object or its
+// movement block is missing.
+bool PlayerMoving() {
+    const uint8_t *player = Unit::Identity::PlayerObject();
+    if (player == nullptr)
+        return false;
+    const uint8_t *move = *reinterpret_cast<const uint8_t *const *>(
+        player + Offsets::OFF_UNIT_MOVEMENT_INFO_PTR);
+    if (move == nullptr)
+        return false;
+    return (*reinterpret_cast<const uint32_t *>(move + Offsets::OFF_MOVEMENT_FLAGS) &
+            Offsets::MOVEFLAG_MASK_CAST_DROP) != 0;
+}
 
 // Pushes an engine-ms timestamp to Lua as an UNSIGNED 32-bit value.
 //
@@ -316,8 +361,9 @@ void __fastcall CastStartSet_h(int spellID, int targetState) {
         if (dur > 0) {
             const int now = NowMs();
             g_cast = TrackedSpell{spellID, now, now + dur, 0};
-            g_castFromServer = false; // client-tracked; VAR==0 clears it
-            g_channel.spellID = 0;    // a cast supersedes any channel
+            g_castFromServer = false;  // client-tracked; VAR==0 clears it
+            g_castMoveDropped = false; // fresh cast — clear the move-drop latch
+            g_channel.spellID = 0;     // a cast supersedes any channel
         }
         // dur == 0: instant (no bar) or channel (handled via +0x228 poll);
         // leave g_cast — don't clobber an unrelated active cast.
@@ -461,7 +507,8 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime) {
         }
         g_cast = TrackedSpell{spellID, now, now + static_cast<int>(castTime), 0};
         g_castFromServer = true;
-        g_channel.spellID = 0; // a cast supersedes any channel
+        g_castMoveDropped = false; // fresh cast — clear the move-drop latch
+        g_channel.spellID = 0;     // a cast supersedes any channel
         return;
     }
     // A channeled spell with a cast time (Mind Control) is in its CAST phase
@@ -570,11 +617,20 @@ void HandleCastAborted(uint64_t guid, int spellID) {
     // caster receives their own broadcast is server-dependent; if it never
     // fires, the endMs self-expiry backstop still applies.
     if (guid == Unit::Identity::PlayerGuid()) {
-        // Cast interrupts are surfaced by PollPlayer (g_castSucceeded). Player
+        // Cast interrupts are surfaced by PollPlayer / SpellFailed_h. Player
         // CHANNELS never fire INTERRUPTED (retail only fires CHANNEL_STOP for
         // them, interrupted or not), so there's nothing to do for a channel.
-        if (g_cast.spellID == spellID)
-            g_cast.spellID = 0;
+        if (g_cast.spellID == spellID) {
+            // A movement-immune cast (grenade) whose cast-state the movement
+            // path just cleared isn't really interrupted — the server completes
+            // it (issue #23). Keep tracking it (mark it move-dropped); OnWorldTick
+            // ends it on its SPELL_GO or a grace past its end. A real cancel /
+            // interrupt happens with the player NOT moving, so it clears here.
+            if (!MovementInterruptible(spellID) && PlayerMoving())
+                g_castMoveDropped = true;
+            else
+                g_cast.spellID = 0;
+        }
         return;
     }
     // Phase 2: remote unit — the poll fires INTERRUPTED + STOP for it.
@@ -668,6 +724,18 @@ void OnWorldTick() {
     if (g_cast.spellID != 0 && !g_castFromServer &&
         *reinterpret_cast<const int *>(Offsets::VAR_CURRENT_CAST_SPELL) == 0)
         g_cast.spellID = 0;
+
+    // End a move-dropped cast (issue #23): the engine cleared its cast-state on
+    // movement, but the server completes it. HandleCastAborted kept it tracked;
+    // end it once its SPELL_GO has landed (→ PollPlayer STOP, no INTERRUPTED) or,
+    // if none ever comes, a grace past its computed end (→ honest INTERRUPTED +
+    // STOP). Gated on the latch, so normal casts are untouched.
+    if (g_cast.spellID != 0 && g_castMoveDropped &&
+        (Spell::CastEvents::PlayerCastSucceeded() ||
+         Time::Clock::Reached(static_cast<uint32_t>(g_cast.endMs + kMoveDroppedGraceMs)))) {
+        g_cast.spellID = 0;
+        g_castMoveDropped = false;
+    }
 
     // A target-selection spell (Disenchant, ground-target AoE, …) stamps
     // g_cast at the green-cursor step, NOT when the cast actually begins:
