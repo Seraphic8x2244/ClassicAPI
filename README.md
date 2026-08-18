@@ -233,6 +233,7 @@ Transparent engine tweaks — no API to call, they just fix a vanilla limitation
 | Tweak | Effect |
 |-------|--------|
 | Tooltip line cap | Lifts `GameTooltip`'s hard 30-line limit to 60 for every `GameTooltipTemplate` frame (`GameTooltip`, `ShoppingTooltip1/2`, `ItemRefTooltip`, AtlasLoot, …). Stat-heavy tooltips and comparison blocks (e.g. pfUI's eqcompare) no longer have their extra lines silently dropped. Done in pure C++ by growing the engine's FontString pool at tooltip-creation time. |
+| Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips, the way 4.3.4+ clients do. Vanilla 1.12 shows the raw escape as literal text instead. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
 
 ## Installation
 
