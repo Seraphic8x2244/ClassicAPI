@@ -47,7 +47,9 @@
 #include "texture/Transform.h"
 
 #include <cmath>
+#include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace Texture::Transform {
 namespace {
@@ -207,11 +209,189 @@ int __fastcall Script_GetRotation(void *L) {
     if (Game::Lua::Type(L, 1) == Game::Lua::TYPE_TABLE)
         tex = Game::Lua::ResolveObject(L, 1);
     if (tex == nullptr) {
-        Game::Lua::Error(L, "Usage: texture:GetRotation()");
+        Game::Lua::Error(L, "Usage: region:GetRotation()");
         return 0;
     }
     Game::Lua::PushNumber(L, Current(tex).angle);
     return 1;
+}
+
+// --- FontString glyph-vert rotation ---------------------------------------
+//
+// A fontstring's glyph verts are re-baked (axis-aligned) by the engine only on a
+// TEXT/layout change — never on an angle change. So SetRotation can't lean on a
+// rebuild the way the texture path leans on the corner-store hook; it must
+// re-rotate the LIVE verts immediately (else a spin rotates once and sticks). We
+// keep an axis-aligned baseline per rotated fontstring and, on each apply,
+// restore→rotate. The baseline is (re)captured on every fresh bake (the
+// DrawBuilder co-hook), so a text change keeps it correct. Keyed by fs (same
+// pointer-reuse caveat as g_xf); cleared on reload.
+std::unordered_map<void *, std::vector<float>> g_fsBaseline;
+
+constexpr int kVertStride = Offsets::TEXT_VERT_STRIDE / 4; // floats per vertex
+
+// Calls fn(float *xy) for every baked glyph vertex across the node's ≤8 font-page
+// buffers (xy[0]=x, xy[1]=y, mutable in place). Returns the vertex count visited.
+template <class Fn>
+int ForEachVert(uint8_t *n, Fn fn) {
+    int visited = 0;
+    for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
+        auto *buf = *reinterpret_cast<uint8_t *const *>(
+            n + Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+        if (buf == nullptr)
+            continue;
+        const int count =
+            *reinterpret_cast<const int *>(buf + Offsets::OFF_TEXT_PAGE_VERT_COUNT);
+        auto *verts = *reinterpret_cast<float *const *>(buf + Offsets::OFF_TEXT_PAGE_VERTS);
+        if (verts == nullptr || count <= 0)
+            continue;
+        for (int i = 0; i < count; ++i) {
+            fn(verts + i * kVertStride);
+            ++visited;
+        }
+    }
+    return visited;
+}
+
+int NodeVertCount(uint8_t *n) {
+    return ForEachVert(n, [](float *) {});
+}
+
+// Rotates every vertex (x, y) about the vertex bounding-box pivot. Same matrix as
+// WriteCorners — positive angle = CCW.
+void RotateVerts(uint8_t *n, float angle, float cxN, float cyN) {
+    float minX = 0, minY = 0, maxX = 0, maxY = 0;
+    bool any = false;
+    ForEachVert(n, [&](float *v) {
+        if (!any) {
+            minX = maxX = v[0];
+            minY = maxY = v[1];
+            any = true;
+        } else {
+            if (v[0] < minX) minX = v[0];
+            else if (v[0] > maxX) maxX = v[0];
+            if (v[1] < minY) minY = v[1];
+            else if (v[1] > maxY) maxY = v[1];
+        }
+    });
+    if (!any)
+        return;
+    const float cx = minX + cxN * (maxX - minX);
+    const float cy = minY + cyN * (maxY - minY);
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    ForEachVert(n, [&](float *v) {
+        const float dx = v[0] - cx;
+        const float dy = v[1] - cy;
+        v[0] = cx + dx * c - dy * s;
+        v[1] = cy + dx * s + dy * c;
+    });
+}
+
+void CaptureBaseline(uint8_t *n, std::vector<float> &out) {
+    out.clear();
+    ForEachVert(n, [&](float *v) {
+        out.push_back(v[0]);
+        out.push_back(v[1]);
+    });
+}
+
+// Restores verts from a baseline. No-op + false when the current vert count no
+// longer matches (a text change re-baked the node) — the DrawBuilder co-hook
+// refreshes the baseline on that fresh bake, so the next apply lines up.
+bool RestoreBaseline(uint8_t *n, const std::vector<float> &base) {
+    if (static_cast<size_t>(NodeVertCount(n)) * 2 != base.size())
+        return false;
+    size_t k = 0;
+    ForEachVert(n, [&](float *v) {
+        v[0] = base[k];
+        v[1] = base[k + 1];
+        k += 2;
+    });
+    return true;
+}
+
+// The CSimpleFontString's current live text node (fs+0xF8 → block, block+8), or
+// null when the text isn't laid out yet.
+void *FontStringNode(void *fs) {
+    void *block = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fs) +
+                                             Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    if (block == nullptr)
+        return nullptr;
+    return *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
+                                      Offsets::OFF_TEXTBLOCK_NODE);
+}
+
+// Applies the fontstring's stored rotation to `node`'s verts, starting from an
+// axis-aligned state. `fresh` = true when the emitter JUST baked the verts (they
+// are axis-aligned → capture the baseline); false for an immediate SetRotation
+// (restore the baseline first). Invariant: g_fsBaseline[fs] holds the
+// axis-aligned verts iff the live verts are rotated.
+void ApplyToNode(void *node, void *fs, bool fresh) {
+    if (node == nullptr || fs == nullptr)
+        return;
+    auto *n = reinterpret_cast<uint8_t *>(node);
+    if (NodeVertCount(n) <= 0)
+        return;
+    auto xit = g_xf.find(fs);
+    const bool rotated = (xit != g_xf.end() && xit->second.angle != 0.0f);
+
+    if (fresh) {
+        if (rotated) {
+            CaptureBaseline(n, g_fsBaseline[fs]);
+            RotateVerts(n, xit->second.angle, xit->second.cxN, xit->second.cyN);
+        } else {
+            g_fsBaseline.erase(fs);
+        }
+        return;
+    }
+    // Immediate (SetRotation): return to axis-aligned, then rotate.
+    auto bit = g_fsBaseline.find(fs);
+    if (bit != g_fsBaseline.end()) {
+        if (!RestoreBaseline(n, bit->second))
+            return; // node re-baked out from under us; the fresh path will fix it
+    } else {
+        CaptureBaseline(n, g_fsBaseline[fs]); // first rotation: current IS axis-aligned
+    }
+    if (rotated) {
+        RotateVerts(n, xit->second.angle, xit->second.cxN, xit->second.cyN);
+    } else {
+        g_fsBaseline.erase(fs); // rotation cleared → leave verts axis-aligned
+    }
+}
+
+// Immediately (re)applies a fontstring's rotation to its live verts — the
+// SetRotation path, so a spin updates every frame with no engine rebuild.
+void ReapplyFontStringRotation(void *fs) {
+    ApplyToNode(FontStringNode(fs), fs, /*fresh=*/false);
+}
+
+// FontString:SetRotation(angle [, cx, cy]). Stores the rotation (shared Xf table)
+// and re-rotates the live verts immediately. Rotation is VISUAL ONLY —
+// GetStringWidth/Height, GetRect, and SetPoint stay axis-aligned, exactly like
+// retail (verified in-game). cx/cy are an optional pivot (normalized within the
+// text's vertex bounds; default centre) — a superset of retail, which is
+// centre-only.
+int __fastcall Script_SetRotationFS(void *L) {
+    void *fs = nullptr;
+    if (Game::Lua::Type(L, 1) == Game::Lua::TYPE_TABLE)
+        fs = Game::Lua::ResolveObject(L, 1);
+    if (fs == nullptr || !Game::Lua::IsNumber(L, 2)) {
+        Game::Lua::Error(L, "Usage: fontstring:SetRotation(angle [, cx, cy])");
+        return 0;
+    }
+    Xf xf = Current(fs);
+    xf.angle = static_cast<float>(Game::Lua::ToNumber(L, 2));
+    if (Game::Lua::IsNumber(L, 3) && Game::Lua::IsNumber(L, 4)) {
+        xf.cxN = static_cast<float>(Game::Lua::ToNumber(L, 3));
+        xf.cyN = static_cast<float>(Game::Lua::ToNumber(L, 4));
+    }
+    if (xf.active())
+        g_xf[fs] = xf;
+    else
+        g_xf.erase(fs); // SetRotation(0) → ReapplyFontStringRotation restores axis-aligned
+    ReapplyFontStringRotation(fs);
+    return 0;
 }
 
 int __fastcall Script_SetVertexOffset(void *L) {
@@ -263,10 +443,21 @@ const Game::Lua::FrameMethodEntry g_methods[] = {
     {"GetVertexOffset", &Script_GetVertexOffset},
 };
 
+// FontString rotation: same GetRotation reader, a fontstring-specific
+// SetRotation (glyph-vert rotation, not corner rewrite). No SetVertexOffset —
+// retail has no fontstring vertex-offset API.
+const Game::Lua::FrameMethodEntry g_fontStringMethods[] = {
+    {"SetRotation", &Script_SetRotationFS},
+    {"GetRotation", &Script_GetRotation},
+};
+
 void RegisterLuaFunctions() {
     Game::Lua::RegisterFrameMethods(
         reinterpret_cast<void *>(Offsets::VAR_TEXTURE_METHOD_REGISTRY), g_methods,
         static_cast<int>(sizeof(g_methods) / sizeof(g_methods[0])));
+    Game::Lua::RegisterFrameMethods(
+        reinterpret_cast<void *>(Offsets::VAR_FONTSTRING_METHOD_REGISTRY), g_fontStringMethods,
+        static_cast<int>(sizeof(g_fontStringMethods) / sizeof(g_fontStringMethods[0])));
     // The UPPER_LEFT_VERTEX / … constants that VertexSlot maps are defined
     // FrameXML-style in the embedded addon's Util/Constants.lua, not here.
 }
@@ -278,6 +469,14 @@ const Game::HookAutoRegister _hookStoreCorners{
 
 } // namespace
 
-void PrepareForReload() { g_xf.clear(); }
+void PrepareForReload() {
+    g_xf.clear();
+    g_fsBaseline.clear();
+}
+
+// Fresh-bake entry (the inline-texture DrawBuilder co-hook): the emitter just
+// baked axis-aligned verts, so capture the baseline and apply the rotation. See
+// ApplyToNode / Transform.h for the timing contract.
+void RotateFontStringNode(void *node, void *fs) { ApplyToNode(node, fs, /*fresh=*/true); }
 
 } // namespace Texture::Transform

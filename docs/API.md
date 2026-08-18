@@ -169,6 +169,7 @@ build instructions.
   - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
   - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
+  - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -4120,6 +4121,36 @@ and the opaque default match the engine.
 local t = frame:CreateTexture(nil, "BACKGROUND")
 t:SetAllPoints(frame)
 t:SetColorTexture(0.1, 0.6, 1.0, 0.8)  -- semi-transparent blue fill
+```
+
+### `fontstring:SetRotation(angle [, cx, cy])`
+
+Rotates a FontString's text by `angle` radians. A positive angle turns the text
+counter-clockwise. Later clients added this method. Vanilla has no text rotation
+of its own.
+
+The optional `cx, cy` set the pivot point, as a normalized position inside the
+text from `0` to `1`. The default pivot is the center, `(0.5, 0.5)`. An angle of
+`0` clears the rotation and returns the text to upright.
+
+The rotation is visual only. `GetStringWidth`, `GetStringHeight`, `GetRect`, and
+`SetPoint` all stay axis-aligned, so a rotated label measures and anchors as if
+it were upright. This matches retail. `GetRotation()` returns the current angle
+in radians.
+
+The method turns the glyph vertices, so the whole text stays visible. It works on
+any FontString, and the rotation holds across text changes, moves, and resizes.
+It costs nothing per frame while the text stays still.
+
+Inline `|T…|t` icons inside a rotated FontString do not turn with the text. They
+draw as separate anchored regions. Plain text rotates correctly.
+
+```lua
+local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+fs:SetPoint("CENTER")
+fs:SetText("Rotate me")
+fs:SetRotation(math.rad(45))     -- 45 degrees counter-clockwise
+fs:SetRotation(0)                -- back to upright
 ```
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`

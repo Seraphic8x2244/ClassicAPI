@@ -6528,6 +6528,23 @@ enum Offsets {
     // node-local pen coords is drawn at (localX + originX, localY + originY).
     OFF_TEXT_NODE_ORIGIN_X = 0x70,
     OFF_TEXT_NODE_ORIGIN_Y = 0x74,
+    // Node → per-font-page vertex buffers. The glyph emitter (FUN_TEXT_EMITTER)
+    // bakes each glyph as a 4-vertex quad into one of up to TEXT_NODE_PAGE_COUNT
+    // font-page buffers hanging off the node; the paint copy-out (FUN_005c8710)
+    // reads them back TRANSLATE-ONLY (gpu.xy = local.xy + node origin). So a
+    // rotation baked into these node-local verts survives to the screen — the
+    // basis for fontstring:SetRotation (Texture::Transform::RotateFontStringNode).
+    //   node + OFF_TEXT_NODE_PAGE_BUFFERS + page*4 -> page buffer ptr (may be 0)
+    //   pageBuf + OFF_TEXT_PAGE_VERT_COUNT          -> int   vertex count
+    //   pageBuf + OFF_TEXT_PAGE_VERTS               -> float* vertex array
+    //   each vertex = 5 floats {x, y, z, u, v}, stride TEXT_VERT_STRIDE bytes.
+    // Cross-verified: the emitter (writes verts here), FUN_005c8710 (copies them
+    // to the GPU buffer), and FUN_005ce0c0 (indexes the page array) all agree.
+    OFF_TEXT_NODE_PAGE_BUFFERS = 0xA0,
+    TEXT_NODE_PAGE_COUNT = 8,
+    OFF_TEXT_PAGE_VERT_COUNT = 0xC,
+    OFF_TEXT_PAGE_VERTS = 0x10,
+    TEXT_VERT_STRIDE = 0x14, // bytes; 5 floats per vertex (x, y, z, u, v)
     // Layout node list — intrusive singly-linked list of render nodes. Head at
     // [layout+0x24]; next = *(node + [layout+0x1c] + 4); the tail sentinel has
     // its low bit set (mirrors the paint pass's own walk in FUN_005c8fe0).

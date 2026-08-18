@@ -63,6 +63,7 @@
 #include "Offsets.h"
 #include "text/InlineTexturePool.h"
 #include "text/PtrProbe.h"
+#include "texture/Transform.h"
 
 #include <windows.h>
 
@@ -228,8 +229,32 @@ constexpr float g_regionCalY = -1.0f;
 // heuristic — comparing the emit text pointer against node+text — failed on
 // pfUI-processed lines and caused both the erased-live-records bug and the
 // ghost-icons-on-reused-nodes bug.)
+// Runtime toggle (default ON — the feature is proven; `_classicapi_InlineTexEnable(false)`
+// still turns it off, and the SEH latch trips it on a flush OR rotation fault).
+// When off, the emitter/tokenizer co-hooks fast-path straight to the originals
+// and the fontstring-rotation apply is skipped.
+bool g_inlineEnabled = true;
+
 void *g_buildNode = nullptr;
 uint32_t g_buildEmitSeq = 0;
+
+// The CSimpleFontString that currently owns `node` (node is its live text node:
+// fs+0xF8 → block, block+8 == node), or nullptr. Read-only — the validation
+// variant with side effects (re-dirtying a stuck-blockless fs) lives inline in
+// FlushLayout; this one just answers "whose verts are these?" for the rotation
+// hook.
+void *OwningFontStringOf(void *node) {
+    auto ow = g_nodeOwner.find(node);
+    if (ow == g_nodeOwner.end() || !LooksReadable(ow->second))
+        return nullptr;
+    auto *of = reinterpret_cast<uint8_t *>(ow->second);
+    void *block = *reinterpret_cast<void **>(of + Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    if (!LooksReadable(block))
+        return nullptr;
+    void *cur = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
+                                           Offsets::OFF_TEXTBLOCK_NODE);
+    return (cur == node) ? ow->second : nullptr;
+}
 
 using DrawBuilder_t = void(__fastcall *)(void *node);
 DrawBuilder_t g_builderOriginal = nullptr;
@@ -239,6 +264,22 @@ void __fastcall DrawBuilder_h(void *node) {
     g_buildEmitSeq = 0;
     g_builderOriginal(node);
     g_buildNode = nullptr;
+    // A fresh vertex bake happened iff the emitter emitted ≥1 line this build
+    // (clean paints re-run the builder but re-emit nothing). Only then are the
+    // node's glyph verts axis-aligned — the sole point it is safe to apply a
+    // fontstring rotation, since rotating already-rotated verts on a clean paint
+    // would make the text spin. Guarded: a bad vert read disables the inline
+    // feature (SEH latch) rather than faulting the client.
+    if (g_inlineEnabled && g_buildEmitSeq > 0) {
+        void *fs = OwningFontStringOf(node);
+        if (fs != nullptr) {
+            __try {
+                Texture::Transform::RotateFontStringNode(node, fs);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                g_inlineEnabled = false;
+            }
+        }
+    }
 }
 
 static const Game::HookAutoRegister _builderHook{Offsets::FUN_TEXT_DRAW_BUILDER,
@@ -323,11 +364,6 @@ float DeriveK(const uint8_t *n, const uint8_t *f, float originX) {
     }
     return g_penPerAnchor;
 }
-
-// Runtime toggle (default ON — the feature is proven; `_classicapi_InlineTexEnable(false)`
-// still turns it off, and the SEH latch trips it on a flush fault). When off, the
-// emitter/tokenizer co-hooks fast-path straight to the originals.
-bool g_inlineEnabled = true;
 
 // True if `t` points into [buf, buf+strlen(buf)] — a TIGHT, exact extent (bounded
 // strlen, cap 0x4000). The editbox's buffers are distinct heap allocations, so an

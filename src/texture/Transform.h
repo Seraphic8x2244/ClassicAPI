@@ -12,11 +12,26 @@
 
 namespace Texture::Transform {
 
-// Clears the per-region corner-transform table (rotation + vertex offsets).
-// Called from DllMain's reload / glue teardown paths: addon textures are
-// destroyed on `/reload` and world→glue, and the region pool reuses their
-// addresses, so a stale entry must not survive to transform a new texture that
+// Drawn-region transform authority. Backs `Texture:SetRotation` /
+// `Texture:SetVertexOffset` (4-corner quad rewrite) AND `FontString:SetRotation`
+// (glyph-vert rotation) — both are LayeredRegions, so the {angle, pivot}
+// storage and the SetRotation/GetRotation Lua surface are shared; only the
+// apply-to-geometry step forks by type.
+
+// Clears the per-region transform table (rotation + vertex offsets). Called
+// from DllMain's reload / glue teardown paths: addon textures and fontstrings
+// are destroyed on `/reload` and world→glue, and the region pool reuses their
+// addresses, so a stale entry must not survive to transform a new region that
 // lands on the same pointer.
 void PrepareForReload();
+
+// Rotates a text render node's freshly-baked glyph vertices in place, by the
+// rotation stored for its owning CSimpleFontString `fs`, around the vertex
+// block's centre. No-op when `fs` has no rotation. MUST be called only right
+// after a fresh vertex bake (verts are axis-aligned then, so rotating is
+// idempotent-by-construction); the inline-texture DrawBuilder co-hook is that
+// point — see src/text/InlineTexture.cpp. Reads the node page-buffer layout in
+// Offsets.h (OFF_TEXT_NODE_PAGE_BUFFERS …).
+void RotateFontStringNode(void *node, void *fs);
 
 } // namespace Texture::Transform
