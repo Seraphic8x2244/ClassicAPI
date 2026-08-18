@@ -58,9 +58,11 @@
 // resolve via ReadModAttr's precedence. Verbs: `target` (with the engine's
 // default-interaction precedence — pending spell / cursor item cast/drop on the
 // unit instead of switching target), `assist`, `focus`, `spell` (reads the
-// `spell` attribute and casts it on the unit via our native C_Spell.CastAtUnit —
-// the unit's GUID goes straight to the cast dispatcher, no target juggling, and
-// ground-target spells land at the unit's feet), `item` (uses the `item`
+// `spell` attribute and casts it: with a `unit` attribute, on that unit via our
+// native C_Spell.CastAtUnit — the unit's GUID goes straight to the cast
+// dispatcher, no target juggling, and ground-target spells land at its feet;
+// with no `unit`, on the current target via the plain CastSpellByName), `item`
+// (uses the `item`
 // attribute — a name/itemID/link via C_Item.UseItemByName with the unit as the
 // use target, or a "bag slot" string like "0 1" via UseContainerItem; the
 // deprecated `bag`/`slot` attributes also work), `macro` (from the
@@ -549,11 +551,18 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         return true;
     }
     if (Ascii::EqualCI(verb, "spell")) {
-        if (!unit) return false;
         char spell[128];
         if (!ReadModAttr(L, fi, prefix, "spell", suffix, spell, sizeof spell))
             return false;
-        Spell::AtUnit::CastByName(spell, unit);
+        // With a `unit`, cast straight at it (GUID → dispatcher, no target
+        // juggling; a ground-target spell lands at its feet). With no `unit`,
+        // fall back to the plain global cast on the current target — a
+        // `type="spell"` button that sets no `unit` attribute (issue #18) now
+        // works like `/cast <spell>` instead of doing nothing.
+        if (unit)
+            Spell::AtUnit::CastByName(spell, unit);
+        else
+            Game::Lua::CallGlobalString(L, "CastSpellByName", spell);
         return true;
     }
     if (Ascii::EqualCI(verb, "item")) {
