@@ -51,6 +51,13 @@ const char *FormatAsString(uint64_t guid, char *buf, std::size_t cap) {
     return buf;
 }
 
+uint32_t CreatureEntry(uint64_t guid) {
+    const Type type = Classify(guid);
+    if (type != Type::Creature && type != Type::Pet)
+        return 0;
+    return static_cast<uint32_t>((guid >> 24) & 0xFFFFFFu);
+}
+
 Type Classify(uint64_t guid) {
     if (guid == 0)
         return Type::Unknown;

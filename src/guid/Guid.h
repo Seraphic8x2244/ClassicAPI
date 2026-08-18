@@ -76,6 +76,14 @@ inline bool IsGameObject(uint64_t guid)    { return Classify(guid) == Type::Game
 inline bool IsDynamicObject(uint64_t guid) { return Classify(guid) == Type::DynamicObject; }
 inline bool IsCorpse(uint64_t guid)        { return Classify(guid) == Type::Corpse; }
 
+// The creature-template / NPC entry ID packed into a creature or pet GUID
+// (bits 24-47). Vanilla puts the per-spawn counter in the low 24 bits and the
+// template entry above it. Returns 0 for any other GUID type (players,
+// gameobjects, items, the 0 sentinel) and when the field itself is 0 — the
+// engine never assigns entry 0, so 0 uniformly means "no creature template".
+// Shared by `C_CreatureInfo.GetCreatureID` and `UnitCreatureID`.
+uint32_t CreatureEntry(uint64_t guid);
+
 // Minimum buffer size for `FormatAsString`'s output — 16 hex digits +
 // the `"0x"` prefix + a NUL terminator.
 constexpr std::size_t STRING_SIZE = 19;

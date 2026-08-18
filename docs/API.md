@@ -557,6 +557,7 @@ build instructions.
   - [`UnitSubName(unit)`](#unitsubnameunit)
   - [`UnitCreatureFamilyID(unit)`](#unitcreaturefamilyidunit)
   - [`UnitCreatureTypeID(unit)`](#unitcreaturetypeidunit)
+  - [`UnitCreatureID(unit)`](#unitcreatureidunit)
   - [`GetUnitSpeed(unit)`](#getunitspeedunit)
   - [`UnitClassBase(unit)`](#unitclassbaseunit)
   - [`UnitRaceBase(unit)`](#unitracebaseunit)
@@ -13529,6 +13530,31 @@ resolver the engine's `UnitCreatureType` uses, which handles every unit kind
 (NPCs via the creature cache, players via their race → Humanoid). Pair with
 [`C_CreatureInfo.GetCreatureTypeInfo`](#c_creatureinfogetcreaturetypeinfocreaturetypeid)
 to get the localized name back from the id.
+
+### `UnitCreatureID(unit)`
+
+Returns the numeric **creature id** — the NPC / creature-template entry — for a
+unit, or `nil`. This is the unit-token twin of
+[`C_CreatureInfo.GetCreatureID`](#c_creatureinfogetcreatureidguid): it does
+`C_CreatureInfo.GetCreatureID(UnitGUID(unit))` for you.
+
+```
+creatureID = UnitCreatureID(unit)
+```
+
+```lua
+/dump UnitCreatureID("target")   -- 1842 for Hogger, nil for a player
+/dump UnitCreatureID("pet")      -- your pet's creature-template id
+```
+
+Vanilla packs the entry id into the unit's GUID (bits 24-47), so this reads it
+straight from the resolved GUID — no creature cache lookup. Returns `nil` for a
+player (a player GUID carries no template), an unresolvable-but-valid token
+(`"target"` with nothing targeted, an empty `"partyN"` slot), and any unit whose
+GUID isn't a creature or pet. Raises a Lua error on a garbage token — the
+standard `UnitX` behavior. Pair with
+[`C_CreatureInfo.GetCreatureInfoByID`](#c_creatureinfogetcreatureinfobyidcreatureid)
+to get the name from the id.
 
 ### `GetUnitSpeed(unit)`
 

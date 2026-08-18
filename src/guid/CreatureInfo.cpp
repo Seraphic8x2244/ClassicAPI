@@ -46,12 +46,9 @@ int __fastcall Script_GetCreatureID(void *L) {
         Game::Lua::PushNil(L);
         return 1;
     }
-    const Type type = Classify(guid);
-    if (type != Type::Creature && type != Type::Pet) {
-        Game::Lua::PushNil(L);
-        return 1;
-    }
-    const uint32_t entryID = static_cast<uint32_t>((guid >> 24) & 0xFFFFFFu);
+    // `Guid::CreatureEntry` handles the creature/pet type gate + the bits-24-47
+    // extraction, and returns 0 for players, non-creature types, and entry 0.
+    const uint32_t entryID = CreatureEntry(guid);
     if (entryID == 0) {
         Game::Lua::PushNil(L);
         return 1;
