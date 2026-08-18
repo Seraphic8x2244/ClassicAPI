@@ -18,6 +18,9 @@
 #include "event/Custom.h"
 #include "nameplate/Walk.h"
 #include "player/NameCache.h"
+#include "text/InlineTexture.h"
+#include "text/InlineTexturePool.h"
+#include "texture/Transform.h"
 
 static Game::FrameScript_Initialize_t FrameScript_Initialize_o = nullptr;
 static Game::LoadScriptFunctions_t LoadScriptFunctions_o = nullptr;
@@ -47,6 +50,16 @@ static bool __fastcall FrameScript_Initialize_h() {
     // cache to clear here.
     NamePlate::Events::PrepareForReload();
 
+    // The reload teardown destroys every icon pool texture, fontstring,
+    // and text node — forget all inline-icon pointers now so nothing
+    // touches them (see InlineTexture.h / InlineTexturePool.h).
+    Text::InlineTexture::PrepareForReload();
+    Text::InlineTexturePool::PrepareForReload();
+
+    // Drop per-region corner transforms (SetRotation / SetVertexOffset) — the
+    // reload destroys every addon texture and the region pool reuses their pointers.
+    Texture::Transform::PrepareForReload();
+
     // Persist the name cache before the engine starts tearing down.
     // This hook fires on both `/reload` and `/logout` (the engine
     // re-initializes Lua state in both cases), giving us a clean
@@ -71,6 +84,13 @@ static void __fastcall LoadScriptFunctions_h() {
 static void __stdcall LoadGlueScriptFunctions_h() {
     LoadGlueScriptFunctions_o();
     Game::RunGlueModuleRegistrations();
+    // World→glue teardown destroyed every world fontstring and text node the
+    // inline-icon maps reference; forget them now that the glue UI is booting.
+    // (Glue→world is covered by FrameScript_Initialize_h; the node-free hook
+    // handles individual deaths, but bulk teardown paths may bypass it.)
+    Text::InlineTexture::PrepareForReload();
+    Text::InlineTexturePool::PrepareForReload();
+    Texture::Transform::PrepareForReload();
 }
 
 // Every Lua-side `frame:RegisterEvent(...)` is a chance to claim a slot

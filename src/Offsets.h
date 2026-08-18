@@ -264,18 +264,204 @@ enum Offsets {
     OFF_REGION_ANCHOR = 0x24,                     // LayoutFrame anchor sub-object (SetPoint `this` / relativeTo base)
     DRAWLAYER_ARTWORK = 2,
     FRAMEPOINT_TOPLEFT = 0,
+    FRAMEPOINT_TOPRIGHT = 2,
     FRAMEPOINT_LEFT = 3,
     FRAMEPOINT_RIGHT = 5,
     FRAMEPOINT_BOTTOMLEFT = 6,
+    FRAMEPOINT_BOTTOMRIGHT = 8,
 
     // FUN_REGION_SET_POINT stores offsets in *internal* coordinates, not
     // pixels. Script_SetPoint converts: `internal = pixel * [0x00832A44] /
     // ([0x00832A4C] * 1024)` (FUN_0041ae60's factor × input ÷
     // (FUN_0041ad70's return × DAT_007ffd68)). Both globals are runtime
     // UI-scale floats; passing raw pixels makes offsets ~1000× too large.
+    // The REVERSE conversion (internal → UI pixels) is what the Script_*
+    // measure getters push: Script_GetStringWidth (0x0079E510) — and our
+    // GetStringHeight backport — compute `px = internal * [0x00832A4C] *
+    // 1024 / [0x00832A44]` (FUN_0041AE40(FUN_0041AD70() × DAT_007FFD68 × v)).
     VAR_UI_COORD_SCALE_MUL = 0x00832A44,   // float numerator
     VAR_UI_COORD_SCALE_DIV = 0x00832A4C,   // float denominator base
     UI_COORD_SCALE_UNIT = 1024,            // DAT_007ffd68
+
+    // CSimpleTexture (`Texture` widget) creation + operate primitives, used by
+    // Text::InlineTexturePool to render inline |T icons as engine-owned,
+    // managed-pool, resident-kept textures (the residency fix — see
+    // docs/InlineTextureResidency.md). Mirrors Script_CreateTexture
+    // (FUN_00773A20) and the Texture frame-method handlers; the sibling of the
+    // CSimpleFontString path above. Same FUN_REGION_POOL_ALLOC / SetPoint /
+    // Show / Hide / SetColor (FUN_FONTSTRING_SET_COLOR) as the FontString pool.
+    VAR_SIMPLETEXTURE_POOL = 0x00CF4CE0,      // &DAT_00cf4ce0 CSimpleTexture free-list pool (`this`)
+    VAR_SIMPLETEXTURE_CLASS_TAG = 0x00846588, // ".?AVCSimpleTexture@@" (alloc debug tag)
+    FUN_SIMPLETEXTURE_CTOR = 0x0076FC40,      // __thiscall(mem, parent, layer, sublayer) -> tex
+    // CSimpleTexture::SetTexture(path). Loads via FUN_00449D90, stores the owned
+    // HTEXTURE at +0xCC (releases the old via DecRef FUN_0041AED0), marks dirty.
+    // `__thiscall(tex, path, 0, *VAR_TEXTURE_BLEND_DEFAULT, 0) -> u32`. The
+    // ownership + engine batched region-draw is the residency win. Same-path
+    // early-out makes pooled reuse cheap.
+    FUN_SIMPLETEXTURE_SET_TEXTURE = 0x00770200,
+    // Script_Texture_SetTexture — the Lua `texture:SetTexture(...)` handler. Its
+    // NUMERIC branch (arg 2 a number) clamps r/g/b/a to [0,1] and fills the
+    // texture with a solid colour via FUN_00770360; its string branch loads a
+    // path through FUN_00770200 above. texture/ColorTexture.cpp aliases this whole
+    // handler as the 7.0 `SetColorTexture` (which IS exactly the numeric form), so
+    // the clamp and opaque-alpha default come straight from the engine.
+    FUN_SCRIPT_TEXTURE_SET_TEXTURE = 0x0079BB40,
+    // CSimpleTexture::SetTexCoord — `__thiscall(tex, float[4])`. Struct field
+    // order is {top, left, bottom, right} = {v0, u0, v1, u1} (verified from the
+    // SetTexCoord handler 0x0079BEB0's Lua-arg → struct mapping). Natural
+    // texcoords (no v-flip — the engine region path is top-left origin).
+    FUN_SIMPLETEXTURE_SET_TEXCOORD = 0x00770410,
+    OFF_SIMPLETEXTURE_HTEXTURE = 0xCC,        // owned HTEXTURE ref (diagnostic)
+    // The four drawn-quad corner POSITIONS: 4 vertices of {x, y, z} floats (0xC
+    // stride), order BL, TL, BR, TR (from FUN_REGION_STORE_CORNERS's writes). The
+    // region draw enqueue FUN_00772fd0 (0x00772fd0) hands region+0xD4 straight to
+    // the vertex batch as FOUR INDEPENDENT vertices — and region+0x104 as the
+    // matching 4 per-corner texcoords — never re-deriving an axis-aligned rect.
+    // So writing ROTATED x,y here draws a rotated quad with NO corner clipping
+    // (unlike 4.3.4's SetRotation, which rotates the texcoords instead). Used by
+    // texture/Rotation.cpp for Texture:SetRotation.
+    OFF_SIMPLETEXTURE_CORNERS = 0xD4,
+    // Region corner-store: `__thiscall(region, const float rect[4])` writes the
+    // drawn quad corners into region+0xD4..+0x100 from the rect ({yA,left,yB,right}
+    // screen px). The renderer only draws a region whose +0xD4 corners are
+    // populated (verified: the draw gate tests region+0xD4 != 0), and normally
+    // SetPoint→layout-resolve calls this. We call it directly to place an icon by
+    // its screen rect with NO anchors (anchoring 100+ textures/frame corrupts the
+    // UI-manager pending-layout list — the FUN_00765650 crash). Co-hooked by
+    // texture/Rotation.cpp, which re-applies rotation right after the engine
+    // restores the axis-aligned corners (layout resolve / SetTexCoord).
+    FUN_REGION_STORE_CORNERS = 0x007705B0,
+    // Texcoord crop applied to a {top,left,bottom,right} screen rect before the
+    // corner-store: shrinks right→left and bottom→top by the region's per-corner
+    // texcoord span (ABS of the +0x104 U/V differences), so a partial SetTexCoord
+    // draws a smaller quad. No-op for full 0..1 texcoords. `__thiscall(region,
+    // float rect[4])`, rect in/out.
+    FUN_REGION_TEXCOORD_CROP = 0x00770570,
+    // Get the region's resolved screen rect: `__thiscall(region+OFF_REGION_ANCHOR,
+    // float out[4]) -> int` (1 = valid, 0 = not laid out yet). Reads the anchor
+    // sub-object's +0x40..+0x4C = {top, left, bottom, right}, gated on the
+    // rect-valid bit [+0x3c]&1. This is the engine's own source for the corner
+    // rect (see FUN_00770410's SetTexCoord path); texture/Rotation.cpp reads it to
+    // rebuild axis-aligned corners before rotating.
+    FUN_REGION_GET_RECT = 0x00768320,
+
+    // __thiscall(region+OFF_REGION_ANCHOR, int flag /*stack; pass 0*/) — force a
+    // synchronous layout resolve: recomputes the region's rect (+0x64) from its
+    // anchors right now, instead of waiting for the render's pending-layout pass.
+    // Verified from Show (FUN_0077FCB0 at 0x0077FCE1: PUSH 0; LEA ECX,[ESI+0x24];
+    // CALL). Load-bearing for tick-time icon placement: SetTexCoord
+    // (FUN_00770410) stores the DRAW CORNERS (+0xD4) from the rect as a side
+    // effect, so without a realize between SetPoint and SetTexCoord the corners
+    // are stored from the STALE pre-anchor rect — the region's rect then resolves
+    // correctly (diagnostics look perfect) but the renderer draws the corners,
+    // which stay zero/stale → invisible icons (and the old build's frozen
+    // top-left icons: corners stored from the zero rect at first apply).
+    FUN_REGION_LAYOUT_REALIZE = 0x00768060,
+
+    // CSimpleFontString::RebuildString — destroys the old gxu text node and
+    // creates the fresh one (FUN_0044d420), storing it at fs+0xF8. Gated on the
+    // fs dirty bit (+0x60 & 1), so it fires on TEXT CHANGES, not per frame.
+    // Co-hooked by Text::InlineTexture to map text node → owning fontstring —
+    // the key that lets inline-icon regions anchor to their owning line
+    // (1.12 chat lines ARE CSimpleFontStrings: the ScrollingMessageFrame's
+    // display refresh FUN_00788750 SetTexts/anchors/shows one fs per visible
+    // line — verified against the 4.3.4 CSimpleEmbeddedTexture model, which
+    // anchors its icon regions to the owning fontstring the same way).
+    FUN_FONTSTRING_REBUILD_STRING = 0x007724A0,
+    // fs+0xF8 holds an HTEXTBLOCK handle, NOT the node itself: FUN_0044d420
+    // allocates the 12-byte handle {vtbl, refcount, node}, FUN_005c1c30 writes
+    // the created text node into handle+8, and FUN_0041af10 AddRefs and returns
+    // the handle. The layout's node (what the emitter/paint hooks see) is
+    // therefore *( *(fs+0xF8) + 8 ).
+    OFF_FONTSTRING_TEXT_BLOCK = 0xF8, // HTEXTBLOCK handle (0 when dirty/empty)
+    // CSimpleFontString live text color: count at +0xB4, array pointer at +0xB8
+    // (uint32 BGRA per slot; slot 0 = the base color, alpha = byte 3; a parallel
+    // per-glyph alpha-byte array hangs off +0xA8/+0xA4). Written by the fs
+    // SetColor (FUN_FONTSTRING_SET_COLOR 0x0077F750: stores the dword at
+    // (*(u32**)(fs+0xB8))[0] + the alpha byte at (*(u8**)(fs+0xA8))[0], then
+    // fires the color-update vmethod +0x20). Count 0 = never colored = default
+    // opaque white. THE CHAT-FADE SIGNAL: the ScrollingMessageFrame's fader
+    // (FUN_00788460, gated on the SetFading flag at smf+0x360; per-line state
+    // {rgba@+4, shown@+8, timeVisibleLeft@+0xC, fadeLeft@+0x10} in the
+    // stride-0x10 line array at smf+0x3A4) animates each visible line
+    // fontstring's alpha byte through this same SetColor every frame, then
+    // hides the fs at fade end. Text::InlineTexturePool mirrors this byte onto
+    // the line's icon regions each tick so inline icons fade with their line
+    // (regions parent to the CHAT FRAME, so the frame's own alpha byte —
+    // frame+0xC8, per Script_GetAlpha 0x00774DC0 — already modulates them via
+    // the engine's parent×region product; only the fs's own component needs
+    // mirroring).
+    OFF_FONTSTRING_COLOR_COUNT = 0xB4,
+    OFF_FONTSTRING_COLOR_ARRAY = 0xB8,
+    OFF_TEXTBLOCK_NODE = 0x8,         // the gxu text node inside the handle
+    // Byte of fontstring state flags; bit 1 = "text block needs rebuild".
+    // RebuildString (0x7724A0) gates on it at entry, releases the old block
+    // (+0xF8 = 0), and only CREATES a new one if the fs rect is resolved —
+    // a SetText during an unresolved rect leaves the fs blockless with the
+    // refcounted zombie node still painting. If the bit is also clear at that
+    // point, nothing ever rebuilds (the stuck-blockless state InlineTexture's
+    // flush nudges by re-setting this bit).
+    OFF_FONTSTRING_DIRTY_FLAGS = 0x60,
+    // The per-node draw builder: walks a node's wrapped lines and calls the
+    // glyph emitter (FUN_TEXT_EMITTER) once per line. Called from the paint's
+    // per-node pre-pass FUN_005cd6a0 (`__thiscall(node)`, no stack args). We
+    // co-hook it to stamp exact BUILD BOUNDARIES for the emitter's first-line
+    // detection — the old `text == node+text-ptr` heuristic silently failed on
+    // pfUI-processed chat lines (stale/preprocessed pointer), leaving inherited
+    // records on reused node addresses (ghost icons) or never clearing them.
+    FUN_TEXT_DRAW_BUILDER = 0x005CDC20,
+    // The gxu text-node FREE: unlinks the node from its layout lists and pushes
+    // it onto the node free list (DAT_00c2b98c) for reuse. Single caller —
+    // FUN_005c1d00, the HTEXTBLOCK handle release (handle vtbl 0x008026e4 dtor
+    // 0x0044D5C0 → 0x005c1d00 → here). This is the choke point where every
+    // text node dies and its address becomes reusable: InlineTexture hooks it
+    // to erase ALL per-node state exactly at death, making stale-record and
+    // stale-owner bugs (ghost icons, orphaned records) structurally impossible
+    // instead of heuristically guarded.
+    FUN_TEXT_NODE_FREE = 0x005CD950,
+    // THE pen↔anchor unit bridge. RebuildString (0x7724A0) multiplies every
+    // text-unit quantity by region+0x7C when crossing into node creation:
+    // nodePos = inset×s + rect corner, nodeFontH = fontPx×s, spacing = +0xF4×s,
+    // and divides rect extents by s for the text-unit width/height. SetParent
+    // (FUN_0076AB10) propagates the parent's +0x7C down the frame tree — it's
+    // the per-object layout/UI-scale chain. This single scalar is what every
+    // earlier "derive the scale" attempt (13/16, ownerH/fontH) was guessing at.
+    OFF_LAYOUT_SCALE = 0x7C,          // float: anchor units per text/pen unit
+    OFF_FONTSTRING_INSET_X = 0x110,   // float, text units (RebuildString posX term)
+    OFF_FONTSTRING_INSET_Y = 0x114,   // float, text units (RebuildString posY term)
+    // CSimpleRegion::SetParentAndLayer — __thiscall(region, parentFrame, layer,
+    // show). Handles old-parent unlink + new-parent region-registry insert +
+    // conditional Show. Verified from the region base ctor FUN_0077F640 and the
+    // message frame's per-line setup (FUN_00788750 calls it with (frame, 2, 1)).
+    FUN_REGION_SET_PARENT_AND_LAYER = 0x0077FD10,
+    OFF_REGION_PARENT = 0x9C,         // region's parent frame ptr (read by Show's gates)
+    OFF_REGION_DESIRED_SHOWN = 0xC4,  // Show (FUN_0077FCB0) NO-OPS unless this is set;
+                                      // engine callers always write it before show/hide
+    OFF_REGION_ACTUALLY_SHOWN = 0xC8, // 1 after Show completed (the realize latch)
+
+    // Owning-frame recovery for the inline-icon pool (the 3.3.5 ownership model,
+    // no overlay). Chat renders through the strata walker FUN_007657d0 →
+    // per-frame draw-list rebuild FUN_00765920 → per-layer render FUN_0076FB00 →
+    // text paint (NOT through the child-frame render FUN_0076B3F0). So
+    // Text::InlineTexturePool co-hooks the two below:
+    //   • FUN_FRAME_DRAWLIST_REBUILD — `__fastcall(frame)`, receives the frame
+    //     cleanly and owns its 5 inline draw layers at frame + OFF_FRAME_LAYER_BASE
+    //     + i*FRAME_LAYER_STRIDE. We record layer→frame so the layer-render hook
+    //     can recover the owning frame with no offset-scan / vtable guessing.
+    //   • FUN_FRAME_LAYER_RENDER — `__fastcall(layer)`, the per-layer paint that
+    //     directly wraps the chat text paint. We bracket the icon pool's pass here
+    //     (the flush runs nested) and look the frame up in the layer→frame map.
+    FUN_FRAME_DRAWLIST_REBUILD = 0x00765920,
+    FUN_FRAME_LAYER_RENDER = 0x0076FB00,
+    OFF_FRAME_LAYER_BASE = 0x1C,   // first inline draw layer, region-relative
+    FRAME_LAYER_STRIDE = 0x30,     // per-layer stride
+    FRAME_LAYER_COUNT = 5,         // BACKGROUND..OVERLAY
+    // Resolved on-screen rect of a region: 4 floats at regionBase+0x64 (=
+    // LayoutFrame+0x40), in GxU SCREEN PIXELS — verified: FUN_00770670 reads
+    // them and FUN_007705b0 stores them straight as GxU vertex corners. Layout is
+    // {yA, left, yB, right} (x at [1]/[3], y at [0]/[2]); use min/max to get
+    // left/top without pinning which y index is top.
+    OFF_REGION_RECT = 0x64,
 
     // "Currently displayed thing" state fields on a GameTooltip frame
     // instance. Each Set* path writes one of these (and zero or two
@@ -737,9 +923,13 @@ enum Offsets {
     // (opcode 0x96 → FUN_0049D560) parses the wire data. Called with
     // the sender GUID as stack args 9 and 10 (lo, hi).
     //
-    // Calling convention: `__fastcall` with 10 args — ECX = sender
-    // name string, EDX = chat type, then 8 stack args ending in the
-    // GUID pair. Called from:
+    // Calling convention: `__fastcall`, `RET 0x28` — ECX = the MESSAGE
+    // text, EDX = chat type, then 10 stack args ending in the sender
+    // GUID pair (lo, hi). (ECX was previously mislabeled "sender name";
+    // verified from the call-site disassembly in FUN_0049D560 —
+    // `MOV ECX,[EBP-0x10]` is the raw/processed message. The message is
+    // copied into one buffer that feeds BOTH the chat frame and the
+    // say/yell bubble spawn FUN_00608AC0.) Called from:
     //   - FUN_0049D560 directly for live (non-throttled) chat
     //   - The pending-chat queue processor (`__AUPENDINGCHAT`) for
     //     messages buffered via FUN_0049CAE0 when the engine flag at
@@ -748,9 +938,11 @@ enum Offsets {
     //     (system notifications, arena team membership changes, etc.)
     //     which pass 0 / NULL for the GUID args
     //
-    // Hooked by `Chat::CurrentGUID::ChatDispatch_h` to capture the
-    // GUID into a global for `GetCurrentChatGUID()` to read during an
-    // addon's CHAT_MSG_* OnEvent.
+    // Hooked (once) by `Chat::Dispatch`, which orchestrates the concerns
+    // sharing this choke point: `Chat::CurrentGUID` (publish the sender
+    // GUID for `GetCurrentChatGUID()`), `Chat::IconFilter` (strip
+    // player-injected `|T` icon spoofs from chat + speech bubbles), and
+    // `Chat::RaidMarkers` (expand `{rtN}`/`{skull}`/… into inline markers).
     FUN_CHAT_DISPATCH = 0x0049A870,
     // Per-player inventory manager lives at this offset on the player object.
     // +0x00 = u32 slot count (OFF_INVMGR_SLOT_COUNT), +0x04 = u64* GUID
@@ -5180,6 +5372,22 @@ enum Offsets {
     // `RET 0x4` (callee cleans the one stack arg).
     FUN_WORLD_TICK = 0x0066FD50,
 
+    // UI render root — the CSimpleTop singleton's (`DAT_00cf0bd8`) per-frame
+    // render callback. Registered at priority 1.0 into the global HLAYER list
+    // (`FUN_00442800`) and drained every frame by the master scene-render pump
+    // `FUN_00442350`; body is just `FUN_00765650(root, ...)` (UI layout pass)
+    // then `FUN_007657d0(root)` (the strata walk that draws every UI frame).
+    // Unlike FUN_WORLD_TICK this fires in BOTH glue and world: the root ctor
+    // `FUN_00764180` runs from the world-init path (`FUN_0048FBF0`) AND the
+    // glue-boot path (`FUN_0046A7B0`), so the UI renders — and this callback
+    // fires — on the login/character-select screens too. This is the tick to
+    // drive UI-object upkeep that must also run on glue (inline-texture icon
+    // regions), where FUN_WORLD_TICK is silent. `__stdcall(void *bounds,
+    // int flag)`, `RET 0x8`; clean PUSH EBP / MOV EBP,ESP prologue (MinHook-
+    // safe). Single caller (the HLAYER drain), quiet render region — not a
+    // known collision target for the other Octo DLLs.
+    FUN_UI_RENDER_ROOT = 0x00764330,
+
     // SMSG_BINDPOINTUPDATE handler. The server sends this packet on
     // initial login (to sync the player's current bind) and again
     // every time the player binds at a new innkeeper. The handler
@@ -6207,4 +6415,242 @@ enum Offsets {
     // `__fastcall(const char *name) -> definition node`, 0 if unregistered
     // (case-insensitive, hashed). See FUN_006ee6f0 in Templates.cpp notes.
     FUN_XML_TEMPLATE_LOOKUP = 0x006EE6F0,
+
+    // --- Inline texture escape (`|Tpath:h:w:...|t`) backport -------------------
+    // See src/text/InlineTexture.cpp and docs/InlineTextureEscapes.md. The
+    // 1.12 text pipeline is a shared `|`-tokenizer feeding per-purpose loops.
+    // Slice 1 injects an inline-texture quad into the text PAINT pass.
+
+    // Text paint pass — flushes each text line's per-font-page glyph vertex
+    // batches to the GPU every frame. `__fastcall(layoutObj)`; gated on
+    // DAT_00c2b9d4. Co-hooked post-original: the flush walks the layout's node
+    // list and queues each recorded inline icon as a fontstring-anchored region
+    // placement (Text::InlineTexturePool). See FUN_005c8fe0.
+    // (The GxU raw-quad primitives this site once drew with — dynamic-VB
+    // lock/write/submit, texture bind/load/force-decode, colorop state — were
+    // removed with the quad render mode; VAs are preserved in
+    // docs/InlineTextureEscapes.md and git history if ever needed again.)
+    FUN_TEXT_PAINT = 0x005C8FE0,
+
+    // Default texture-load blend arg (DAT_00878cf0) — passed to the engine's
+    // SetTexture-by-path (FUN_SIMPLETEXTURE_SET_TEXTURE) exactly as
+    // Script_Texture_SetTexture's own call site does.
+    VAR_TEXTURE_BLEND_DEFAULT = 0x00878CF0,
+
+    // --- Inline-texture positioning (slice 1: measure/emit integration) --------
+    // The 1.12 text pipeline builds a layout as a list of render "nodes" (one
+    // per wrapped line); each node owns per-font-page glyph vertex batches and a
+    // screen origin, and the paint pass (FUN_005c8fe0) walks the layout's node
+    // list drawing each node's batches translated by that origin. See
+    // docs/InlineTextureEscapes.md and the decompiled map in InlineTexture.cpp.
+
+    // Per-line glyph emitter. `__thiscall(node, byte *text, int len, uint
+    // *colorState, float *penXYZ, uint *pageMask, int *linkState)`. Reads the
+    // pen start from penXYZ[0..2] (node-local), appends glyph quads to the
+    // node's page batches, and on return writes the final pen x (node-local,
+    // as a FLOAT via `FSTP dword` — read linkState[4] as float, not int) into
+    // linkState[4]. We co-hook it and, for a line that
+    // contains an inline `|T…|t`, render the plain runs by delegating to the
+    // original per segment (threading the pen via linkState[4]) and record an
+    // icon quad at the pen between segments. Safe to call repeatedly per line
+    // because the batch-clear at its top is gated on OFF_TEXT_NODE_FLAGS bit 3,
+    // which is clear during normal accumulation draw. See FUN_005ccbe0.
+    FUN_TEXT_EMITTER = 0x005CCBE0,
+    // Node flags. Bit 3 (0x08) gates the emitter's per-call batch-clear (set
+    // only in a rebuild mode we don't take); we segment only when it's clear.
+    // Bit 6 (0x40) = EDITABLE text (set on editbox content; verified in-game:
+    // the macro editbox is 0x4D, chat display 0x20D, FontStrings 0x0D). It rides
+    // in the tokenizer's flags argument, so we suppress inline rendering per node
+    // for editboxes — they show raw, editable `|T…|t` markup. This is the 1.12
+    // analog of 4.3.4's per-render texture-disable flag (tokenizer bit 0x1000).
+    OFF_TEXT_NODE_FLAGS = 0x5C,
+    // Node horizontal justify (int): 0 = left, 1 = centre, 2 = right — the draw
+    // builder's encoding. The emitter pre-shifts an inline icon's pen by the
+    // line's justify offset for centre/right nodes (left needs no shift).
+    // Verified in-game against centred/right-aligned text layout.
+    OFF_TEXT_NODE_JUSTIFY = 0x54,
+    // Node screen origin (float x, float y). The paint pass translates the
+    // node's node-local glyph verts by this; an inline icon recorded in
+    // node-local pen coords is drawn at (localX + originX, localY + originY).
+    OFF_TEXT_NODE_ORIGIN_X = 0x70,
+    OFF_TEXT_NODE_ORIGIN_Y = 0x74,
+    // Layout node list — intrusive singly-linked list of render nodes. Head at
+    // [layout+0x24]; next = *(node + [layout+0x1c] + 4); the tail sentinel has
+    // its low bit set (mirrors the paint pass's own walk in FUN_005c8fe0).
+    OFF_TEXT_LAYOUT_NODE_HEAD = 0x24,
+    OFF_TEXT_LAYOUT_NODE_LINK = 0x1C,
+    // Node source-text pointer. The draw builder FUN_005cdc20 starts from
+    // [node+0x48] and advances it per wrapped line, calling the emitter once
+    // per line on the SAME node — so `emitterText == [node+0x48]` identifies
+    // the first wrapped line (used to clear the node's icon list once per
+    // build, then accumulate across lines).
+    OFF_TEXT_NODE_TEXT = 0x48,
+    // Node font-size field (float), fed to the font-height helper.
+    OFF_TEXT_NODE_FONT_SIZE = 0x1C,
+    // Node's gxu font-face pointer. The emitter FUN_005ccbe0 reads *(node+0x44)
+    // as the `this` for every glyph call (glyph lookup FUN_005cabd0, the pair
+    // advance, the native-height getter below).
+    OFF_TEXT_NODE_FONT_FACE = 0x44,
+    // Font pixel-height helper. `__fastcall(int flag /*ecx = (nodeFlags>>7)&1*/,
+    // float fontSize /*stack = [node+0x1c]*/) -> float` (returns in ST0). The
+    // emitter calls it to size glyphs; we call it to derive the text's vertical
+    // extent so an inline icon can be centred on the line independent of font
+    // size. See FUN_005c6fa0.
+    FUN_TEXT_FONT_HEIGHT = 0x005C6FA0,
+    // Font-face NATIVE pixel height getter: `__fastcall(void *fontFace) -> int`
+    // (returns *(font+0x24C)). The emitter's pen scale is
+    // FUN_TEXT_FONT_HEIGHT(...) / (float)nativeHeight — glyph-record advances
+    // are in native-font units and multiply by that scale into pen units.
+    // See FUN_005cae90.
+    FUN_TEXT_FONT_NATIVE_HEIGHT = 0x005CAE90,
+    // Glyph PAIR advance: `__thiscall(void *fontFace, uint prevCh, uint curCh)
+    // -> float (ST0)`, native-font units = baseAdvance(prevCh) +
+    // kern(prevCh,curCh)·[font+0x188], memoized per pair. The emitter computes
+    // this at the top of each token iteration and places the CURRENT glyph at
+    // pen + pairAdvance(prev, cur) — i.e. the pen is LAZY: a glyph's own
+    // advance is only consumed when the NEXT token lands. Consequence
+    // (verified in FUN_005ccbe0's tail): the emitter's final pen write
+    // (linkState[4]) is x(lastGlyph) + pairAdvance(secondLast, last) — the
+    // last pair RE-ADDED as a stand-in for the last glyph's own advance. For a
+    // single-glyph run that stand-in is 0 (no pair ever computed) → the
+    // read-back reports the run as zero-width (the money-string "coin sits on
+    // the lone digit" bug). The emitter co-hook corrects the read-back with
+    // these helpers: pen = linkState[4] − pairAdvance(prev,last)·scale +
+    // baseAdvance(last)·scale. See FUN_005ca2d0.
+    FUN_TEXT_GLYPH_PAIR_ADVANCE = 0x005CA2D0,
+    // The flags&0x10 variant of the pair advance (same shape; the emitter
+    // selects it when node flags bit 4 is set). See FUN_005ca4b0.
+    FUN_TEXT_GLYPH_PAIR_ADVANCE_ALT = 0x005CA4B0,
+    // Glyph BASE advance: `__thiscall(void *fontFace, uint ch) -> float (ST0)`,
+    // native-font units, from the font's glyph cache (present for any glyph the
+    // emitter just drew; returns a default for uncached). This is the pair
+    // advance's first term — the terminal-glyph advance with no following
+    // kern, exactly what an inline icon following the glyph needs. See
+    // FUN_005ca240.
+    FUN_TEXT_GLYPH_BASE_ADVANCE = 0x005CA240,
+    // Hyperlink hit-rect registration (the GXUFONTHYPERLINKINFO append).
+    // `__thiscall(node, float yA, float xLeft, float yB, float xRight,
+    // char *linkStart, uint linkLen, char *escStart, uint escLen)` — 8 stack
+    // dwords, RET 0x20. Appends a 0x20-byte record to the node's link array
+    // (cap +0x7C, count +0x80, data +0x84): the four floats normalized to
+    // screen space ({yA,left,yB,right} — the engine's y-first rect order; the
+    // emitter's |H open writes linkState[2]=xLeft, |h close linkState[4]=
+    // xRight, the draw builder provides the line's yA/yB), then the four link
+    // dwords raw. Called from the emitter's |h close (case 5). The y extent is
+    // the TEXT band (fontH tall) — co-hooked so a link containing a tall
+    // inline icon gets its hit band expanded by the icon's overflow (the
+    // line-height-growth counterpart; without it only the text-high slice of
+    // a 32px emote link was hoverable). See FUN_005cd310.
+    FUN_TEXT_LINK_RECT_ADD = 0x005CD310,
+
+    // Shared `|`-escape tokenizer. `__fastcall(byte *text /*ecx*/, int
+    // *bytesConsumed /*edx*/, uint *colorOut, uint flags, uint *payloadOut) ->
+    // tokenType`. ~11 callers (measure loops, line-fit/wrap, the emitter, the
+    // draw builder). It has NO `|T` case, so `|T` falls through to a literal
+    // `|`. We co-hook it so an inline-texture span (`||T…||t` after the
+    // FontString pipe-doubling, or a clean `|T…|t`) is consumed as ONE
+    // near-zero-width token — this stops every measure/wrap caller from
+    // counting the path text and wrapping early. The emitter detects icons on
+    // its own (and delegates plain segments that never contain `|T`), so the
+    // draw path is unaffected by this hook. See FUN_005c2810.
+    FUN_TEXT_TOKENIZER = 0x005C2810,
+
+    // Shared wrap-stepper dispatcher — lays out ONE wrapped line per call.
+    // `__fastcall(gxuFont /*ecx*/, byte *text /*edx*/, float fontH, float
+    // wrapWidth, int *outBreak, float *outWidth, void *outNext, float indent,
+    // uint flags, byte *p10)`, callee cleans 0x20 (verified RET 0x20; prologue
+    // PUSH EBP; MOV EBP,ESP; FLD [EBP+8] — MinHook-safe). Thin validator that
+    // routes flags&0x80 to the no-wrap path (FUN_005C7300, ignores wrapWidth)
+    // and everything else to the real stepper FUN_005C7470. Its exactly 4
+    // callers are EVERY wrap consumer: the draw builder FUN_005CDC20 (render
+    // breaks), the height measure FUN_005C2070 (GetStringHeight), the
+    // chars-that-fit counter FUN_005C21C0 (ellipsis truncation), and the
+    // break-array computer FUN_005C2430 (behind FUN_00772B60) — so a co-hook
+    // here keeps render, height, truncation, and break arrays mutually
+    // consistent. Text::InlineTexture shrinks the wrapWidth arg by the line's
+    // inline-icon advances (the tokenizer hook hides them from the measure, so
+    // breaks otherwise land as if icons were 0 wide and the emitter's real
+    // advances overflow the right edge). UNITS: each caller passes
+    // fontH/wrapWidth in its OWN space (node text units from the builder, the
+    // small anchor-converted space from the fs-level callers — the path chat
+    // wraps through); a raw-pixel subtraction annihilates the small spaces
+    // (shredded chat lines into 2-glyph fragments on first flight). Convert
+    // px→caller units by (fontH / FUN_TEXT_FONT_HEIGHT(flag, fontH)) — the
+    // engine's own pixel realization of the fontH param (FUN_005C6940's final
+    // scale uses exactly that call), so the ratio is valid in every caller's
+    // space.
+    FUN_TEXT_WRAP_STEPPER = 0x005C7260,
+
+    // Focused-editbox global — holds the CSimpleEditBox that currently has
+    // keyboard focus (the one showing a cursor), or 0 when no input field is
+    // active. Written by EditBox SetFocus (`mov [0xcf4dc8],esi` @0x0077e3f8),
+    // cleared by ClearFocus (FUN_0077e410). We read it (plus the buffer offsets
+    // below) to identify the focused editbox's OWN text and suppress inline-icon
+    // rendering for JUST that text, so the input field shows raw, editable
+    // `|T…|t` markup while everything else (chat history icons/emotes) keeps
+    // rendering. See the editbox vtable at 0x0081c8c0 / FUN_0077e410.
+    VAR_FOCUSED_EDITBOX = 0x00CF4DC8,
+    // CSimpleEditBox text-buffer layout — the editbox lays out and measures its
+    // text IN PLACE from these buffers (no internal copy), so its layout node's
+    // text pointer ([node+0x48]) and every wrapped-line text pointer point INTO
+    // this buffer. Verified from the caret positioner FUN_0077da80: it selects
+    // the buffer via `(*(byte*)(fe+0x318) & 8) ? *(char**)(fe+0x334) :
+    // *(char**)(fe+0x32C)` and measures substrings of it directly with
+    // FUN_00772ae0(fs, feBuf+off, n). Used by Text::InlineTexture to correlate a
+    // node/token to the focused editbox by pointer range.
+    OFF_EDITBOX_BUFFER_SELECT = 0x318, // byte; bit 3 (0x08) picks the masked buffer
+    OFF_EDITBOX_BUFFER = 0x32C,        // char* — normal text buffer
+    OFF_EDITBOX_BUFFER_MASKED = 0x334, // char* — masked/password variant buffer
+    // The editbox's DISPLAY FontString ([fe+0x328], param_1[0xca] in FUN_0077da80).
+    // Its rendered text is a COPY of the input buffer, stored at
+    // *(fs + OFF_FONTSTRING_TEXT) — the editbox lays out (renders) from this copy,
+    // NOT from the input buffer above (which only the caret/measure path reads in
+    // place). So identifying the focused editbox's own render nodes needs BOTH
+    // buffers. Verified: FUN_00771d80 (FontString SetText) writes the copy to
+    // *(this+0xF0) via SStrDup.
+    OFF_EDITBOX_TEXT_FONTSTRING = 0x328, // CSimpleFontString* — the display text object
+
+    // --- FontString measure internals (GetStringWidth icon fix + GetStringHeight) ---
+    // CSimpleFontString::GetStringWidthInternal — `float(__fastcall)(fs /*ecx*/)`,
+    // returns in x87 ST0. Lazily computes into the fs+0xFC cache (ANCHOR units,
+    // sentinel 0.0f = DAT_007ffd74): display-text getter FUN_00771EC0, then measure
+    // core FUN_0044D670(fontHandle fs+0xE0, text, len, fontH*[fs+0x7C], &out,
+    // fs+0x108, 0, flags fs+0x120), then `fs+0xFC = out / [fs+0x7C]`. Exactly 4
+    // callers: Script_GetStringWidth (0x0079E510), GameTooltip auto-size
+    // (0x00530640), the editbox caret positioner (0x0077DE70), and the layout
+    // effective-width vmethod (FUN_00772930 = fs+0x24 vtbl slot +0x1C: explicit
+    // rect width else string width). Prologue PUSH EBX; PUSH ESI; MOV ESI,ECX;
+    // FLD [ESI+0xFC] — MinHook-safe. Co-hooked by Text::InlineTexture to add
+    // inline |T icon advances; the hook must NEVER write the fs+0xFC cache (the
+    // original may serve the cached value — the icon sum is re-added per call).
+    FUN_FONTSTRING_STRING_WIDTH = 0x00772890,
+    // CSimpleFontString::GetStringHeightInternal — `float(__fastcall)(fs)`, ST0.
+    // Wrap-aware: FUN_0044D750 → FUN_005C2070 → wrap engine FUN_005C7260 (the
+    // same wrap math the render uses); returns lines*fontH + (lines-1)*spacing
+    // (spacing = fs+0xF4), cached at fs+0x100 (anchor units, 0.0 sentinel; empty
+    // text → 0). Wrap width = the effective-width vmethod (fs+0x24 vtbl +0x1C).
+    // Used internally by the tooltip auto-size (0x00530640), multi-line editbox
+    // height (0x0077D4D0), and ScrollingMessageFrame line stacking (0x00788750)
+    // — FontString::Metrics only CALLS it (the GetStringHeight backport), no hook.
+    FUN_FONTSTRING_STRING_HEIGHT = 0x007729B0,
+    // Per-fontstring font-height getter, ANCHOR units (reads fs+0xE4; with
+    // mode=1 and measure-flag 0x200 set, re-derives from the gxu font's native
+    // height). ECX = fs, mode on the STACK (`PUSH 0x1; MOV ECX,ESI; CALL` at
+    // 0x007728F4) → declare `__fastcall(fs, edx_unused, int mode)`. The ENGINE's
+    // width path multiplies its return by [fs+0x7C] (the layout UI SCALE) before
+    // handing it to the measure core. Our width hook instead converts it to UI
+    // PIXELS (× the anchor→px push factor VAR_UI_COORD_SCALE_DIV × 1024 /
+    // VAR_UI_COORD_SCALE_MUL, ≈1468) to resolve `:0` auto-sized icon dims —
+    // escape sizes are PIXELS, not fs+0x7C-scaled pen units; dividing a pixel
+    // advance by fs+0x7C (~0.68) inflated a 16px icon to +44k measured px on
+    // first flight. Distinct from FUN_TEXT_FONT_HEIGHT (0x005C6FA0), the
+    // node-level gxu helper.
+    FUN_FONTSTRING_FONT_HEIGHT = 0x007727B0,
+    // FontString measure-flags word (the `flags` arg the measure paths pass to
+    // FUN_0044D670/FUN_0044D750, and the justify field: bits 0-2). The measure
+    // core translates fs-level bits to gxu/tokenizer flags; bit 0x1000 → gxu
+    // bit 0x40 = EDITABLE (OFF_TEXT_NODE_FLAGS bit 6 — the exact bit the
+    // tokenizer co-hook stands down on). The width hook tests it so editbox
+    // carets keep measuring the raw |T markup they render.
+    OFF_FONTSTRING_MEASURE_FLAGS = 0x120,
 };

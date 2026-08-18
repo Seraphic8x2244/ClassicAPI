@@ -79,6 +79,9 @@ build instructions.
   - [`C_CreatureInfo.GetCreatureTypeInfo(creatureTypeID)`](#c_creatureinfogetcreaturetypeinfocreaturetypeid)
   - [`C_CreatureInfo.GetCreatureTypeIDs()`](#c_creatureinfogetcreaturetypeids)
 
+- [Currency](#currency)
+  - [`GetCoinTextureString(amount [, fontHeight])` / `C_CurrencyInfo.GetCoinTextureString(amount [, fontHeight])`](#getcointexturestringamount--fontheight--c_currencyinfogetcointexturestringamount--fontheight)
+
 - [CVar](#cvar)
   - [`C_CVar.GetCVarBool(cvar)`](#c_cvargetcvarboolcvar)
 
@@ -162,6 +165,10 @@ build instructions.
   - [`region:IsDragging()`](#regionisdragging)
   - [`GetMouseFoci()`](#getmousefoci)
   - [`frame:SetShown(shown)`](#framesetshownshown)
+  - [`fontstring:GetStringHeight()`](#fontstringgetstringheight)
+  - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
+  - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
+  - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -2010,6 +2017,35 @@ each round-tripping with
 local ids = C_CreatureInfo.GetCreatureTypeIDs()
 -- { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }
 ```
+
+## Currency
+
+### `GetCoinTextureString(amount [, fontHeight])` / `C_CurrencyInfo.GetCoinTextureString(amount [, fontHeight])`
+
+Returns the amount of copper as a money string with real coin icons —
+for example `"12<gold> 34<silver> 56<copper>"`. The icons are inline
+`|T…|t` markup over vanilla's `UI-MoneyIcons` sprite sheet, rendered by
+ClassicAPI's inline-texture backport. Both names call the same C
+function, like retail.
+
+Only the non-zero denominations appear, in gold → silver → copper
+order. An `amount` of `0` returns `"0<copper>"`. A negative or
+fractional `amount` is clamped to `0` / rounded.
+
+`fontHeight` sets the icon height in UI pixels. When omitted (or `0`),
+each coin sizes itself to the font of the fontstring that shows the
+string — the retail default.
+
+```lua
+GetCoinTextureString(123456)   -- "12g 34s 56c" with coin icons
+GetCoinTextureString(5)        -- "5c" with a copper icon
+GetCoinTextureString(5, 24)    -- same, with a 24px coin
+```
+
+The per-denomination formats are the GlobalStrings
+`GOLD_AMOUNT_TEXTURE` / `SILVER_AMOUNT_TEXTURE` /
+`COPPER_AMOUNT_TEXTURE`, backported in the embedded `!!!ClassicAPI`
+addon's locale layer — a locale can override them.
 
 ## CVar
 
@@ -3881,6 +3917,97 @@ end
 `Show()` if `shown` is truthy, `Hide()` otherwise. Registered for
 frames, textures and fontstrings (each branch has its own engine
 Show/Hide implementation).
+
+### `fontstring:GetStringHeight()`
+
+This is the companion to vanilla's `GetStringWidth`. Blizzard first
+shipped it in 2.3.0. It returns the height of the rendered text, in
+UI pixels. The result includes word wrap: wrapped text measures
+`lines × fontHeight + (lines − 1) × spacing` (the `SetSpacing`
+value). The height comes from the same wrap math that the renderer
+uses. Empty or unset text returns `0`. The vanilla engine already
+computes this height internally, for tooltip auto-sizing and chat
+line stacking. This method only adds the missing Lua binding.
+
+```lua
+local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+f:SetWidth(100)
+f:SetText("a long line that wraps a few times")
+frame:SetHeight(f:GetStringHeight() + 16)  -- size the box to the text
+```
+
+Related: the stock `fontstring:GetStringWidth()` now **includes inline
+`|T…|t` icon widths**. It reports the same advance that the renderer
+reserves for each icon, so the measured width matches the rendered
+width. Editbox text is not adjusted: an editbox shows raw markup, and
+its caret math must measure that same raw text.
+
+### `texture:SetRotation(angle [, cx, cy])`
+
+Rotates a texture by `angle` radians. A positive angle turns the texture
+counter-clockwise. Later clients added this method. Vanilla has no texture
+rotation of its own.
+
+The optional `cx, cy` set the pivot point, as a normalized position inside the
+texture from `0` to `1`. The default pivot is the center, `(0.5, 0.5)`. An
+angle of `0` clears the rotation and returns the texture to upright.
+
+The method turns the four corners of the drawn quad, so the whole texture stays
+visible and no corner is clipped. It works on any texture, including
+engine-created ones. The rotation holds across moves and resizes, and costs
+nothing per frame while it stays still. `GetRotation()` returns the current
+angle in radians.
+
+```lua
+local t = frame:CreateTexture(nil, "ARTWORK")
+t:SetAllPoints(frame)
+t:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+t:SetRotation(math.rad(45))      -- 45 degrees counter-clockwise
+t:SetRotation(math.pi, 0, 1)     -- half turn around the top-left corner
+```
+
+### `texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`
+
+Moves one corner of a texture by `offsetX, offsetY` pixels. `vertexIndex` picks
+the corner: `UPPER_LEFT_VERTEX`, `LOWER_LEFT_VERTEX`, `UPPER_RIGHT_VERTEX`, or
+`LOWER_RIGHT_VERTEX` (values 1 to 4). `+x` is right and `+y` is up. Vanilla has
+no way to move a texture's corners. This backport matches retail.
+
+Moving the corners warps the whole quad, so the texture and its background move
+together. It suits skew, trapezoid, and fake-perspective effects, and waving
+animations. It composes with `SetRotation`: the texture rotates first, then the
+offsets apply. The offset holds across moves, resizes, and `SetTexture`, and
+costs nothing per frame while it stays still.
+
+`GetVertexOffset(vertexIndex)` returns the current `offsetX, offsetY` for a
+corner (`0, 0` if unset).
+
+Note: an offset that turns the quad inside-out — mirroring it past its opposite
+edge — is not drawn. The engine skips a back-facing quad, so keep the warp
+within a non-mirrored shape.
+
+```lua
+local t = frame:CreateTexture(nil, "ARTWORK")
+t:SetAllPoints(frame)
+t:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+-- pull the top two corners inward: a trapezoid (fake perspective)
+t:SetVertexOffset(UPPER_LEFT_VERTEX, 20, 0)
+t:SetVertexOffset(UPPER_RIGHT_VERTEX, -20, 0)
+```
+
+### `texture:SetColorTexture(colorR, colorG, colorB [, a])`
+
+Fills the texture with a solid color. Each channel is `0` to `1`. The alpha `a`
+is optional and defaults to `1` (opaque). This is the 7.0 name for a fill that
+vanilla already does — `SetTexture(r, g, b [, a])` with numbers instead of a
+path. The backport is the same engine call under a second name, so the clamping
+and the opaque default match the engine.
+
+```lua
+local t = frame:CreateTexture(nil, "BACKGROUND")
+t:SetAllPoints(frame)
+t:SetColorTexture(0.1, 0.6, 1.0, 0.8)  -- semi-transparent blue fill
+```
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`
 
