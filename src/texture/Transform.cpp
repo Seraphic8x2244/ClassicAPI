@@ -314,6 +314,13 @@ void RotateVerts(uint8_t *n, float angle, float cxN, float cyN) {
     const float cx = minX + cxN * (maxX - minX);
     const float cy = minY + cyN * (maxY - minY);
     const float c = std::cos(angle);
+    // Standard matrix: a positive angle renders COUNTER-CLOCKWISE on screen —
+    // the retail contract, and matching Texture:SetRotation. Confirmed by direct
+    // comparison against the (retail-verified) texture rotation: both turn the
+    // same way with the same-signed angle. (Node-local glyph-vert Y handedness
+    // is NOT determinable from GetGlyphVerts alone — an earlier negate-the-sine
+    // attempt off that dump inverted the direction; the visual comparison is the
+    // arbiter.)
     const float s = std::sin(angle);
     ForEachVert(n, [&](float *v) {
         const float dx = v[0] - cx;
@@ -497,6 +504,54 @@ int __fastcall Script_GetCorners(void *L) {
     return 12;
 }
 
+// Debug binding (fontstring analog of GetCorners): the first glyph's 4 baked
+// vertex (x,y) positions plus the bounding box of ALL glyph verts. Returns 12
+// numbers: v0x,v0y, v1x,v1y, v2x,v2y, v3x,v3y, minX,minY,maxX,maxY. These are
+// node-local coords — and because the text paint (FUN_005c8710) is
+// TRANSLATE-ONLY, they track the on-screen positions directly (no mirror /
+// inversion to undo, unlike the texture corners). So a 0°-vs-90° dump yields the
+// rotation direction arithmetically. Diagnostic-only.
+int __fastcall Script_GetGlyphVerts(void *L) {
+    void *fs = nullptr;
+    if (Game::Lua::Type(L, 1) == Game::Lua::TYPE_TABLE)
+        fs = Game::Lua::ResolveObject(L, 1);
+    if (fs == nullptr) {
+        Game::Lua::Error(L, "Usage: fontstring:GetGlyphVerts()");
+        return 0;
+    }
+    float first[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int got = 0;
+    float minX = 0, minY = 0, maxX = 0, maxY = 0;
+    bool any = false;
+    void *node = FontStringNode(fs);
+    if (node != nullptr) {
+        ForEachVert(reinterpret_cast<uint8_t *>(node), [&](float *v) {
+            if (got < 4) {
+                first[got * 2 + 0] = v[0];
+                first[got * 2 + 1] = v[1];
+                ++got;
+            }
+            if (!any) {
+                minX = maxX = v[0];
+                minY = maxY = v[1];
+                any = true;
+            } else {
+                if (v[0] < minX) minX = v[0];
+                else if (v[0] > maxX) maxX = v[0];
+                if (v[1] < minY) minY = v[1];
+                else if (v[1] > maxY) maxY = v[1];
+            }
+        });
+    }
+    for (int i = 0; i < 8; ++i)
+        Game::Lua::PushNumber(L, first[i]);
+    Game::Lua::PushNumber(L, minX);
+    Game::Lua::PushNumber(L, minY);
+    Game::Lua::PushNumber(L, maxX);
+    Game::Lua::PushNumber(L, maxY);
+    return 12;
+}
+
 const Game::Lua::FrameMethodEntry g_methods[] = {
     {"SetRotation", &Script_SetRotation},
     {"GetRotation", &Script_GetRotation},
@@ -511,6 +566,7 @@ const Game::Lua::FrameMethodEntry g_methods[] = {
 const Game::Lua::FrameMethodEntry g_fontStringMethods[] = {
     {"SetRotation", &Script_SetRotationFS},
     {"GetRotation", &Script_GetRotation},
+    {"GetGlyphVerts", &Script_GetGlyphVerts},
 };
 
 void RegisterLuaFunctions() {
