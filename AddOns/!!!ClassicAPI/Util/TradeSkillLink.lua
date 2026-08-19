@@ -754,8 +754,8 @@ local function ShowTradeSkillLink(link, text)
 	frame.bar:SetMinMaxValues(0, (max and max > 0) and max or 1);
 	frame.bar:SetValue(cur or 0);
 	frame.barName:SetText(prof);
-	frame.barRank:SetText(string.format("%d/%d", cur or 0, max or 0));
-	frame.summary:SetText(string.format("%d of %d recipes known", known, total));
+	frame.barRank:SetFormattedText("%d/%d", cur or 0, max or 0);
+	frame.summary:SetFormattedText("%d of %d recipes known", known, total);
 	frame.recipes = knownList;
 	frame.subclassFilter = nil;
 
