@@ -294,17 +294,20 @@ then adds `SumIconAdvances(text) / K` when two gates pass:
 - The fs is not an editbox: `fs+0x120 & 0x1000` is clear (the fs-level bit
   `FUN_0044D670` translates into the gxu editbox flag 0x40).
 
-`K = [0x832A4C] × 1024 / [0x832A44]` (≈1468) is the anchor→pixel push factor
-— the same conversion `Script_GetStringWidth` applies in reverse when it
-pushes. (This is NOT the placement K from Current design: here the icon sum is
-built from a fontH that was converted with the same factor, so the units
-cancel exactly — the factor's absolute value never matters. The placement path
-has no such cancellation and needs the true raster÷anchorExtent conversion.)
-The per-icon advance comes from `IconAdvancePen`, the **same helper**
-the emitter reserves with (width + 1.5×pad + positive offsetX) — so the
-measured width matches the rendered width by construction. One documented
-gap: this fs-level path can't cheaply resolve the gxu face, so it passes
-outline ink 0 — outlined icon-bearing text measures 2–4px short per icon.
+The icon sum is computed in TRUE PEN PX — the exact numbers the emitter
+reserves — and bridged into the getter's return space by the font height
+known in both spaces: `sumPen × (fontHInt / fontHPen)`. `ResolveFsPenFont`
+replicates the render chain: `fontHPen = round((fontHInt × fs+0x7C, floored
+at [0x801628]/rasterY) × rasterY)` (the rebuild's node fontSize + the node
+ctor's min clamp + the emitter's own height helper), and the outline ink
+resolves through `face = [[fs+0xE0]+0x20]` — the same object the node stores
+at +0x44. fs-built nodes are always in snap mode (no fs-flag maps to node
+bit 7), so the snap-truncated advances are exact. The per-icon advance comes
+from `IconAdvancePen`, the **same helper** the emitter reserves with — so the
+measured width matches the rendered width by construction, outline ink and
+pixel snapping included. (An earlier bridge used the SetPoint push factor
+`div×1024/mul ≈ 1468` as the intermediate — the units cancelled for `:0`
+icons, but it couldn't express the truncation or the ink.)
 
 Unit trap (hit on first flight): escape sizes are UI PIXELS. Do NOT divide
 the icon sum by `fs+0x7C` — that field is the layout UI *scale* (~0.68–1.0).

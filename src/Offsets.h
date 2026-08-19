@@ -369,9 +369,20 @@ enum Offsets {
     // The engine's outline ink allowance, .rdata float constants (4.0 / 2.0
     // pen px total, i.e. ~2 / ~1 px per side) — the exact values the emitter
     // adds to line height for bit 3 / bit 0 outlined faces. Read live so we
-    // stay bit-identical with the engine's own compensation.
+    // stay bit-identical with the engine's own compensation. The 2.0 constant
+    // double-duties as the MINIMUM font size numerator in the node ctor
+    // (FUN_005cd6d0 / FUN_005ccb80: fontSize floored at [0x801628]/rasterY =
+    // 2 pen px).
     FLOAT_OUTLINE_EXTRA_THICK = 0x0080306C,
     FLOAT_OUTLINE_EXTRA_THIN = 0x00801628,
+    // FontString → gxu face resolution, for fs-level (measure-hook) callers
+    // that need the face the RENDER will use. The rebuild (FUN_007724a0)
+    // passes [fs+0xE0] (the font HANDLE) to the block creator FUN_0044d420,
+    // which hands [handle+0x20] to FUN_005c1c30 → FUN_005cd6d0, which stores
+    // it at node+0x44 — the emitter's face (`this` for every glyph call, and
+    // the +0x180 outline-flags carrier). So face = [[fs+0xE0]+0x20].
+    OFF_FONTSTRING_FONT_HANDLE = 0xE0,
+    OFF_FONT_HANDLE_FACE = 0x20,
 
     // CSimpleTexture (`Texture` widget) creation + operate primitives, used by
     // Text::InlineTexturePool to render inline |T icons as engine-owned,

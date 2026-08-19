@@ -607,18 +607,28 @@ float OutlineInkPen(const void *fontFace) {
 
 // `outlineInk` is OutlineInkPen for the line's face — half of it leads, half
 // trails, keeping the icon clear of outlined neighbours' ink on both sides.
-float IconAdvancePen(const IconDesc &d, float fontHPen, float outlineInk) {
+// `snap` truncates the advance to whole pen px, mirroring the engine's own
+// per-glyph __ftol (FUN_005CCBE0, node bit-7 clear). Native glyphs always sit
+// on INTEGER pen pixels — rounded origin (FUN_005cdf70) + truncated advances —
+// so a fractional icon advance shifted every glyph AFTER an icon onto
+// half-pixel positions: bilinear-filtered, fuzzy/ghosted post-icon text, with
+// visibility depending on the machine's filtering config (the "artifacting
+// only on the text after the icon" report).
+float IconAdvancePen(const IconDesc &d, float fontHPen, float outlineInk, bool snap) {
     const float baseH = (d.height > 0.0f) ? d.height : fontHPen;
     const float baseW = (d.width > 0.0f) ? d.width : baseH;
     const float w = baseW * g_sizeScale;
     const float offX = d.offsetX * g_sizeScale;
-    return w + 1.5f * (fontHPen * g_iconPadFrac) + outlineInk + (offX > 0.0f ? offX : 0.0f);
+    float adv = w + 1.5f * (fontHPen * g_iconPadFrac) + outlineInk + (offX > 0.0f ? offX : 0.0f);
+    if (snap)
+        adv = static_cast<float>(static_cast<int>(adv));
+    return adv;
 }
 
 // Sum of IconAdvancePen over every well-formed `|T…|t` (or sanitizer-doubled
 // `||T…||t`) span in [text, text+len). Malformed/unterminated spans contribute
 // nothing — mirroring the emitter, which renders them as plain text.
-float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlineInk) {
+float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlineInk, bool snap) {
     float sum = 0.0f;
     int i = 0;
     while (i < len) {
@@ -639,7 +649,7 @@ float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlin
         IconDesc d;
         if (ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
                       ce - (static_cast<size_t>(i) + ml), d))
-            sum += IconAdvancePen(d, fontHPen, outlineInk);
+            sum += IconAdvancePen(d, fontHPen, outlineInk, snap);
         i = static_cast<int>(ce) + cl;
     }
     return sum;
@@ -739,15 +749,17 @@ static const Game::HookAutoRegister _tokenizerHook{Offsets::FUN_TEXT_TOKENIZER,
 // InlineInterceptActive predicate) and the fs isn't an editbox, add the same
 // per-icon advances the emitter reserves (the shared IconAdvancePen math).
 //
-// UNITS: escape sizes ("|T…:16|t") are UI pixels; the internal getter returns
-// ANCHOR units. Convert px→anchor with the same global factor the Script push
-// chain uses: K = [VAR_UI_COORD_SCALE_DIV] × 1024 / [VAR_UI_COORD_SCALE_MUL]
-// (anchor→px), i.e. sum_px / K. Do NOT divide by fs+0x7C — that's the layout
-// UI SCALE (~0.68-1.0), and the original's own `out / fs+0x7C` applies to a
-// value FUN_0044D670 already ran through the FUN_0041AD80 gxu→internal
-// converter, not to raw pixels (a /0x7C here inflated a 16px icon to +44k px
-// on first flight). The `:0` auto-size default gets fontH in px as
-// internal × K, which also tracks a scaled fs correctly.
+// UNITS: the icon sum is computed in true PEN px — the exact numbers the
+// emitter reserves (outline ink, snap truncation and all; see ResolveFsPenFont)
+// — and bridged into the getter's return space via the font height known in
+// both spaces: `sumPen × (fontHInt / fontHPen)`. Do NOT divide by fs+0x7C —
+// that's the layout UI SCALE (~0.68-1.0), and the original's own
+// `out / fs+0x7C` applies to a value FUN_0044D670 already ran through the
+// gxu→internal converter, not to raw pixels (a /0x7C here inflated a 16px
+// icon to +44k px on first flight). An earlier bridge used the SetPoint push
+// factor (div×1024/mul) as the intermediate — the units cancelled the same
+// way for `:0` icons, but it couldn't express the pen-integral truncation or
+// the outline ink, leaving ≤1px + 2-4px per-icon divergences from the render.
 //
 // Idempotence: the original may serve the cached fs+0xFC — the icon sum is
 // re-derived and re-added on EVERY call, and the cache is NEVER written.
@@ -766,6 +778,58 @@ using StringWidthInternal_t = float(__fastcall *)(void *fs);
 using FsFontHeight_t = float(__fastcall *)(void *fs, void *edx, int mode);
 StringWidthInternal_t g_stringWidthOriginal = nullptr;
 
+// The RENDER's exact font numbers for an fs, for the measure hooks. fontHInt
+// is the fs height-getter's raw value — the same unit space the hooked
+// internal getters RETURN (they divide their measure by fs+0x7C exactly as the
+// rebuild multiplied it in), so `penValue × (fontHInt / fontHPen)` converts
+// any pen-px quantity into the hook's return space with the font height as
+// the exact unit bridge. fontHPen replicates the node's pen font height:
+// nodeFontSize = internal × fs+0x7C ÷ [0x832A48] (the rebuild FUN_007724a0
+// feeds internal × 0x7C to FUN_0044d420, which normalizes it via
+// FUN_0041ae50), floored at [0x801628]/rasterY = 2 pen px (the node ctor,
+// FUN_005cd6d0), realized by the emitter's own helper (flag 0 = the snap
+// path: round(size × rasterY)).
+// fs-built nodes are always in snap mode — none of the fs-flag → node-flag
+// mappings in FUN_0044d420 produce bit 7 — so snap-truncated advances are
+// exact here. The face for the outline ink resolves via
+// [[fs+0xE0]+0x20] → node+0x44 (see OFF_FONTSTRING_FONT_HANDLE).
+struct FsPenFont {
+    float fontHInt = 0.0f; // getter units — the hook-return space
+    float fontHPen = 0.0f; // render pen px (rounded + min-clamped like the node)
+    float outlineInk = 0.0f;
+};
+bool ResolveFsPenFont(void *fs, FsPenFont &out) {
+    out.fontHInt =
+        reinterpret_cast<FsFontHeight_t>(Offsets::FUN_FONTSTRING_FONT_HEIGHT)(fs, nullptr, 1);
+    const float scale = Game::Read<float>(fs, Offsets::OFF_LAYOUT_SCALE);
+    const float anchorH = Game::Read<float>(Offsets::VAR_UI_ANCHOR_SCREEN_H);
+    const int rasterY = Game::Read<int>(Offsets::VAR_TEXT_RASTER_Y);
+    if (!(out.fontHInt > 0.0f) || !(scale > 0.0f) || !(anchorH > 0.0f) || rasterY <= 0)
+        return false;
+    // The ÷anchorH hop is LOAD-BEARING: the block creator FUN_0044d420 runs
+    // the rebuild's fontH (internal × fs+0x7C) through the y-axis
+    // anchor→normalized converter FUN_0041ae50 (÷[0x832A48]) before it
+    // reaches node+0x18. Skipping it undersized fontHPen ~40%: phantom
+    // tall-icon overflow grew every icon-bearing chat line, and the
+    // fontHInt/fontHPen bridge inflated fixed-size/ink width terms (the
+    // money-tooltip right-anchor gap).
+    float sizeNorm = out.fontHInt * scale / anchorH;
+    const float minNorm = Game::Read<float>(Offsets::FLOAT_OUTLINE_EXTRA_THIN) /
+                          static_cast<float>(rasterY);
+    if (sizeNorm < minNorm)
+        sizeNorm = minNorm;
+    out.fontHPen = reinterpret_cast<float(__fastcall *)(int, float)>(
+        Offsets::FUN_TEXT_FONT_HEIGHT)(0, sizeNorm);
+    if (!(out.fontHPen > 0.0f))
+        return false;
+    const void *handle = Game::Read<const void *>(fs, Offsets::OFF_FONTSTRING_FONT_HANDLE);
+    const void *face =
+        LooksReadable(handle) ? Game::Read<const void *>(handle, Offsets::OFF_FONT_HANDLE_FACE)
+                              : nullptr;
+    out.outlineInk = LooksReadable(face) ? OutlineInkPen(face) : 0.0f;
+    return true;
+}
+
 float __fastcall StringWidth_h(void *fs) {
     const float base = g_stringWidthOriginal(fs);
     if (!LooksReadable(fs))
@@ -782,20 +846,14 @@ float __fastcall StringWidth_h(void *fs) {
         ++len;
     if (!HasInlineTexture(text, len))
         return base;
-    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
-    if (!(mul > 0.0f) || !(div > 0.0f))
+    FsPenFont pf;
+    if (!ResolveFsPenFont(fs, pf))
         return base;
-    const float anchorToPx = div * Offsets::UI_COORD_SCALE_UNIT / mul; // ≈1468 (the push K)
-    // Font height in UI pixels for the `:0` auto-size default (internal × K).
-    const float fontHPx =
-        reinterpret_cast<FsFontHeight_t>(Offsets::FUN_FONTSTRING_FONT_HEIGHT)(fs, nullptr, 1) *
-        anchorToPx;
-    // outlineInk 0: the fs-level measure path doesn't resolve the gxu face (it
-    // lives behind the fs+0xE0 handle), so outlined faces measure 2–4px short
-    // per icon here. Measure-only and minor; the render-side pads (emitter +
-    // wrap stepper) are ink-exact.
-    return base + SumIconAdvances(text, len, fontHPx, 0.0f) / anchorToPx;
+    // The icon advances EXACTLY as the emitter reserves them — pen px, outline
+    // ink included, snap-truncated — bridged into the return space by the
+    // font height known in both spaces.
+    const float sumPen = SumIconAdvances(text, len, pf.fontHPen, pf.outlineInk, true);
+    return base + sumPen * (pf.fontHInt / pf.fontHPen);
 }
 
 static const Game::HookAutoRegister _stringWidthHook{
@@ -825,10 +883,11 @@ static const Game::HookAutoRegister _stringWidthHook{
 // bottom-anchored stacking (older lines shift up by the growth).
 //
 // Same rules as the width hook: NEVER write the fs+0x100 cache (the delta is
-// re-derived and re-added per call — idempotent); px→anchor via the push
-// factor, not fs+0x7C. v1 limit (documented): the delta is the WHOLE text's
-// max overflow, exact when the tall icons sit on one wrapped line (the emote
-// case); two tall icons on different wrapped lines of one message under-grow.
+// re-derived and re-added per call — idempotent); overflow computed in pen px
+// and bridged by the font-height ratio, never /fs+0x7C. v1 limit (documented):
+// the delta is the WHOLE text's max overflow, exact when the tall icons sit on
+// one wrapped line (the emote case); two tall icons on different wrapped lines
+// of one message under-grow.
 using StringHeightInternal_t = float(__fastcall *)(void *fs);
 StringHeightInternal_t g_stringHeightOriginal = nullptr;
 
@@ -846,15 +905,12 @@ float __fastcall StringHeight_h(void *fs) {
         ++len;
     if (!HasInlineTexture(text, len))
         return base;
-    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
-    if (!(mul > 0.0f) || !(div > 0.0f))
+    FsPenFont pf;
+    if (!ResolveFsPenFont(fs, pf))
         return base;
-    const float anchorToPx = div * Offsets::UI_COORD_SCALE_UNIT / mul;
-    const float fontHPx =
-        reinterpret_cast<FsFontHeight_t>(Offsets::FUN_FONTSTRING_FONT_HEIGHT)(fs, nullptr, 1) *
-        anchorToPx;
-    return base + MaxIconOverflowPx(text, len, fontHPx) / anchorToPx;
+    // Overflow computed in pen px — the space the render compares icon height
+    // against the font in — then bridged like the width hook.
+    return base + MaxIconOverflowPx(text, len, pf.fontHPen) * (pf.fontHInt / pf.fontHPen);
 }
 
 static const Game::HookAutoRegister _stringHeightHook{
@@ -1043,8 +1099,9 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                         lineLen = pBreak;
                     else if (pNext > text && pNext - text < len)
                         lineLen = static_cast<int>(pNext - text);
-                    const float sumPx =
-                        SumIconAdvances(text, lineLen, fontHPx, OutlineInkPen(font));
+                    const float sumPx = SumIconAdvances(text, lineLen, fontHPx,
+                                                        OutlineInkPen(font),
+                                                        (flags & 0x80u) == 0);
                     const float iconUnits = sumPx * toUnits;
                     float slack = probeW - pWidth;
                     if (slack < 0.0f)
@@ -1284,13 +1341,20 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // Outline faces draw ink past the glyph advances; the icon pads absorb it
     // (see OutlineInkPen). Computed once per line from the node's face.
     const float outlineInk = OutlineInkPen(fontFace);
+    // The node's pixel-snap mode (bit-7 clear) — the engine truncates every
+    // glyph advance and rounds the origin in this mode, so our icon advances
+    // and pen shifts must stay integral too (see IconAdvancePen's snap note).
+    const bool snapNode = (savedFlags & 0x80u) == 0;
 
     const int justify = Game::Read<int>(node, Offsets::OFF_TEXT_NODE_JUSTIFY);
     if (justify == 1 || justify == 2) {
         // Shared helper so the pre-shift matches the real advances exactly
         // (including the positive-offsetX term an earlier inline copy omitted).
-        const float iconW = SumIconAdvances(text, len, fontH, outlineInk);
-        penX -= (justify == 1) ? iconW * 0.5f : iconW;
+        const float iconW = SumIconAdvances(text, len, fontH, outlineInk, snapNode);
+        float shift = (justify == 1) ? iconW * 0.5f : iconW;
+        if (snapNode)
+            shift = static_cast<float>(static_cast<int>(shift));
+        penX -= shift;
     }
 
     // Draws a plain run [start,start+n) via the original emitter, threading the
@@ -1436,7 +1500,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
             // right — a half trail balances that. The lead pad is applied to the
             // draw position in FlushLayout. Shared with the justify pre-shift and
             // the string-width co-hook — never inline this math.
-            penX += IconAdvancePen(d, fontH, outlineInk);
+            penX += IconAdvancePen(d, fontH, outlineInk, snapNode);
         }
         penXYZ[0] = penX;
         i = static_cast<int>(close) + closeLen; // skip past the closing marker
