@@ -655,6 +655,44 @@ float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlin
     return sum;
 }
 
+// The TRAIL half of the last icon's advance — 0.5×pad + 0.5×outline ink —
+// when the measured text ENDS in a well-formed icon span, else 0. The engine's
+// width convention stops at the last content's INK (the measure loop ends on
+// the last glyph's ink width, not its advance); an icon's "ink" is its drawn
+// art (lead + w), and the advance's trail exists purely to space a FOLLOWING
+// glyph that a string-final icon doesn't have. The measure-REPORTING hooks
+// (GetStringWidth + the substring measure) subtract this so a trailing icon —
+// the money-string shape, "…|TCoin:0|t" — reports its true right edge; the
+// render/justify/wrap paths keep the full advance (the pen genuinely moves).
+// Strict end-at-len only: trailing spaces after the icon make the SPACE the
+// last content, and the engine handles that itself.
+float TrailingIconTrimPen(const uint8_t *text, int len, float fontHPen, float outlineInk) {
+    int i = 0;
+    bool endsInIcon = false;
+    while (i < len) {
+        const int ml = IconStartLen(text, len, i);
+        if (ml == 0) {
+            if (text[i] == '|' && i + 1 < len && text[i + 1] == '|')
+                i += 2;
+            else
+                ++i;
+            endsInIcon = false;
+            continue;
+        }
+        int cl = 0;
+        const size_t ce = FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl);
+        if (ce == static_cast<size_t>(-1))
+            return 0.0f; // unterminated → the tail renders as plain text
+        IconDesc d;
+        endsInIcon = ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
+                               ce - (static_cast<size_t>(i) + ml), d);
+        i = static_cast<int>(ce) + cl;
+    }
+    if (!endsInIcon)
+        return 0.0f;
+    return 0.5f * (fontHPen * g_iconPadFrac) + 0.5f * outlineInk;
+}
+
 // The tallest icon's VERTICAL OVERFLOW past the font height, in px, over every
 // well-formed span in [text, text+len) — 0 when every icon fits the line.
 // Only explicit `|T…:H|t` heights can overflow (the `:0` default IS the font
@@ -766,12 +804,13 @@ static const Game::HookAutoRegister _tokenizerHook{Offsets::FUN_TEXT_TOKENIZER,
 //
 // Residuals (documented in docs/InlineTextureEscapes.md): the measure loop ends
 // on the last glyph's INK width rather than its advance, so a trailing icon
-// leaves a ~≤1px artifact; wrap-break (FUN_00772B60), substring measure
-// (FUN_00772AE0), and hyperlink hit-test stay icon-blind. The focused chat
-// editbox's own display fontstring (editable bit CLEAR — only multi-line
-// editors carry it) can reach this through the caret positioner's line-boundary
-// branch with a content-suppressed raw render; that branch is multi-line-only
-// in practice, so no content compare is spent here.
+// leaves a ~≤1px artifact; the hyperlink hit-test past a tall icon OUTSIDE the
+// link stays icon-blind. (Wrap breaks route through the stepper hook, and the
+// substring measure has its own co-hook below.) The focused chat editbox's own
+// display fontstring (editable bit CLEAR — only multi-line editors carry it)
+// can reach this through the caret positioner's line-boundary branch with a
+// content-suppressed raw render; that branch is multi-line-only in practice,
+// so no content compare is spent here.
 using StringWidthInternal_t = float(__fastcall *)(void *fs);
 // FUN_FONTSTRING_FONT_HEIGHT is __thiscall(fs, mode-on-stack) — dummy-EDX
 // __fastcall matches the register/stack layout (established pattern).
@@ -851,8 +890,12 @@ float __fastcall StringWidth_h(void *fs) {
         return base;
     // The icon advances EXACTLY as the emitter reserves them — pen px, outline
     // ink included, snap-truncated — bridged into the return space by the
-    // font height known in both spaces.
-    const float sumPen = SumIconAdvances(text, len, pf.fontHPen, pf.outlineInk, true);
+    // font height known in both spaces. A string-final icon reports its ink
+    // edge rather than its full advance (see TrailingIconTrimPen).
+    float sumPen = SumIconAdvances(text, len, pf.fontHPen, pf.outlineInk, true) -
+                   TrailingIconTrimPen(text, len, pf.fontHPen, pf.outlineInk);
+    if (sumPen < 0.0f)
+        sumPen = 0.0f;
     return base + sumPen * (pf.fontHInt / pf.fontHPen);
 }
 
@@ -916,6 +959,61 @@ float __fastcall StringHeight_h(void *fs) {
 static const Game::HookAutoRegister _stringHeightHook{
     Offsets::FUN_FONTSTRING_STRING_HEIGHT, reinterpret_cast<void *>(&StringHeight_h),
     reinterpret_cast<void **>(&g_stringHeightOriginal)};
+
+// --- substring-measure co-hook (wrapped tooltip segments count icons) --------
+//
+// FUN_FONTSTRING_MEASURE_SUBSTRING measures an ARBITRARY string in the fs's
+// font (len 0 = strlen; same measure-core + out/fs+0x7C shape as the width
+// getter, no cache). Its icon-relevant consumer is the GameTooltip auto-size
+// (FUN_00530640): when a wrap-enabled line's icon-inclusive width exceeds the
+// tooltip, it computes the break positions (FUN_00772B60 — icon-aware through
+// the wrap-stepper hook) and measures EACH WRAPPED SEGMENT through this,
+// taking the max as the tooltip width — so an icon-bearing segment undersized
+// its tooltip. Same adjustment as the width hook: the segment's icon advances
+// in true pen px, bridged by the font-height ratio. The editbox
+// caret/selection callers (FUN_0077DA80 / FUN_0077DE70 / FUN_0077D0D0) must
+// keep measuring raw markup: the multi-line editors carry the fs editable bit,
+// and the focused single-line inputs measure their input buffer IN PLACE,
+// which InlineInterceptActive's focused-buffer pointer test stands down on —
+// the same predicate stack as everywhere else. A segment can never start or
+// end inside a |T span (the tokenizer hook makes breaks treat a span as one
+// token); an unterminated span from a hostile caller falls out as plain text
+// (FindIconClose miss), contributing nothing.
+using MeasureSubstring_t = float(__fastcall *)(void *fs, void *edx, const uint8_t *text, int len);
+MeasureSubstring_t g_measureSubstringOriginal = nullptr;
+
+float __fastcall MeasureSubstring_h(void *fs, void *edx, const uint8_t *text, int len) {
+    const float base = g_measureSubstringOriginal(fs, edx, text, len);
+    if (!LooksReadable(fs) || !LooksReadable(text))
+        return base;
+    const bool editable =
+        (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_MEASURE_FLAGS) & 0x1000u) != 0;
+    if (!InlineInterceptActive(text, editable))
+        return base;
+    int n = len;
+    if (n <= 0) { // len 0 = whole string, mirroring the original's strlen
+        n = 0;
+        while (n < 0x4000 && text[n] != '\0')
+            ++n;
+    } else if (n > 0x4000) {
+        n = 0x4000;
+    }
+    if (!HasInlineTexture(text, n))
+        return base;
+    FsPenFont pf;
+    if (!ResolveFsPenFont(fs, pf))
+        return base;
+    // Segment-final icons report their ink edge, like the width hook.
+    float sumPen = SumIconAdvances(text, n, pf.fontHPen, pf.outlineInk, true) -
+                   TrailingIconTrimPen(text, n, pf.fontHPen, pf.outlineInk);
+    if (sumPen < 0.0f)
+        sumPen = 0.0f;
+    return base + sumPen * (pf.fontHInt / pf.fontHPen);
+}
+
+static const Game::HookAutoRegister _measureSubstringHook{
+    Offsets::FUN_FONTSTRING_MEASURE_SUBSTRING, reinterpret_cast<void *>(&MeasureSubstring_h),
+    reinterpret_cast<void **>(&g_measureSubstringOriginal)};
 
 // --- hyperlink-rect co-hook (tall icons stay hoverable) ----------------------
 //
@@ -997,18 +1095,17 @@ static const Game::HookAutoRegister _linkRectAddHook{Offsets::FUN_TEXT_LINK_RECT
 // render's breaks, GetStringHeight's line count, ellipsis truncation, and the
 // break arrays all shift together — no cross-consumer drift.
 //
-// UNITS (bit us on first flight): each caller passes fontH/wrapWidth in its
-// OWN space — the draw builder passes the node's fontSize (+0x1C) and wrap
-// width (+0x3C) in internal text units, while the fs-level callers (height,
-// fit, break arrays — the path CHAT wraps through) pass the much smaller
-// anchor-converted space. Subtracting a raw pixel advance annihilated those
-// small widths to the floor and shredded icon-bearing chat lines into
-// 2-glyph fragments. The space-agnostic conversion uses the engine's own
-// convention: every gxu caller passes fontH in the units FUN_TEXT_FONT_HEIGHT
-// expects, and the measure loops use FUN_TEXT_FONT_HEIGHT(flag, fontH) as the
-// PIXEL realization of that fontH (see FUN_005c6940's final scale). So
-// px→caller-units is exactly (fontH / fontHPx): compute the icon sum in true
-// pixels (same value the emitter reserves), then scale by that ratio.
+// UNITS (bit us TWICE): the stepper's inputs are gxu-NORMALIZED, per axis —
+// fontH is normalized-Y (× rasterY = pen px, FUN_005c6fa0) and
+// wrapWidth/outWidth are normalized-X (× rasterX = pen px). Both caller
+// flavors land there: the draw builder passes node+0x1C/+0x3C (normalized at
+// block creation via FUN_0041ae50/ae40), and the fs-level callers (height,
+// fit, break arrays — the path CHAT wraps through) x-normalize their widths
+// inside FUN_0044d670 before gxu. First flight subtracted raw pixels and
+// annihilated the small normalized widths (2-glyph chat fragments); the
+// second used fontH/fontHPx — a Y-axis factor on an X-axis width —
+// overshrinking by the render aspect (×2.37 at 2560×1080; early-wrapped
+// icon chat lines). The correct pen-x → width-units factor is 1/rasterX.
 using WrapStepper_t = void(__fastcall *)(void *font, uint8_t *text, float fontH,
                                          float wrapWidth, int *outBreak, float *outWidth,
                                          void *outNext, float indent, uint32_t flags,
@@ -1030,14 +1127,28 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
             ++len;
         if (HasInlineTexture(text, len)) {
             // Pixel realization of this caller's fontH — the same helper the
-            // measure loops and the emitter use. px → caller units is then
-            // (fontH / fontHPx); see the units note above.
+            // measure loops and the emitter use.
             const int fontFlag = static_cast<int>((flags >> 7) & 1u);
             const float fontHPx = reinterpret_cast<float(__fastcall *)(int, float)>(
                 Offsets::FUN_TEXT_FONT_HEIGHT)(fontFlag, fontH);
-            if (fontHPx > 0.0f) {
-                const float toUnits = fontH / fontHPx;
-                const float minWidth = fontH * 2.0f;
+            const int rasterX = Game::Read<int>(Offsets::VAR_TEXT_RASTER_X);
+            if (fontHPx > 0.0f && rasterX > 0) {
+                // Pen-x px → the stepper's WIDTH units. fontH is normalized-Y
+                // (× rasterY = pen) but wrapWidth/outWidth are normalized-X
+                // (× rasterX = pen) — both caller flavors: the draw builder
+                // passes node+0x3C (x-normalized at block creation via
+                // FUN_0041ae40) and the fs-level callers x-normalize their
+                // widths through FUN_0044d670's own FUN_0041ae40 call before
+                // gxu. The first version scaled by fontH/fontHPx — a Y-AXIS
+                // conversion applied to an x-axis width — overshrinking the
+                // budget by rasterX/rasterY (the render aspect: ×1.33 at 4:3,
+                // ×2.37 at 2560×1080), so icon-bearing chat lines wrapped a
+                // word or two early, worse per icon and per aspect. The
+                // glyph-relative tolerances below use fontHPx × this factor so
+                // "half a glyph" means an actual glyph width in width units.
+                const float penToUnits = 1.0f / static_cast<float>(rasterX);
+                const float glyphU = fontHPx * penToUnits; // one glyph width, width units
+                const float minWidth = glyphU * 2.0f;
                 // Only icons that actually LAND on this line may shrink its
                 // width — subtracting every icon in the remaining text made an
                 // 8-icon line wrap absurdly early (one word per line). The
@@ -1102,7 +1213,7 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                     const float sumPx = SumIconAdvances(text, lineLen, fontHPx,
                                                         OutlineInkPen(font),
                                                         (flags & 0x80u) == 0);
-                    const float iconUnits = sumPx * toUnits;
+                    const float iconUnits = sumPx * penToUnits;
                     float slack = probeW - pWidth;
                     if (slack < 0.0f)
                         slack = 0.0f;
@@ -1122,7 +1233,7 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                     // 1.5 glyphs of exactly filling its frame gives up its
                     // shrink, and its overflow is bounded by its icon sum
                     // (the pre-hook status quo).
-                    if (pass == 0 && lineLen == len && slack <= fontH * 1.5f)
+                    if (pass == 0 && lineLen == len && slack <= glyphU * 1.5f)
                         break; // s == 0, best unset → final shrink = 0
                     // Half-glyph feasibility tolerance. An AUTO-WIDTH
                     // fontstring's wrap width IS the icon-inclusive string
@@ -1138,7 +1249,7 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                     // >= a full icon (~1.27 fontH), so half a glyph separates
                     // drift from real overflow; the cost is that a real
                     // overflow may render up to half a glyph past the edge.
-                    if (iconUnits <= s + slack + fontH * 0.5f) {
+                    if (iconUnits <= s + slack + glyphU * 0.5f) {
                         if (best < 0.0f || s < best)
                             best = s;
                         if (s <= 0.0f)
@@ -1151,7 +1262,7 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                             // measured deficit (strictly increasing).
                             float next = iconUnits - slack;
                             if (next <= s)
-                                next = s + fontH;
+                                next = s + glyphU;
                             s = next;
                             continue;
                         }
@@ -1160,7 +1271,7 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                     // than a quarter-glyph.
                     if (lo < 0.0f || best < 0.0f)
                         break; // feasible with no infeasible below → best = s
-                    if (best - lo < fontH * 0.25f)
+                    if (best - lo < glyphU * 0.25f)
                         break;
                     s = (lo + best) * 0.5f;
                 }

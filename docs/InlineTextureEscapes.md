@@ -79,10 +79,15 @@ The DLL hooks the engine's own text pipeline — no companion addon:
   TGA.
 - **Anti-spoof** — chat strips player-injected `|T` icons.
 
-The one measure path still icon-blind is the substring width (`FUN_00772AE0`),
-which nothing consumes yet. The Lua control surface is one kill switch,
-`_classicapi_InlineTexEnable` (the SEH latch trips it on a flush fault); the
-bring-up tune / stat / probe functions were removed (`5e5677b`, `6800a9a`).
+Every fs-level measure path now counts icons: width (`FUN_00772890`), height
+(`FUN_007729B0`), wrap (`FUN_005C7260`), and the substring measure
+(`FUN_00772AE0` — an earlier note claimed nothing consumed it; its xrefs
+refute that: the GameTooltip auto-size measures each WRAPPED SEGMENT of a
+wrap-enabled line through it, so icon-bearing wrapped tooltip lines
+undersized their tooltip until it was hooked too). The Lua control surface is
+one kill switch, `_classicapi_InlineTexEnable` (the SEH latch trips it on a
+flush fault); the bring-up tune / stat / probe functions were removed
+(`5e5677b`, `6800a9a`).
 
 ## REMOVED (bring-up record) — the raw-GxU-quad rendering primitive
 
@@ -364,17 +369,19 @@ together. (A `_classicapi_InlineTexWrap(n)` ring dumped the last 8
 icon-bearing calls during bring-up; removed with the other diagnostics in
 `5e5677b`.)
 
-Unit trap #2 (hit on first flight, like the width hook's): each caller passes
-fontH/wrapWidth in its OWN space — the draw builder passes node text units
-(node+0x1C / node+0x3C), and the fs-level callers (the path chat wraps
-through) pass the much smaller anchor-converted space. Subtracting a raw
-pixel advance annihilated the small widths to the floor and shredded
-icon-bearing chat lines into 2-glyph fragments. The space-agnostic conversion
-uses the engine's own convention: the measure loops realize their fontH param
-as pixels via `FUN_TEXT_FONT_HEIGHT(flag, fontH)` (see `FUN_005c6940`'s final
-scale), so px → caller units is exactly `fontH / fontHPx`. The hook computes
-the icon sum in true pixels (the same value the emitter reserves) and scales
-by that ratio.
+Unit trap #2 (hit TWICE): the stepper's inputs are gxu-normalized, PER AXIS —
+fontH is normalized-Y (× rasterY = pen px) and wrapWidth/outWidth are
+normalized-X (× rasterX = pen px). Both caller flavors land there: the draw
+builder passes node+0x1C/+0x3C (normalized at block creation), and the
+fs-level callers (the path chat wraps through) x-normalize their widths
+inside `FUN_0044d670` before gxu. First flight subtracted raw pixels and
+annihilated the small normalized widths (2-glyph chat fragments). The second
+converted with `fontH / fontHPx` — a Y-AXIS factor applied to an X-axis
+width — overshrinking the budget by the render aspect (×1.33 at 4:3, ×2.37
+at 2560×1080): icon-bearing chat lines wrapped a word or two early, worse per
+icon and per aspect. The correct pen-x → width-units factor is `1/rasterX`,
+and the glyph-relative tolerances use `fontHPx/rasterX` so "half a glyph"
+means an actual glyph width.
 
 **Chat hyperlink hover over inline icons works (verified).** An emote wrapped in a
 hyperlink — `|Htel:name|h|T…|t|h`, the TwitchEmotes pattern — pops its tooltip when
@@ -393,14 +400,13 @@ formula.)
 
 **Still icon-blind (accepted residuals):**
 
-- The substring measure (`FUN_00772AE0`) still sees icons as ~0. It is a
-  *separate* function from the hyperlink hover rect above (which works) — nothing
-  consumes it yet; revisit it (also cold) if a consumer needs icon-aware substring
-  widths.
-- A ~≤1px artifact when an icon is the last token: the gxu width loop ends on
-  the last *glyph's* ink width rather than its advance (`FUN_005c6b70` gets the
-  remaining-text pointer), and a trailing icon shifts the previous glyph's
-  treatment — the source of the old −0.8px measurement.
+- Sub-pixel only for a string-final icon: the width hooks report its INK edge
+  (advance minus the trail half-pad/ink — `TrailingIconTrimPen`), matching the
+  engine's own last-glyph convention (the gxu width loop ends on ink, not
+  advance — the source of the old −0.8px measurement, whose previous-glyph
+  advance treatment is semantically CORRECT once an icon renders after it).
+  What remains is the icon region's ±0.5px placement rounding and the base
+  loop's ~0 contribution for the payload-0 icon token.
 - An fs whose `fs+0xFC` cache was filled while the feature was toggled
   differently (`_classicapi_InlineTexEnable`) keeps its old base width until
   the next `SetText`/font change re-dirties it. Debug-toggle-only.
@@ -518,10 +524,12 @@ backend note.)
   decode in 1.12 (uncompressed only) — convert with
   `magick in.tga -compress none in.tga` (no `-orient`/`-flip`: the region
   renderer's texcoord order shows the frame right-side-up).
-- **Still icon-blind** (accepted): the substring measure `FUN_00772AE0`; the
-  hyperlink hit-test past a tall icon OUTSIDE the link on the same line; and a
-  ≤1px trailing-icon residual in `GetStringWidth` (the measure loop ends on the
-  last glyph's ink width, not its advance).
+- **Still icon-blind** (accepted): the hyperlink hit-test past a tall icon
+  OUTSIDE the link on the same line. The substring measure `FUN_00772AE0` was
+  hooked once its real consumer surfaced (the tooltip auto-size measures
+  wrapped SEGMENTS with it), and the trailing-icon width residual is trimmed
+  to sub-pixel (`TrailingIconTrimPen` — a string-final icon reports its ink
+  edge, not its advance, per the engine's own last-glyph convention).
 
 ## Goal & spec
 

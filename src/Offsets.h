@@ -375,6 +375,18 @@ enum Offsets {
     // 2 pen px).
     FLOAT_OUTLINE_EXTRA_THICK = 0x0080306C,
     FLOAT_OUTLINE_EXTRA_THIN = 0x00801628,
+    // Substring width measure: `__thiscall(fs, const char *text, int len)` →
+    // ST0 (len 0 = strlen). Same measure-core call + `out / fs+0x7C` shape as
+    // GetStringWidthInternal, but for an ARBITRARY string in the fs's font —
+    // no cache. Callers (xrefs): the GameTooltip auto-size FUN_00530640, which
+    // measures each WRAPPED SEGMENT of a wrap-enabled line between the
+    // FUN_00772B60 break positions and takes the max as the tooltip width —
+    // the icon-relevant consumer (an earlier note claimed nothing consumed
+    // this function; the xref list refutes it) — plus the editbox
+    // caret/selection cluster (FUN_0077DA80, FUN_0077DE70, FUN_0077D0D0),
+    // which must stay raw and is excluded by the editable/focused-buffer
+    // gates in the co-hook.
+    FUN_FONTSTRING_MEASURE_SUBSTRING = 0x00772AE0,
     // FontString → gxu face resolution, for fs-level (measure-hook) callers
     // that need the face the RENDER will use. The rebuild (FUN_007724a0)
     // passes [fs+0xE0] (the font HANDLE) to the block creator FUN_0044d420,
