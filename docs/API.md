@@ -4066,11 +4066,17 @@ its caret math must measure that same raw text.
 
 ### `fontstring:GetUnboundedStringWidth()`
 
-Returns the full width of the text in UI pixels, as if no wrap width
-applied. `GetStringWidth` measures the text inside its wrap box;
-this method measures the whole string on one line. Later clients
-added the method. Inline `|T…|t` icon widths are included, the same
-way `GetStringWidth` includes them. Empty or unset text returns `0`.
+Returns the width of the text on one line, in UI pixels, with no wrap
+or size limit applied. Note: `GetStringWidth` ALSO ignores word wrap —
+that is a classic API trap on every client. The two methods differ
+only on modern clients, and only for text truncated with an ellipsis:
+there `GetStringWidth` reports the displayed width and this method
+reports the full string. The 1.12 width getter never applies
+truncation, so on this client the two always agree; the method exists
+so modern code that calls it works. The width of the text AS RENDERED
+(the widest wrapped line) is `GetWrappedWidth`, which 1.12 does not
+have. Inline `|T…|t` icon widths are included, the same way
+`GetStringWidth` includes them. Empty or unset text returns `0`.
 
 ### `fontstring:GetNumLines()`
 
