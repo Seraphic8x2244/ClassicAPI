@@ -287,8 +287,9 @@ std::unordered_map<void *, std::vector<float>> g_fsBaseline;
 
 constexpr int kVertStride = Offsets::TEXT_VERT_STRIDE / 4; // floats per vertex
 
-// Calls fn(float *xy) for every baked glyph vertex across the node's ≤8 font-page
-// buffers (xy[0]=x, xy[1]=y, mutable in place). Returns the vertex count visited.
+// Calls fn(float *v) for every baked glyph vertex across the node's ≤8 font-page
+// buffers (v[0]=x, v[1]=y, v[2]=z, v[3]=u, v[4]=v — mutable in place). Returns
+// the vertex count visited.
 template <class Fn>
 int ForEachVert(uint8_t *n, Fn fn) {
     int visited = 0;
@@ -310,6 +311,59 @@ int ForEachVert(uint8_t *n, Fn fn) {
 
 int NodeVertCount(uint8_t *n) {
     return ForEachVert(n, [](float *) {});
+}
+
+// Half-texel font-atlas inset for ROTATED glyph quads. An axis-aligned quad
+// samples its atlas cell on exact texel boundaries, so bilinear filtering never
+// crosses into a neighbouring glyph — but a rotated quad samples along
+// diagonals, and at the cell border the filter pulls in texels from ADJACENT
+// cells, showing as dotted fragments of other glyphs strung along the rotated
+// text's edges. Whether the samples land inside or outside the cell depends on
+// renderer/filtering/resolution/UI scale, so the artifact is machine-dependent.
+// The engine has the same hazard with its bit-7 font nodes and fixes it the
+// same way: FUN_TEXT_EMITTER's init-once block (0x005CCBE0) sets four globals
+// to ±0.001953125 (= ±0.5/256, half a texel of the 256px font page) and
+// shrinks each glyph's UV rect by that per edge. Mirror that inset for quads we
+// rotate. Idempotence across restore→rotate cycles comes from the baseline now
+// carrying UVs (see CaptureBaseline/RestoreBaseline).
+constexpr float kGlyphUVInset = 0.5f / 256.0f;
+
+void InsetGlyphUVs(uint8_t *n) {
+    for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
+        auto *buf = Game::Read<uint8_t *>(n, Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+        if (buf == nullptr)
+            continue;
+        const int count = Game::Read<int>(buf, Offsets::OFF_TEXT_PAGE_VERT_COUNT);
+        auto *verts = Game::Read<float *>(buf, Offsets::OFF_TEXT_PAGE_VERTS);
+        if (verts == nullptr || count < 4)
+            continue;
+        // The emitter appends four verts per glyph (one quad per atlas cell),
+        // so consecutive groups of four share one UV rect. Each vert's u/v is
+        // one of exactly two values (the cell edges), so nudging min-edge verts
+        // up and max-edge verts down shrinks the rect symmetrically.
+        for (int q = 0; q + 4 <= count; q += 4) {
+            float *quad = verts + q * kVertStride;
+            float minU = quad[3], maxU = quad[3], minV = quad[4], maxV = quad[4];
+            for (int i = 1; i < 4; ++i) {
+                const float *v = quad + i * kVertStride;
+                if (v[3] < minU) minU = v[3];
+                else if (v[3] > maxU) maxU = v[3];
+                if (v[4] < minV) minV = v[4];
+                else if (v[4] > maxV) maxV = v[4];
+            }
+            const bool doU = (maxU - minU) > 2.0f * kGlyphUVInset;
+            const bool doV = (maxV - minV) > 2.0f * kGlyphUVInset;
+            if (!doU && !doV)
+                continue; // degenerate cell — nothing safe to shrink
+            for (int i = 0; i < 4; ++i) {
+                float *v = quad + i * kVertStride;
+                if (doU)
+                    v[3] = (v[3] == minU) ? minU + kGlyphUVInset : maxU - kGlyphUVInset;
+                if (doV)
+                    v[4] = (v[4] == minV) ? minV + kGlyphUVInset : maxV - kGlyphUVInset;
+            }
+        }
+    }
 }
 
 // Rotates every vertex (x, y) about the vertex bounding-box pivot. Same matrix as
@@ -348,13 +402,22 @@ void RotateVerts(uint8_t *n, float angle, float cxN, float cyN) {
         v[0] = cx + dx * c - dy * s;
         v[1] = cy + dx * s + dy * c;
     });
+    // Rotated quads sample across atlas-cell borders — shrink each glyph's UV
+    // rect by the engine's half-texel inset so filtering can't bleed neighbours.
+    InsetGlyphUVs(n);
 }
 
+// Baseline stores x, y, u, v per vertex: the positions so an immediate
+// re-rotate starts axis-aligned, and the UVs so InsetGlyphUVs never compounds
+// across restore→rotate cycles (restore puts the untouched cell edges back
+// before the rotate re-insets them once).
 void CaptureBaseline(uint8_t *n, std::vector<float> &out) {
     out.clear();
     ForEachVert(n, [&](float *v) {
         out.push_back(v[0]);
         out.push_back(v[1]);
+        out.push_back(v[3]);
+        out.push_back(v[4]);
     });
 }
 
@@ -362,13 +425,15 @@ void CaptureBaseline(uint8_t *n, std::vector<float> &out) {
 // longer matches (a text change re-baked the node) — the DrawBuilder co-hook
 // refreshes the baseline on that fresh bake, so the next apply lines up.
 bool RestoreBaseline(uint8_t *n, const std::vector<float> &base) {
-    if (static_cast<size_t>(NodeVertCount(n)) * 2 != base.size())
+    if (static_cast<size_t>(NodeVertCount(n)) * 4 != base.size())
         return false;
     size_t k = 0;
     ForEachVert(n, [&](float *v) {
         v[0] = base[k];
         v[1] = base[k + 1];
-        k += 2;
+        v[3] = base[k + 2];
+        v[4] = base[k + 3];
+        k += 4;
     });
     return true;
 }
