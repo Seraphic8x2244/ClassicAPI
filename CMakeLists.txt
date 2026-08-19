@@ -149,5 +149,8 @@ set(CMAKE_SHARED_LINKER_FLAGS
     # crash dumps back to functions. Published as a build/release artifact so
     # any crash from a shipped DLL can be triaged exactly. (/OPT:ICF folds
     # identical functions, so a few map symbols share an address — harmless.)
-    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT /MAP"
+    # /DEF exports `Load` (VanillaFixes' post-injection entry point) undecorated
+    # so its GetProcAddress(module, "Load") resolves. See src/ClassicAPI.def and
+    # the loader-lock rationale in src/DllMain.cpp.
+    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT /MAP /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ClassicAPI.def"
 )

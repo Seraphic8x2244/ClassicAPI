@@ -381,19 +381,24 @@ void RunGlueModuleRegistrations();
 
 // Declarative MinHook registration. Each feature module declares a
 // file-scope `static const Game::HookAutoRegister _hookreg{target,
-// &hook_fn, reinterpret_cast<void**>(&original_fn)};` and DllMain's
-// `RunHookRegistrations` walks the list once after `MH_Initialize`,
-// installing each hook with `MH_CreateHook` + `MH_EnableHook`.
+// &hook_fn, reinterpret_cast<void**>(&original_fn)};` and the installer
+// (`InstallHooks` in DllMain.cpp) walks the list once after
+// `MH_Initialize`, creating each hook and QUEUE-enabling it; a single
+// `MH_ApplyQueued` then activates them all in one thread-freeze.
+//
+// The install runs OFF the loader lock (via the `Load` export or the
+// fallback worker thread — see DllMain.cpp), never inside DllMain, so
+// the thread-freeze can't deadlock or stall the loader.
 //
 // Same lifetime rules as ModuleAutoRegister: constructors chain onto
 // a static-init list before DllMain runs, the linker keeps the OBJ
 // because the constructor has side effects, and order across TUs is
 // undefined but doesn't matter here (hooks are independent).
 //
-// Use only for feature hooks. The three core engine-init hooks in
+// Use only for feature hooks. The four core engine-init hooks in
 // DllMain (FrameScript_Initialize / LoadScriptFunctions /
-// Frame::RegisterEvent) have inline logic that interleaves with the
-// hook chain and stays in DllMain.
+// LoadGlueScriptFunctions / Frame::RegisterEvent) have inline logic that
+// interleaves with the hook chain and stays with the installer.
 struct HookAutoRegister {
     HookAutoRegister(uintptr_t target, void *hook, void **original);
     uintptr_t target;
@@ -402,8 +407,9 @@ struct HookAutoRegister {
     HookAutoRegister *next;
 };
 
-// Installs every registered hook. Returns `false` and stops on first
-// failure — caller (DllMain) should propagate by returning FALSE.
+// Creates and QUEUE-enables every registered hook (no `MH_ApplyQueued`
+// here — the caller applies the whole batch at once). Returns `false`
+// and stops on first failure.
 bool RunHookRegistrations();
 
 } // namespace Game

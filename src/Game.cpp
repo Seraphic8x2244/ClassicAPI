@@ -320,7 +320,12 @@ bool RunHookRegistrations() {
         if (MH_CreateHook(targetPtr, node->hook,
                           reinterpret_cast<LPVOID *>(node->original)) != MH_OK)
             return false;
-        if (MH_EnableHook(targetPtr) != MH_OK)
+        // Queue, don't enable. The caller (InstallHooks) applies every
+        // queued hook with a single MH_ApplyQueued, so all ~90 hooks share
+        // ONE thread-freeze instead of one freeze per hook. This is the
+        // difference that keeps install cheap on machines whose security
+        // stack intercepts SuspendThread / VirtualProtect per call.
+        if (MH_QueueEnableHook(targetPtr) != MH_OK)
             return false;
     }
     return true;
