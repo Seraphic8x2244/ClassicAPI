@@ -1205,15 +1205,20 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
         *flagsPtr = savedFlags & ~8u;
 
         // Clearing bit 3 switches the engine from the FontString's UNIFORM colour
-        // (RGB from SetTextColor + opacity applied wholesale) to PER-GLYPH colour
-        // taken from colorState = [node+0x2c]. That field's RGB is correct, but its
-        // ALPHA byte is a stale default (observed 0x07 ≈ 3%) rather than the
-        // FontString's real opacity — so the segmented glyphs draw ~transparent,
-        // and a FontString with a dark outline (pfUI's reskinned bubble) shows only
-        // the outline: "black text". Force the glyph alpha opaque, keeping the RGB
-        // (so a coloured bubble stays its colour). `|c`-driven text already carries
-        // alpha 0xFF, so this is a no-op for chat lines.
-        colorState[0] |= 0xFF000000u;
+        // (node+0x2c, consulted live at every paint) to PER-GLYPH colour baked
+        // from colorState — a copy of [node+0x2c] the draw builder took at build
+        // start. Its alpha byte is the FOLDED live opacity (SetTextColor alpha ×
+        // frame-chain effective alpha; the engine re-folds it into fs colors[0]
+        // and node+0x2c on every alpha change — FUN_0077fac0), so it is correct
+        // AT BUILD TIME and needs no fixup here. But baked per-glyph alphas
+        // never refresh: the colour-change path (FUN_005ccb40) skips the
+        // rebuild-invalidate for bit-3 nodes, so a later fade (parent SetAlpha)
+        // updates +0x2c while the glyphs keep their build-time alpha. The
+        // flush's baked-alpha mirror (FlushLayout) re-syncs them per frame.
+        // (An earlier build forced alpha 0xFF here — a misread of a pfUI bubble
+        // that BUILT while faded out: 0x07 was the live folded alpha, not a
+        // stale default. The force inverted the bug: segmented text stuck fully
+        // opaque while its icons and iconless siblings faded.)
     }
 
     // Font pixel height of this line — used to centre icons vertically (penY sits
@@ -1531,6 +1536,38 @@ void FlushLayout(void *layout) {
         // Never draw over editable text (flags bit 6) — safety net for records
         // made before the emitter's editable-suppress applied.
         if (!NodeEditable(node)) {
+            // Baked-alpha mirror. Segmented lines carry PER-GLYPH colours (the
+            // emitter hook clears bit 3 during emit) and the paint uses those
+            // VERBATIM — while the node's live opacity (node+0x2c alpha:
+            // SetTextColor alpha × frame-chain effective alpha, re-folded by
+            // the engine on every alpha change) is only consulted for UNIFORM
+            // text. A bit-3 node's colour-change path skips the rebuild-
+            // invalidate, so a fade (parent SetAlpha) updated +0x2c while the
+            // baked glyph alphas froze at their build-time value: text stayed
+            // put while the icons faded. Mirror the live alpha into every
+            // baked colour, change-detected on each page's first entry (all
+            // baked alphas are uniform — the engine's own |c splice writes the
+            // node alpha too). One-frame lag (flush runs post-paint), same as
+            // the icon fade mirror. Chat (bit-3 clear) is excluded: the engine
+            // re-bakes those on colour change itself.
+            if ((*reinterpret_cast<const uint32_t *>(n + Offsets::OFF_TEXT_NODE_FLAGS) &
+                 8u) != 0) {
+                const uint8_t liveA = n[Offsets::OFF_TEXT_NODE_COLOR + 3];
+                for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
+                    auto *buf = *reinterpret_cast<uint8_t *const *>(
+                        n + Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+                    if (buf == nullptr)
+                        continue;
+                    const int count = *reinterpret_cast<const int *>(
+                        buf + Offsets::OFF_TEXT_PAGE_COLOR_COUNT);
+                    auto *colors =
+                        *reinterpret_cast<uint8_t *const *>(buf + Offsets::OFF_TEXT_PAGE_COLORS);
+                    if (colors == nullptr || count <= 0 || colors[3] == liveA)
+                        continue;
+                    for (int i = 0; i < count; ++i)
+                        colors[i * 4 + 3] = liveA;
+                }
+            }
             const float ox = *reinterpret_cast<float *>(n + Offsets::OFF_TEXT_NODE_ORIGIN_X);
             const float oy = *reinterpret_cast<float *>(n + Offsets::OFF_TEXT_NODE_ORIGIN_Y);
             // The fs rect, read HERE in the same flush as the icon coords — a

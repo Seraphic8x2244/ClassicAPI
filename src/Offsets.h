@@ -6692,6 +6692,29 @@ enum Offsets {
     OFF_TEXT_PAGE_VERT_COUNT = 0xC,
     OFF_TEXT_PAGE_VERTS = 0x10,
     TEXT_VERT_STRIDE = 0x14, // bytes; 5 floats per vertex (x, y, z, u, v)
+    // Per-page baked PER-GLYPH colours (BGRA dword per vertex), parallel to the
+    // vertex array above. Written by the emitter's bit-3-clear path
+    // (`[pageBuf+0x20] + ([pageBuf+0x1C] + i)*4 = colorState` at 0x005CCC0x);
+    // the paint copy-out FUN_005c8710 uses them VERBATIM — but only when the
+    // colour count equals the vertex count, else it falls back to the node's
+    // uniform colour (OFF_TEXT_NODE_COLOR). No later modulation: whatever alpha
+    // is baked here is final, which is why InlineTexture's flush mirrors the
+    // node's live alpha into these entries per frame.
+    OFF_TEXT_PAGE_COLOR_COUNT = 0x1C,
+    OFF_TEXT_PAGE_COLORS = 0x20,
+    // Node uniform colour (BGRA). Seeded from fs colors[0] at block creation
+    // (FUN_007724a0 → FUN_0044d420) and rewritten on every colour/alpha change
+    // via the fs colour-changed vmethod (FUN_00772180 → FUN_0044d650 →
+    // FUN_005ccb40). Its alpha byte (+0x2F) is the FOLDED live opacity —
+    // SetTextColor alpha (fs+0xA8 array) × the owning frame's effective alpha
+    // (*(fs+0x9C)+0xC8), maintained by FUN_0077fac0 — so it tracks parent
+    // SetAlpha per change. The paint reads it per frame for uniform text; the
+    // emitter's |c splice (case 0) and the draw builder's colorState seed both
+    // copy it at bake time. NOTE: FUN_005ccb40 only invalidates (re-bakes) a
+    // node on colour change when bit 3 is CLEAR — a bit-3 (standalone
+    // FontString) node with baked per-glyph colours goes stale instead, hence
+    // the flush-side alpha mirror.
+    OFF_TEXT_NODE_COLOR = 0x2C,
     // Layout node list — intrusive singly-linked list of render nodes. Head at
     // [layout+0x24]; next = *(node + [layout+0x1c] + 4); the tail sentinel has
     // its low bit set (mirrors the paint pass's own walk in FUN_005c8fe0).
