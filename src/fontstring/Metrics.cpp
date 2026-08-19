@@ -36,6 +36,22 @@
 //                               rebuild feeds the text node (FUN_007727b0);
 //                               excludes spacing, like retail (GetSpacing is
 //                               its own method).
+//   IsTruncated()             — did the engine cut the text off with an
+//                               ellipsis? Reads the render's own output: the
+//                               built text node's copy of the laid-out string
+//                               (OFF_TEXT_NODE_TEXT) vs the source. Same
+//                               "displayed vs full" comparison retail does; no
+//                               reconstruction of the fit/wrap/maxLines logic.
+//                               Reflects the last rendered layout (the display-
+//                               text resolver's rect is zero until a render, so
+//                               a Lua-time re-call cannot see the bound).
+//   SetMaxLines(n)/GetMaxLines() — cap the fontstring to n wrapped lines; text
+//                               past the cap is ellipsized. Writes the engine's
+//                               own per-fontstring maxLines field (fs+0x128,
+//                               already honored by the truncation resolver) and
+//                               re-invalidates the layout like SetText does.
+//                               1.12 has no SetWordWrap, so SetMaxLines(1) is
+//                               how you get a single-line, ellipsized label.
 //   SetFormattedText(fmt,...) — string.format + SetText convenience; the
 //                               format runs through Lua's own string.format
 //                               under pcall, the set through the engine's
@@ -53,6 +69,7 @@
 #include "Offsets.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace FontString::Metrics {
 namespace {
@@ -68,6 +85,30 @@ using BreakArray_t = uint32_t(__fastcall *)(void *fs, void *edx, const char *tex
                                             int *outBreaks, int cap);
 // FUN_FONTSTRING_SET_TEXT — __thiscall(fs, text, flag = 0); dummy-EDX form.
 using FsSetText_t = void(__fastcall *)(void *fs, void *edx, const char *text, int flag);
+// FUN_HANDLE_RELEASE — DecRef a ref-counted handle. __fastcall(handle).
+using HandleRelease_t = void(__fastcall *)(void *handle);
+// FUN_FONTSTRING_LAYOUT_INVALIDATE — region layout invalidate. __thiscall(region,
+// int); dummy-EDX form.
+using LayoutInvalidate_t = void(__fastcall *)(void *region, void *edx, int arg);
+
+// Invalidate a fontstring's layout exactly as SetText (FUN_00771D80) does after
+// a content change, so a layout-affecting property change (max lines) takes
+// effect on the next draw: drop the cached measures, release the built node,
+// clear the layout-dirty bit, and notify the region to re-lay-out. Re-calling
+// SetText would NOT work — it early-outs when the text string is unchanged.
+void InvalidateLayout(void *fs) {
+    Game::Ref<float>(fs, Offsets::OFF_FONTSTRING_WIDTH_CACHE) = 0.0f;
+    Game::Ref<float>(fs, Offsets::OFF_FONTSTRING_HEIGHT_CACHE) = 0.0f;
+    void *block = Game::Read<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    if (block != nullptr) {
+        reinterpret_cast<HandleRelease_t>(Offsets::FUN_HANDLE_RELEASE)(block);
+        Game::Ref<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK) = nullptr;
+    }
+    Game::Ref<uint32_t>(fs, Offsets::OFF_FONTSTRING_DIRTY_FLAGS) &= ~1u;
+    void *region = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(fs) + 0x24);
+    reinterpret_cast<LayoutInvalidate_t>(Offsets::FUN_FONTSTRING_LAYOUT_INVALIDATE)(
+        region, nullptr, 0);
+}
 
 // Anchor units → UI pixels: `FUN_0041AE40(FUN_0041AD70() × DAT_007FFD68 × v)`
 // = v × [VAR_UI_COORD_SCALE_DIV] × 1024 / [VAR_UI_COORD_SCALE_MUL] — the exact
@@ -249,6 +290,72 @@ int __fastcall Script_GetLineHeight(void *L) {
     return 1;
 }
 
+int __fastcall Script_IsTruncated(void *L) {
+    void *fs = ResolveSelf(L, "Usage: fontstring:IsTruncated()");
+    if (fs == nullptr)
+        return 0;
+    // Retail computes this by running the display-text resolver and strcmp'ing
+    // its result against the source (5.4.8 inner fn 0x0045E001). 1.12's resolver
+    // needs the LAID-OUT rect (fs+0x64), which is zero until a render pass, so a
+    // Lua-time re-call always sees an unbounded box and never truncates. Read the
+    // render's OWN output instead: the built text node keeps a copy of exactly
+    // the string it laid out (OFF_TEXT_NODE_TEXT) — the ellipsized "<prefix>..."
+    // form on truncation, else the source verbatim. So this reflects the last
+    // rendered layout (the fontstring must have drawn once), matching retail's
+    // "displayed vs full" semantics.
+    bool truncated = false;
+    void *block = Game::Read<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    const char *src = Game::Read<const char *>(fs, Offsets::OFF_FONTSTRING_TEXT);
+    if (block != nullptr && src != nullptr) {
+        void *node = Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE);
+        const char *shown =
+            (node != nullptr) ? Game::Read<const char *>(node, Offsets::OFF_TEXT_NODE_TEXT)
+                              : nullptr;
+        if (shown != nullptr) {
+            // A truncated display is exactly <source-prefix> + "...". Require the
+            // "..." suffix, a length strictly shorter than the source, and a
+            // matching byte-prefix. This rejects a STALE node — one left from a
+            // previous, different text after a fresh SetText, not yet re-laid-out
+            // — which would otherwise read as a truncation of the new text.
+            const size_t nlen = std::strlen(shown);
+            const size_t slen = std::strlen(src);
+            if (nlen >= 3 && nlen < slen && shown[nlen - 3] == '.' &&
+                shown[nlen - 2] == '.' && shown[nlen - 1] == '.' &&
+                std::memcmp(shown, src, nlen - 3) == 0)
+                truncated = true;
+        }
+    }
+    Game::Lua::PushBool(L, truncated);
+    return 1;
+}
+
+int __fastcall Script_SetMaxLines(void *L) {
+    void *fs = ResolveSelf(L, "Usage: fontstring:SetMaxLines(maxLines)");
+    if (fs == nullptr)
+        return 0;
+    // <= 0 or a non-number means "no cap" — the engine treats 0 as unlimited.
+    int maxLines = 0;
+    if (Game::Lua::IsNumber(L, 2)) {
+        const double n = Game::Lua::ToNumber(L, 2);
+        if (n > 0.0)
+            maxLines = static_cast<int>(n);
+    }
+    if (maxLines != Game::Read<int>(fs, Offsets::OFF_FONTSTRING_MAX_LINES)) {
+        Game::Ref<int>(fs, Offsets::OFF_FONTSTRING_MAX_LINES) = maxLines;
+        InvalidateLayout(fs);
+    }
+    return 0;
+}
+
+int __fastcall Script_GetMaxLines(void *L) {
+    void *fs = ResolveSelf(L, "Usage: fontstring:GetMaxLines()");
+    if (fs == nullptr)
+        return 0;
+    Game::Lua::PushNumber(
+        L, static_cast<double>(Game::Read<int>(fs, Offsets::OFF_FONTSTRING_MAX_LINES)));
+    return 1;
+}
+
 int __fastcall Script_SetFormattedText(void *L) {
     void *fs = nullptr;
     if (Game::Lua::Type(L, 1) == Game::Lua::TYPE_TABLE)
@@ -297,6 +404,9 @@ const Game::Lua::FrameMethodEntry g_methods[] = {
     {"GetWrappedWidth", &Script_GetWrappedWidth},
     {"GetNumLines", &Script_GetNumLines},
     {"GetLineHeight", &Script_GetLineHeight},
+    {"IsTruncated", &Script_IsTruncated},
+    {"SetMaxLines", &Script_SetMaxLines},
+    {"GetMaxLines", &Script_GetMaxLines},
     {"SetFormattedText", &Script_SetFormattedText},
 };
 

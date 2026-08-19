@@ -463,24 +463,30 @@ inline bool TextInReentry(const uint8_t *t) {
 // The tokenizer's stand-down environment, factored into ONE predicate so measure
 // and render can never disagree: true when inline-texture interception is ACTIVE
 // for `text` (spans are eaten as zero-width tokens and icons render). `editable`
-// is the caller's editbox bit at its own representation level — gxu flags bit
-// 0x40 at the tokenizer, fs+0x120 bit 0x1000 at the string-width co-hook
+// is the caller's editbox-PROXY bit at its own representation level — gxu flags
+// bit 0x40 at the tokenizer, fs+0x120 bit 0x1000 at the string-width co-hook
 // (FUN_0044D670 translates the latter into the former, so both call shapes
-// evaluate the same engine bit). The tokenizer's `text[0] == '|'` position check
-// stays at its call site — it's about where the tokenizer stands in the text,
-// not about whether the feature is active.
+// evaluate the same engine bit). That bit is actually NON-SPACE-WRAP (what
+// FontString:SetNonSpaceWrap toggles), used here as an editbox proxy — see
+// NodeEditable. The tokenizer's `text[0] == '|'` position check stays at its call
+// site — it's about where the tokenizer stands in the text, not about whether the
+// feature is active.
 bool InlineInterceptActive(const uint8_t *text, bool editable) {
     return g_inlineEnabled && !editable && text != nullptr && !TextInReentry(text) &&
            !TextInFocusedEditbox(text);
 }
 
-// A text node's flags (`[node+0x5c]`) bit 6 (0x40) distinguishes editable input
-// text (set on the macro editbox: flags 0x4D) from display text (chat 0x20D,
-// FontStrings 0x0D — bit 6 clear). It's a per-node property the emitter and
-// tokenizer don't otherwise use, and it rides in the tokenizer's flags argument,
-// so we can suppress inline rendering per node — covering editboxes the focus
-// global misses (multi-line editors build once, un-focused). This mirrors 4.3.4's
-// per-render texture-disable flag, adapted to 1.12's layout.
+// A text node's flags (`[node+0x5c]`) bit 6 (0x40) is the NON-SPACE-WRAP bit (the
+// one FontString:SetNonSpaceWrap sets; fs+0x120 bit 0x1000 → this via
+// FUN_0044D420). We use it as an editbox PROXY: multi-line editors enable
+// non-space-wrap (macro editbox node flags 0x4D, bit 6 set) while chat/display
+// text does not (chat 0x20D, FontStrings 0x0D — bit 6 clear), so suppressing
+// inline rendering when it is set covers editboxes the focused-buffer pointer test
+// misses (multi-line editors build once, un-focused). Caveat: the correlation is
+// not a guarantee — a DISPLAY fontstring with SetNonSpaceWrap(true) + inline |T
+// icons would be wrongly suppressed here (rare, never observed; the focused-buffer
+// pointer test remains the primary editbox guard). Mirrors 4.3.4's per-render
+// texture-disable flag, adapted to 1.12's layout.
 inline bool NodeEditable(const void *node) {
     return (Game::Read<uint32_t>(node, Offsets::OFF_TEXT_NODE_FLAGS) & 0x40u) != 0;
 }
@@ -739,14 +745,15 @@ Tokenizer_t g_tokenizerOriginal = nullptr;
 uint32_t __fastcall Tokenizer_h(uint8_t *text, int *bytesConsumed, uint32_t *colorOut,
                                 uint32_t flags, uint32_t *payloadOut) {
     // Intervene at a pipe when enabled, not manually suppressed, flags bit 0x40
-    // (EDITABLE) clear, and the text is NOT the focused editbox's own text.
+    // (the non-space-wrap editbox proxy — see NodeEditable) clear, and the text is
+    // NOT the focused editbox's own text.
     //
-    // Bit 0x40 (EDITABLE, set on the macro editor 0x4D) means "leave `|T` as
-    // literal" — it keeps the macro editor's measure literal so its caret stays
-    // aligned with the raw glyphs the emitter draws for it. Chat DISPLAY is
-    // editable=0 (flags 0x205, ICON-NODE probe), so this does NOT touch it — its
-    // icons still measure ~zero. Single-line inputs (chat / name box) lack bit 6
-    // and are handled by the two focused-input signals:
+    // Bit 0x40 (non-space-wrap; set on the macro editor 0x4D) is our proxy for
+    // "leave `|T` as literal" — it keeps the macro editor's measure literal so its
+    // caret stays aligned with the raw glyphs the emitter draws for it. Chat
+    // DISPLAY has it clear (flags 0x205, ICON-NODE probe), so this does NOT touch
+    // it — its icons still measure ~zero. Single-line inputs (chat / name box)
+    // lack bit 6 and are handled by the two focused-input signals:
     //   • MEASURE (caret/GetStringWidth loops this tokenizer over the input buffer
     //     in place) → TextInFocusedEditbox: `text` points into that buffer.
     //   • Re-entrant RENDER (the suppressed emitter delegates the raw line to the
@@ -873,8 +880,9 @@ float __fastcall StringWidth_h(void *fs) {
     const float base = g_stringWidthOriginal(fs);
     if (!LooksReadable(fs))
         return base;
-    // fs+0x120 bit 0x1000 → gxu editbox bit 0x40: an editbox measures the raw
-    // markup it renders, so its width must stay unadjusted (caret alignment).
+    // fs+0x120 bit 0x1000 (non-space-wrap; → gxu bit 0x40) as an editbox proxy —
+    // see NodeEditable. A multi-line editor measures the raw markup it renders, so
+    // its width must stay unadjusted (caret alignment).
     const bool editable =
         (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_MEASURE_FLAGS) & 0x1000u) != 0;
     const uint8_t *text = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_TEXT);
@@ -1319,12 +1327,14 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // editbox is focused.
     const bool sup_ptr = TextInFocusedEditbox(text);
     const bool sup_content = !sup_ptr && EmitLineIsFocusedEditbox(text);
-    // Suppress on the editable bit (bit 6). Verified via the ICON-NODE probe: chat
-    // DISPLAY is editable=0 (flags 0x205), the macro editor is editable=1 (0x4D),
-    // the focused chat edit box is editable=0 but content-matched (0x20D). So the
-    // editable bit cleanly catches the un-focused macro editor (which content-match
-    // can't, since it's not the focused editbox) without touching chat display.
-    // Content-match still handles the focused chat/name box.
+    // Suppress on the non-space-wrap proxy bit (bit 6; see NodeEditable). Verified
+    // via the ICON-NODE probe: chat DISPLAY has it clear (flags 0x205), the macro
+    // editor has it set (0x4D), the focused chat edit box has it clear but is
+    // content-matched (0x20D). So the bit cleanly catches the un-focused macro
+    // editor (which content-match can't, since it's not the focused editbox)
+    // without touching chat display. Content-match still handles the focused chat/
+    // name box. (Caveat: a display fs with SetNonSpaceWrap(true) would also match
+    // here — rare, never observed; see NodeEditable.)
     const bool sup_editable = node != nullptr && NodeEditable(node);
     if (sup_ptr || sup_content || sup_editable) {
         if (node != nullptr)

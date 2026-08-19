@@ -6809,7 +6809,12 @@ enum Offsets {
     // [node+0x48] and advances it per wrapped line, calling the emitter once
     // per line on the SAME node — so `emitterText == [node+0x48]` identifies
     // the first wrapped line (used to clear the node's icon list once per
-    // build, then accumulate across lines).
+    // build, then accumulate across lines). This buffer is a node-owned COPY of
+    // the DISPLAY text (SStrCopy'd in the node init FUN_005cd6d0, capacity
+    // [node+0x4c]) — the full source when it fits, or the ellipsized
+    // "<prefix>..." form when the display-text resolver truncated it. So
+    // comparing it against the fs source (OFF_FONTSTRING_TEXT) is the render-
+    // truth "displayed vs full" signal FontString:IsTruncated uses.
     OFF_TEXT_NODE_TEXT = 0x48,
     // Node font-size field (float), fed to the font-height helper.
     OFF_TEXT_NODE_FONT_SIZE = 0x1C,
@@ -6975,8 +6980,66 @@ enum Offsets {
     // FontString measure-flags word (the `flags` arg the measure paths pass to
     // FUN_0044D670/FUN_0044D750, and the justify field: bits 0-2). The measure
     // core translates fs-level bits to gxu/tokenizer flags; bit 0x1000 → gxu
-    // bit 0x40 = EDITABLE (OFF_TEXT_NODE_FLAGS bit 6 — the exact bit the
-    // tokenizer co-hook stands down on). The width hook tests it so editbox
-    // carets keep measuring the raw |T markup they render.
+    // bit 0x40 (OFF_TEXT_NODE_FLAGS bit 6 — the bit the tokenizer co-hook stands
+    // down on and the width hook tests).
+    //
+    // NOTE — bit 0x1000 is NON-SPACE-WRAP, not a dedicated "editable" flag: it is
+    // exactly what FontString:SetNonSpaceWrap toggles (verified in its setter
+    // FUN_0079E9F0: `fs+0x120 ^= 0x1000`). Text::InlineTexture uses gxu 0x40 as an
+    // EDITBOX PROXY — it works because the macro editor (the multi-line editbox
+    // the focused-buffer pointer test misses) enables non-space-wrap while chat/
+    // display text does not (observed node flags: macro editor 0x4D, chat 0x20D/
+    // 0x205). The correlation is not a guarantee: a DISPLAY fontstring with
+    // SetNonSpaceWrap(true) + inline |T icons would have its icons wrongly
+    // suppressed. Rare and never observed; the focused-buffer pointer test remains
+    // the primary editbox guard.
     OFF_FONTSTRING_MEASURE_FLAGS = 0x120,
+
+    // CSimpleFontString::GetDisplayText — the engine's truncation MECHANISM (the
+    // reason FontString:IsTruncated has anything to detect). `char* __thiscall(fs
+    // /*ecx*/, float availW, float availH)` (dummy-EDX __fastcall form; RET 0x8).
+    // Reads the raw text at fs+0xF0 and, when the box is BOUNDED (availW>0 AND
+    // (maxLines fs+0x128 != 0 OR availH>0)), measures how much fits via the
+    // chars-that-fit counter FUN_0044D960; on overflow it writes "<prefix>...\0"
+    // into the shared scratch buffer VAR_TEXT_ELLIPSIS_BUFFER and returns THAT,
+    // else the fs+0xF0 pointer (or NULL). The rebuild FUN_007724A0 calls it with
+    // availW=(rect.right−rect.left)/[fs+0x7C], availH=(rect.bottom−rect.top)/
+    // [fs+0x7C] and lays out whatever it returns — the node then COPIES that
+    // string into OFF_TEXT_NODE_TEXT. IsTruncated does NOT call this (the rect at
+    // fs+0x64 is zero between frames, so a Lua-time re-call always sees an
+    // unbounded box); it reads the node copy instead. Kept for the availW/availH
+    // derivation + the bounded-box gate. Verified in the Octo binary: prologue
+    // 55 8B EC 83 EC 0C 53 56 8B F1, ellipsis literal "..." at 0x00800188.
+    FUN_FONTSTRING_DISPLAY_TEXT = 0x00771EC0,
+    // Shared 0x1000-byte BSS scratch buffer the display-text resolver above writes
+    // the truncated, "..."-suffixed string into (memset FUN_0064A5A0 at 0x00772054,
+    // suffix append at 0x00772086) and returns on truncation. Transient — every
+    // layout rebuild overwrites it, and the node keeps its OWN copy (see
+    // OFF_TEXT_NODE_TEXT), so it is not read directly by any live path.
+    VAR_TEXT_ELLIPSIS_BUFFER = 0x00CF0CC0,
+
+    // Per-fontstring MAX LINE COUNT. 0 = no cap. When non-zero, the display-text
+    // resolver forces availH = maxLines × lineHeight (verified in FUN_00771EC0:
+    // `if (fs+0x128 != 0) param2 = fs+0x128 * lineHeight`), so text past that
+    // many wrapped lines is ellipsized. Backs FontString:SetMaxLines/GetMaxLines
+    // — the truncation control 1.12 never exposed for fontstrings (SetMaxLines is
+    // ScrollingMessageFrame-only). Vanilla fontstrings always word-wrap, so this
+    // is the way to force a single-line, ellipsized label: SetMaxLines(1).
+    OFF_FONTSTRING_MAX_LINES = 0x128,
+    // Lazily-computed measure caches (anchor units, 0.0f = dirty sentinel):
+    // fs+0xFC = string width (GetStringWidth), fs+0x100 = string height
+    // (GetStringHeight). SetText (FUN_00771D80) zeroes BOTH when the content
+    // changes; SetMaxLines mirrors that so the getters recompute after the cap.
+    OFF_FONTSTRING_WIDTH_CACHE = 0xFC,
+    OFF_FONTSTRING_HEIGHT_CACHE = 0x100,
+    // Ref-counted handle DecRef (resolve via FUN_0041af30 → --refcount → dtor at
+    // 0). `__fastcall(void *handle)`. SetText releases the text-block handle
+    // (fs+0xF8) through it before nulling the field; SetMaxLines does the same to
+    // force a fresh node rebuild with the new line cap.
+    FUN_HANDLE_RELEASE = 0x0041AED0,
+    // VisibleRegion layout invalidate — marks the region (the fs+0x24 layout
+    // subobject) dirty and propagates to parent/children so it re-lays-out.
+    // SetText's tail calls it `FUN_007680e0(fs+0x24, 0)`. `__thiscall(region,
+    // int)` (dummy-EDX form; the int arg is on the stack).
+    FUN_FONTSTRING_LAYOUT_INVALIDATE = 0x007680E0,
 };

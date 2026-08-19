@@ -170,6 +170,8 @@ build instructions.
   - [`fontstring:GetWrappedWidth()`](#fontstringgetwrappedwidth)
   - [`fontstring:GetNumLines()`](#fontstringgetnumlines)
   - [`fontstring:GetLineHeight()`](#fontstringgetlineheight)
+  - [`fontstring:IsTruncated()`](#fontstringistruncated)
+  - [`fontstring:SetMaxLines(maxLines)` / `fontstring:GetMaxLines()`](#fontstringsetmaxlinesmaxlines--fontstringgetmaxlines)
   - [`fontstring:SetFormattedText(format [, ...])`](#fontstringsetformattedtextformat--)
   - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
   - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
@@ -4119,6 +4121,54 @@ Returns the height of one text line in UI pixels — the font height,
 without the `SetSpacing` value. Later clients added the method. Use
 it with `GetNumLines` and `GetSpacing` to reconstruct
 `GetStringHeight` per line.
+
+### `fontstring:IsTruncated()`
+
+Returns `true` when the engine cut the text off with an ellipsis
+(`...`). Later clients added the method. The engine truncates only
+when the text does not fit a bounded box. The fontstring needs a
+width and a height, and the text must overflow that box. Vanilla
+fontstrings always wrap at spaces. So a box that is only one line
+tall truncates, but a taller box wraps the text and fits it.
+
+The method reads what the fontstring last drew. It compares the
+line the engine laid out against the full text. So the result
+reflects the text on screen, and the fontstring must have drawn at
+least once. `GetText` still returns the full text, not the cut-off
+line.
+
+```lua
+local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+f:SetWidth(60)
+f:SetHeight(14)             -- one line tall
+f:SetText("a name too long to fit")
+-- after it draws: f:IsTruncated() -> true  (draws "a name too...")
+```
+
+### `fontstring:SetMaxLines(maxLines)` / `fontstring:GetMaxLines()`
+
+Caps the fontstring to `maxLines` wrapped lines. Text past the cap
+is cut off with an ellipsis (`...`). Pass `0` (or nothing) for no
+cap. Later clients added the method for fontstrings. In 1.12 the
+engine already stores this cap per fontstring — this only adds the
+Lua binding.
+
+This is the way to make a truncating label in 1.12. Vanilla
+fontstrings always wrap at spaces, and there is no `SetWordWrap`. So
+`SetMaxLines(1)` gives a single-line label that ends in `...` when
+the text is too wide, even inside a tall box.
+
+The cap needs a width to take effect: the text must have an edge to
+overflow. `GetMaxLines` returns the current cap (`0` when unset). Use
+`IsTruncated` to check whether the cap actually cut the text.
+
+```lua
+local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+f:SetWidth(120)
+f:SetMaxLines(1)                 -- one line, then "..."
+f:SetText("a really long guild or player name that will not fit")
+-- draws "a really long gu..."   ; f:IsTruncated() -> true
+```
 
 ### `fontstring:SetFormattedText(format [, ...])`
 
