@@ -142,9 +142,10 @@ struct FsPlacements {
     // parked position" class) stops being touched entirely, so its regions
     // expire via the freshness check in Maintain.
     uint32_t lastTouchTick = 0;
-    // The fs color alpha last folded into the shown regions' colors (the
-    // chat-fade mirror — see FsColorAlpha below). Re-applied on change only.
-    uint8_t appliedAlpha = 0xFF;
+    // The fs colour key (folded BGRA colors[0] dword) last applied to the
+    // shown regions (the fade mirror — see FsColorKey below). Re-applied on
+    // change only.
+    uint32_t appliedColor = 0xFFFFFFFFu;
 };
 
 std::unordered_map<void *, FsPlacements> g_fsIcons;
@@ -168,25 +169,49 @@ void Hide(void *tex) {
     reinterpret_cast<ShowHide_t>(Offsets::FUN_FONTSTRING_HIDE)(tex);
 }
 
-// The fontstring's live color alpha byte — THE CHAT-FADE SIGNAL. The
-// ScrollingMessageFrame's fader animates each visible line fontstring's alpha
-// through the fs SetColor every frame (see OFF_FONTSTRING_COLOR_ARRAY's
-// derivation); mirroring the byte onto the line's icon regions makes inline
-// icons fade with their text. Count 0 = never colored = opaque default.
-uint8_t FsColorAlpha(const void *fs) {
+// The fontstring's live folded colour (slot 0's BGRA dword) — THE FADE
+// SIGNAL. Its alpha byte is the chat-fade channel: the ScrollingMessageFrame's
+// fader animates each visible line fontstring's alpha through the fs SetColor
+// every frame (see OFF_FONTSTRING_COLOR_ARRAY's derivation), and the engine
+// keeps the byte folded with the frame-chain effective alpha. Count 0 = never
+// coloured = opaque white default.
+uint32_t FsColorKey(const void *fs) {
     if (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_COLOR_COUNT) < 1u)
-        return 0xFFu;
+        return 0xFFFFFFFFu;
     const uint8_t *colors = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_COLOR_ARRAY);
     if (!LooksReadable(colors))
-        return 0xFFu;
-    return colors[3]; // slot 0's BGRA dword, alpha byte
+        return 0xFFFFFFFFu;
+    return *reinterpret_cast<const uint32_t *>(colors); // slot 0, BGRA
 }
 
-// Placement color with the fs's fade alpha folded in: the markup tint's own
-// alpha (0xFF except explicit tints) modulated by the line's live alpha.
-uint32_t FadedColor(const Placement &p, uint8_t fsAlpha) {
-    const uint32_t a = ((p.color >> 24) * fsAlpha) / 0xFFu;
-    return (a << 24) | (p.color & 0x00FFFFFFu);
+// Placement colour with the fs's live colour folded in. The markup tint's own
+// alpha (0xFF except explicit tints) is modulated by the line's live alpha —
+// everywhere. On the GLUE screen the icon's brightness ALSO follows the text
+// colour's VALUE (max of R/G/B): the glue AddonList greys disabled entries
+// through SetTextColor RGB alone (alpha stays 1.0), so value-follow is the
+// only channel that dims a disabled addon title's icons with its text. It can
+// never TINT — a gold or red title has a 255-max channel, factor 1.0, icons
+// untouched — and it is gated to glue (no local player) so in-world text
+// colours (guild green, whisper pink) keep icons exactly as before.
+uint32_t FadedColor(const Placement &p, uint32_t fsColor) {
+    const uint32_t a = ((p.color >> 24) * (fsColor >> 24)) / 0xFFu;
+    uint32_t rgb = p.color & 0x00FFFFFFu;
+    const bool inGlue =
+        *reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) == nullptr;
+    if (inGlue) {
+        const uint32_t b = fsColor & 0xFFu, g = (fsColor >> 8) & 0xFFu,
+                       r = (fsColor >> 16) & 0xFFu;
+        uint32_t value = r > g ? r : g;
+        if (b > value)
+            value = b;
+        if (value < 0xFFu) {
+            const uint32_t pr = ((rgb >> 16) & 0xFFu) * value / 0xFFu;
+            const uint32_t pg = ((rgb >> 8) & 0xFFu) * value / 0xFFu;
+            const uint32_t pb = (rgb & 0xFFu) * value / 0xFFu;
+            rgb = (pr << 16) | (pg << 8) | pb;
+        }
+    }
+    return (a << 24) | rgb;
 }
 
 // Creates a bare pooled CSimpleTexture parented to `parent` (ARTWORK).
@@ -206,7 +231,7 @@ void *CreateRegion(void *parent) {
 // line's fade alpha folded in), and the two anchor points expressed relative to
 // the owning fontstring's BOTTOMLEFT (so the engine moves the icon with its
 // line for free).
-void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint8_t fsAlpha) {
+void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint32_t fsColor) {
     auto *f = reinterpret_cast<uint8_t *>(fs);
     // Placement coords are FS-RELATIVE (from the fs rect's min corner), computed
     // at PAINT time in the same flush as the icon coords. Do NOT read the fs
@@ -226,7 +251,7 @@ void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint8_t fsAlpha
     // cell). v is top-down, same as the |T payload's top/bottom fields.
     const float coords[4] = {p.v0, p.u0, p.v1, p.u1};
     reinterpret_cast<SetTexCoord_t>(Offsets::FUN_SIMPLETEXTURE_SET_TEXCOORD)(r.tex, coords);
-    const uint32_t color = FadedColor(p, fsAlpha);
+    const uint32_t color = FadedColor(p, fsColor);
     reinterpret_cast<SetColor_t>(Offsets::FUN_FONTSTRING_SET_COLOR)(r.tex, &color);
 
     // Placement coords are in RESOLVED-rect (anchor) units, but anchor
@@ -329,9 +354,9 @@ void MaintainImpl() {
             continue;
         }
 
-        // The line's live fade alpha (see FsColorAlpha) — folded into every
+        // The line's live folded colour (see FsColorKey) — folded into every
         // color write below and mirrored on change.
-        const uint8_t fsAlpha = FsColorAlpha(fs);
+        const uint32_t fsColor = FsColorKey(fs);
 
         if (np.dirty) {
             np.dirty = false;
@@ -355,7 +380,7 @@ void MaintainImpl() {
                         r.tex, parent, Offsets::DRAWLAYER_ARTWORK, 0);
                     r.parent = parent;
                 }
-                ApplyPlacement(r, fs, np.want[static_cast<size_t>(i)], fsAlpha);
+                ApplyPlacement(r, fs, np.want[static_cast<size_t>(i)], fsColor);
             }
             // Hide surplus pooled regions from a previous, larger icon set.
             for (int i = want; i < np.shown; ++i)
@@ -364,13 +389,15 @@ void MaintainImpl() {
             np.shown = (want < static_cast<int>(np.regions.size()))
                            ? want
                            : static_cast<int>(np.regions.size());
-            np.appliedAlpha = fsAlpha;
-        } else if (np.shown > 0 && fsAlpha != np.appliedAlpha) {
-            // CHAT-FADE MIRROR: the ScrollingMessageFrame fader animates the
-            // line fontstring's color alpha every frame; keep the icon regions'
-            // alpha in lockstep so inline icons fade with their text. Change-
-            // driven — steady-state (no fade running) costs one byte compare.
-            np.appliedAlpha = fsAlpha;
+            np.appliedColor = fsColor;
+        } else if (np.shown > 0 && fsColor != np.appliedColor) {
+            // FADE MIRROR: the ScrollingMessageFrame fader animates the line
+            // fontstring's color alpha every frame, and the glue AddonList
+            // swaps title RGB on toggle; keep the icon regions' colour in
+            // lockstep (alpha everywhere, value-follow on glue — see
+            // FadedColor) so inline icons fade/dim with their text. Change-
+            // driven — steady state costs one dword compare.
+            np.appliedColor = fsColor;
             const int live = (np.shown < static_cast<int>(np.want.size()))
                                  ? np.shown
                                  : static_cast<int>(np.want.size());
@@ -378,7 +405,7 @@ void MaintainImpl() {
                 IconRegion &r = np.regions[static_cast<size_t>(i)];
                 if (r.tex == nullptr)
                     continue;
-                const uint32_t color = FadedColor(np.want[static_cast<size_t>(i)], fsAlpha);
+                const uint32_t color = FadedColor(np.want[static_cast<size_t>(i)], fsColor);
                 reinterpret_cast<SetColor_t>(Offsets::FUN_FONTSTRING_SET_COLOR)(r.tex, &color);
             }
         }
@@ -401,7 +428,7 @@ void MaintainImpl() {
                 reinterpret_cast<uint8_t *>(r.tex) + Offsets::OFF_REGION_RECT);
             const float gotW = (rr[3] > rr[1]) ? (rr[3] - rr[1]) : (rr[1] - rr[3]);
             if (gotW <= 1e-7f) {
-                ApplyPlacement(r, fs, p, fsAlpha); // rect not resolved yet — re-kick
+                ApplyPlacement(r, fs, p, fsColor); // rect not resolved yet — re-kick
                 continue;
             }
             const float err = gotW / wantW;
@@ -411,7 +438,7 @@ void MaintainImpl() {
                     r.corr = 0.05f;
                 else if (r.corr > 20.0f)
                     r.corr = 20.0f;
-                ApplyPlacement(r, fs, p, fsAlpha);
+                ApplyPlacement(r, fs, p, fsColor);
             }
         }
 

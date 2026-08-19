@@ -348,6 +348,16 @@ enum Offsets {
     // the measured origin÷rect-edge quotient to four digits).
     VAR_TEXT_RASTER_Y = 0x00C2B9A0,
     VAR_TEXT_RASTER_X = 0x00C2B9A4,
+    // gxu text-node invalidate/reset — `__fastcall(node)`. Zeroes the
+    // built-line count (+0x9C, the draw builder's early-out gate), resets the
+    // link-rect state (+0x80/+0x90) and wrap cache (+0x68/+0x6C), and frees
+    // all 8 page buffers — the next paint's pre-pass re-runs the builder, so
+    // the emitter re-bakes the node from scratch. This is what the node
+    // colour setter FUN_005CCB40 calls on a colour change for accumulation
+    // (bit-3-clear) nodes; InlineTexture's flush calls it for a SEGMENTED
+    // bit-3 node whose BASE colour RGB changed (glue AddonList toggle), since
+    // baked per-glyph RGB can't be patched in place (|c runs own theirs).
+    FUN_TEXT_NODE_INVALIDATE = 0x005CDEF0,
     // gxu font-face flags word. Bit 0 (0x1) = thin outline, bit 3 (0x8) =
     // thick outline: the emitter's prologue (FUN_005CCBE0) reads
     // *(fontFace+0x180) and grows the line height by [FLOAT_OUTLINE_EXTRA_*]

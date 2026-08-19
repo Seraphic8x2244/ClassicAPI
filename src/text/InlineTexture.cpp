@@ -209,6 +209,19 @@ std::unordered_map<void *, std::vector<IconRecord>> g_nodeIcons;
 // the map clears on /reload.
 std::unordered_map<void *, void *> g_nodeOwner;
 
+// node → the node's base colour (node+0x2c) at the time its segmented
+// per-glyph colours were baked. A segmented (bit-3, icon-bearing) node never
+// re-bakes on a colour change — the engine's colour setter skips the
+// invalidate for bit-3 nodes because UNIFORM bit-3 text recolours live at
+// paint — so a later SetTextColor RGB change (the glue AddonList's gold↔gray
+// toggle) froze the glyphs at their bake-time colour while plain titles
+// swapped fine. The flush compares this stamp against the live node colour
+// and re-bakes on an RGB change via the engine's own invalidate; alpha-only
+// changes take the cheap in-place alpha mirror instead (fades animate per
+// frame — a re-bake per frame would be absurd, and alpha is safe to patch in
+// place because every baked glyph carries the node alpha).
+std::unordered_map<void *, uint32_t> g_nodeBakedColor;
+
 // Region calibration, PEN units added to the region's position. x needs no
 // constant — the +3 once calibrated here turned out to be the missing lead pad,
 // now applied at draw. y keeps a 1px residual (the pen→anchor map's one true
@@ -292,6 +305,7 @@ void __fastcall NodeFree_h(void *node) {
     if (node != nullptr) {
         g_nodeIcons.erase(node);
         g_nodeOwner.erase(node);
+        g_nodeBakedColor.erase(node);
     }
     g_nodeFreeOriginal(node);
 }
@@ -1196,6 +1210,10 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // delegating to the original per segment.
     std::vector<IconRecord> &icons = g_nodeIcons[node];
 
+    // Stamp the base colour this bake is built from — the flush re-bakes the
+    // node if the live node colour's RGB later diverges (see g_nodeBakedColor).
+    g_nodeBakedColor[node] = Game::Read<uint32_t>(node, Offsets::OFF_TEXT_NODE_COLOR);
+
     // Bit 3 of the node flags gates the emitter's per-call batch-clear. When set
     // (the standalone-FontString case), each original call would wipe the page
     // batches, so segmenting would lose all but the last run. Handle it by doing
@@ -1552,18 +1570,35 @@ void FlushLayout(void *layout) {
             // the icon fade mirror. Chat (bit-3 clear) is excluded: the engine
             // re-bakes those on colour change itself.
             if ((Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_FLAGS) & 8u) != 0) {
-                const uint8_t liveA = Game::Read<uint8_t>(n, Offsets::OFF_TEXT_NODE_COLOR + 3);
-                for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
-                    auto *buf =
-                        Game::Read<uint8_t *>(n, Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
-                    if (buf == nullptr)
-                        continue;
-                    const int count = Game::Read<int>(buf, Offsets::OFF_TEXT_PAGE_COLOR_COUNT);
-                    auto *colors = Game::Read<uint8_t *>(buf, Offsets::OFF_TEXT_PAGE_COLORS);
-                    if (colors == nullptr || count <= 0 || colors[3] == liveA)
-                        continue;
-                    for (int i = 0; i < count; ++i)
-                        colors[i * 4 + 3] = liveA;
+                const uint32_t liveColor = Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_COLOR);
+                auto baked = g_nodeBakedColor.find(node);
+                if (baked != g_nodeBakedColor.end() &&
+                    ((baked->second ^ liveColor) & 0x00FFFFFFu) != 0) {
+                    // The base colour's RGB changed since the bake (the glue
+                    // AddonList's gold↔gray toggle). Baked per-glyph RGB can't
+                    // be patched in place — |c runs own their colours — so
+                    // re-bake, exactly what the engine's colour setter does
+                    // for accumulation nodes: invalidate the node and the next
+                    // paint's pre-pass re-runs the builder (which re-stamps
+                    // g_nodeBakedColor and re-records the icons). Stamp first
+                    // so a delayed rebuild can't re-trigger every flush.
+                    baked->second = liveColor;
+                    reinterpret_cast<void(__fastcall *)(void *)>(
+                        Offsets::FUN_TEXT_NODE_INVALIDATE)(node);
+                } else {
+                    const uint8_t liveA = static_cast<uint8_t>(liveColor >> 24);
+                    for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
+                        auto *buf = Game::Read<uint8_t *>(
+                            n, Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+                        if (buf == nullptr)
+                            continue;
+                        const int count = Game::Read<int>(buf, Offsets::OFF_TEXT_PAGE_COLOR_COUNT);
+                        auto *colors = Game::Read<uint8_t *>(buf, Offsets::OFF_TEXT_PAGE_COLORS);
+                        if (colors == nullptr || count <= 0 || colors[3] == liveA)
+                            continue;
+                        for (int i = 0; i < count; ++i)
+                            colors[i * 4 + 3] = liveA;
+                    }
                 }
             }
             const float ox = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_X);
@@ -1683,11 +1718,12 @@ static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 } // namespace
 
 void PrepareForReload() {
-    // /reload frees every gxu text node — g_nodeIcons/g_nodeOwner hold stale
-    // node pointers. Forget them (records rebuild as the reloaded UI re-emits
-    // its text). K survives (resolution/uiScale don't change across /reload).
+    // /reload frees every gxu text node — the per-node maps hold stale node
+    // pointers. Forget them (records rebuild as the reloaded UI re-emits its
+    // text). K needs no state at all (read live from engine globals).
     g_nodeIcons.clear();
     g_nodeOwner.clear();
+    g_nodeBakedColor.clear();
 }
 
 } // namespace Text::InlineTexture
