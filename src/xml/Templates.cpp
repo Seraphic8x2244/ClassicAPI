@@ -60,19 +60,16 @@ const char *Attr(const uint8_t *node, const char *name) {
 }
 
 const uint8_t *FirstChild(const uint8_t *node) {
-    return *reinterpret_cast<const uint8_t *const *>(
-        node + Offsets::OFF_XML_NODE_CHILD);
+    return Game::Read<const uint8_t *>(node, Offsets::OFF_XML_NODE_CHILD);
 }
 const uint8_t *NextSibling(const uint8_t *node) {
-    return *reinterpret_cast<const uint8_t *const *>(
-        node + Offsets::OFF_XML_NODE_SIBLING);
+    return Game::Read<const uint8_t *>(node, Offsets::OFF_XML_NODE_SIBLING);
 }
 
 // Case-insensitive tag match, using the engine's own comparator (the same one
 // FUN_006f1eb0 uses to recognize "AbsDimension" etc.).
 bool TagEquals(const uint8_t *node, const char *tag) {
-    const char *t = *reinterpret_cast<const char *const *>(
-        node + Offsets::OFF_XML_NODE_TAG);
+    const char *t = Game::Read<const char *>(node, Offsets::OFF_XML_NODE_TAG);
     if (t == nullptr)
         return false;
     return reinterpret_cast<SStrCmpI_t>(Offsets::FUN_SSTR_CMP_I)(
@@ -119,35 +116,32 @@ void ReadSize(const uint8_t *node, double *outW, double *outH) {
 int __fastcall Script_GetTemplates(void *L) {
     Game::Lua::NewTable(L); // the result array
 
-    const uint32_t mask =
-        *reinterpret_cast<const uint32_t *>(Offsets::VAR_XML_TEMPLATE_MASK);
+    const uint32_t mask = Game::Read<uint32_t>(Offsets::VAR_XML_TEMPLATE_MASK);
     if (mask == 0xFFFFFFFFu)
         return 1; // no template has ever registered — empty array
 
-    const uint8_t *base = *reinterpret_cast<const uint8_t *const *>(
-        Offsets::VAR_XML_TEMPLATE_TABLE);
+    const uint8_t *base = Game::Read<const uint8_t *>(Offsets::VAR_XML_TEMPLATE_TABLE);
     if (base == nullptr)
         return 1;
 
     int outIdx = 0;
     for (uint32_t b = 0; b <= mask; ++b) {
         const uint8_t *bucket = base + b * Offsets::XML_TEMPLATE_BUCKET_STRIDE;
-        const int linkOff = *reinterpret_cast<const int *>(
-            bucket + Offsets::OFF_XML_TEMPLATE_BUCKET_LINKOFF);
-        const uint8_t *node = *reinterpret_cast<const uint8_t *const *>(
-            bucket + Offsets::OFF_XML_TEMPLATE_BUCKET_HEAD);
+        const int linkOff = Game::Read<int>(
+            bucket, Offsets::OFF_XML_TEMPLATE_BUCKET_LINKOFF);
+        const uint8_t *node = Game::Read<const uint8_t *>(
+            bucket, Offsets::OFF_XML_TEMPLATE_BUCKET_HEAD);
 
         // Walk the intrusive chain; the tail sentinel has its low bit set
         // (mirrors the engine's own traversal in FUN_006ee6f0).
         while (node != nullptr && (reinterpret_cast<uintptr_t>(node) & 1) == 0) {
-            const char *name = *reinterpret_cast<const char *const *>(
-                node + Offsets::OFF_XML_TEMPLATE_NODE_NAME);
-            const uint8_t *def = *reinterpret_cast<const uint8_t *const *>(
-                node + Offsets::OFF_XML_TEMPLATE_NODE_DEF);
+            const char *name = Game::Read<const char *>(
+                node, Offsets::OFF_XML_TEMPLATE_NODE_NAME);
+            const uint8_t *def = Game::Read<const uint8_t *>(
+                node, Offsets::OFF_XML_TEMPLATE_NODE_DEF);
             const char *type =
                 (def != nullptr)
-                    ? *reinterpret_cast<const char *const *>(
-                          def + Offsets::OFF_XML_NODE_TAG)
+                    ? Game::Read<const char *>(def, Offsets::OFF_XML_NODE_TAG)
                     : nullptr;
 
             ++outIdx;
@@ -177,8 +171,7 @@ int __fastcall Script_GetTemplateInfo(void *L) {
 
     Game::Lua::NewTable(L); // XMLTemplateInfo
 
-    const char *type = *reinterpret_cast<const char *const *>(
-        node + Offsets::OFF_XML_NODE_TAG);
+    const char *type = Game::Read<const char *>(node, Offsets::OFF_XML_NODE_TAG);
     Game::Lua::SetFieldString(L, "type", type != nullptr ? type : "");
 
     double w = 0.0, h = 0.0;

@@ -58,8 +58,8 @@ bool ReadItemGuid(const uint8_t *item, uint32_t *lo, uint32_t *hi) {
     auto *inst = Item::InstanceBlock(item);
     if (inst == nullptr)
         return false;
-    *lo = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);
-    *hi = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID + 4);
+    *lo = Game::Read<uint32_t>(inst, Offsets::OFF_INSTANCE_BLOCK_GUID);
+    *hi = Game::Read<uint32_t>(inst, Offsets::OFF_INSTANCE_BLOCK_GUID + 4);
     return true;
 }
 
@@ -84,8 +84,8 @@ int __fastcall Script_C_Item_IsLocked(void *L) {
         Game::Lua::PushBool(L, false);
         return 1;
     }
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        item + Offsets::OFF_ITEM_CLIENT_LOCK);
+    const uint32_t flags = Game::Read<uint32_t>(
+        item, Offsets::OFF_ITEM_CLIENT_LOCK);
     Game::Lua::PushBool(L, (flags & Offsets::ITEM_CLIENT_LOCK_BIT) != 0);
     return 1;
 }

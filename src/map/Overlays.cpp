@@ -274,7 +274,7 @@ void ResolveTiles(ResolvedOverlay *out, const char *basePath, int dbcW,
 const ResolvedOverlay *CachedResolve(int overlayId, const char *basePath,
                                      int dbcW, int dbcH) {
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_WORLDMAP_OVERLAY_COUNT);
+        Game::Read<int>(Offsets::VAR_WORLDMAP_OVERLAY_COUNT);
     if (g_cache == nullptr || g_cacheSize < count + 1) {
         auto **fresh = new ResolvedOverlay *[count + 1]();
         for (int i = 0; i < g_cacheSize; ++i)
@@ -388,8 +388,7 @@ const uint8_t *ExplorationBits() {
     auto *player = static_cast<const uint8_t *>(fn("player"));
     if (player == nullptr)
         return nullptr;
-    auto *sub = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    auto *sub = Game::Read<const uint8_t *>(player, Offsets::OFF_CGPLAYER_INFO);
     if (sub == nullptr)
         return nullptr;
     return sub + Offsets::OFF_PLAYER_EXPLORED_BITS;
@@ -404,8 +403,8 @@ bool IsOverlayExplored(const uint8_t *overlayRec, const uint8_t *bits) {
     if (bits == nullptr)
         return false;
     for (int k = 0; k < 4; ++k) {
-        const int areaID = *reinterpret_cast<const int *>(
-            overlayRec + Offsets::OFF_WMO_AREA_ID + k * 4);
+        const int areaID =
+            Game::Read<int>(overlayRec, Offsets::OFF_WMO_AREA_ID + k * 4);
         if (areaID <= 0)
             continue;
         const uint8_t *areaRec =
@@ -413,10 +412,10 @@ bool IsOverlayExplored(const uint8_t *overlayRec, const uint8_t *bits) {
                         Offsets::VAR_AREATABLE_COUNT, static_cast<uint32_t>(areaID));
         if (areaRec == nullptr)
             continue;
-        if (*reinterpret_cast<const int *>(areaRec + Offsets::OFF_AREATABLE_EXPLORE_GATE) < 0)
+        if (Game::Read<int>(areaRec, Offsets::OFF_AREATABLE_EXPLORE_GATE) < 0)
             return true; // area needs no exploration → always counts
-        const int areaBit = *reinterpret_cast<const int *>(
-            areaRec + Offsets::OFF_AREATABLE_AREA_BIT);
+        const int areaBit =
+            Game::Read<int>(areaRec, Offsets::OFF_AREATABLE_AREA_BIT);
         if (areaBit < 0)
             continue;
         const int byteIdx = areaBit >> 3;
@@ -455,8 +454,7 @@ void PushZoneOverlays(void *L, int wmaRow, Filter filter) {
                                         static_cast<uint32_t>(wmaRow));
     const char *mapDir =
         (wmaRec != nullptr)
-            ? *reinterpret_cast<const char *const *>(wmaRec +
-                                                     Offsets::OFF_WMA_NAME)
+            ? Game::Read<const char *>(wmaRec, Offsets::OFF_WMA_NAME)
             : nullptr;
 
     // Exploration bitfield only needed for the filtered variants.
@@ -464,15 +462,14 @@ void PushZoneOverlays(void *L, int wmaRow, Filter filter) {
         (filter == Filter::All) ? nullptr : ExplorationBits();
 
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_WORLDMAP_OVERLAY_COUNT);
+        Game::Read<int>(Offsets::VAR_WORLDMAP_OVERLAY_COUNT);
     int outIdx = 0;
     for (int id = 1; id <= count; ++id) {
         const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_OVERLAY_RECORDS,
                                          Offsets::VAR_WORLDMAP_OVERLAY_COUNT,
                                          static_cast<uint32_t>(id));
         if (rec == nullptr ||
-            *reinterpret_cast<const int *>(rec + Offsets::OFF_WMO_WORLDMAP_AREA) !=
-                wmaRow)
+            Game::Read<int>(rec, Offsets::OFF_WMO_WORLDMAP_AREA) != wmaRow)
             continue;
 
         if (filter != Filter::All) {
@@ -483,8 +480,8 @@ void PushZoneOverlays(void *L, int wmaRow, Filter filter) {
                 continue;
         }
 
-        const char *texName = *reinterpret_cast<const char *const *>(
-            rec + Offsets::OFF_WMO_TEXTURE_NAME);
+        const char *texName =
+            Game::Read<const char *>(rec, Offsets::OFF_WMO_TEXTURE_NAME);
         const bool hasTexture = (texName != nullptr && texName[0] != '\0');
 
         const auto fieldInt = [rec](uintptr_t off) {

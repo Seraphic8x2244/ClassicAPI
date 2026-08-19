@@ -77,11 +77,10 @@ const auto RawGetI = reinterpret_cast<RawGetI_t>(Offsets::LUA_RAWGETI);
 // Returns the frame's Lua object ref (frame+0x08), lazily creating it exactly
 // as the engine runner does (`if (refcount == 0) ScriptRegister(frame, 0)`).
 int EnsureLuaRef(void *frame) {
-    auto *f = reinterpret_cast<uint8_t *>(frame);
-    if (*reinterpret_cast<int *>(f + Offsets::OFF_COBJECT_LUA_REFCOUNT) == 0)
+    if (Game::Read<int>(frame, Offsets::OFF_COBJECT_LUA_REFCOUNT) == 0)
         reinterpret_cast<ScriptRegister_t>(
             Offsets::FUN_FRAMESCRIPT_OBJECT_SCRIPT_REGISTER)(frame, nullptr);
-    return *reinterpret_cast<int *>(f + Offsets::OFF_COBJECT_LUA_REF);
+    return Game::Read<int>(frame, Offsets::OFF_COBJECT_LUA_REF);
 }
 
 // Writes "arg" + k (k in 1..19) into buf; buf must hold at least 6 bytes.
@@ -193,9 +192,7 @@ bool RunModern(int handlerRef, void *frame, const char *fmt, const void *vaPtr) 
     // as the first positional to mirror retail's (self, event, arg1..argN).
     const bool isOnEvent =
         haveThis &&
-        *reinterpret_cast<const int *>(reinterpret_cast<uint8_t *>(frame) +
-                                       Offsets::OFF_FRAME_ONEVENT_SLOT) ==
-            handlerRef;
+        Game::Read<int>(frame, Offsets::OFF_FRAME_ONEVENT_SLOT) == handlerRef;
     const int selfRef = haveThis ? EnsureLuaRef(frame) : 0;
 
     Arg args[kMaxArgs];
@@ -230,7 +227,7 @@ bool RunModern(int handlerRef, void *frame, const char *fmt, const void *vaPtr) 
 
     // --- call handler(self, [event,] arg1..argN) ---------------------------
     const int callBase = GetTop(L); // == base + saved-block size
-    const int errRef = *reinterpret_cast<const int *>(
+    const int errRef = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_FRAMESCRIPT_ERROR_HANDLER_REF));
     int errIdx = 0;
     if (errRef > 0) {

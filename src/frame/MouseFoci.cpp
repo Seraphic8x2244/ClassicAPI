@@ -54,8 +54,7 @@ int CallScript(uintptr_t fn, void *L) {
 
 // The UI context is a pointer stored at VAR_UI_CONTEXT_PTR (null pre-world).
 void *UIContext() {
-    return *reinterpret_cast<void *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
+    return Game::Read<void *>(static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
 }
 
 // Strata name -> draw rank, low (behind) to high (on top). Unknown -> 0.
@@ -110,8 +109,7 @@ Cursor ReadCursor(void *L) {
 
 // With `self` at Lua idx 1, is the cursor within the frame's rect?
 bool CursorOverSelf(void *L, void *obj, const Cursor &cur) {
-    const float effScale = *reinterpret_cast<const float *>(
-        reinterpret_cast<const uint8_t *>(obj) + Offsets::OFF_REGION_EFFECTIVE_SCALE);
+    const float effScale = Game::Read<float>(obj, Offsets::OFF_REGION_EFFECTIVE_SCALE);
     if (effScale == 0.0f)
         return false; // unpositioned region — no rect
     double left, right, top, bottom;
@@ -141,19 +139,16 @@ int __fastcall Script_GetMouseFoci(void *L) {
 
     // The engine's authoritative topmost focus — the frame GetMouseFocus
     // returns. Forced to index 1 below.
-    void *focus = *reinterpret_cast<void *const *>(
-        reinterpret_cast<uint8_t *>(ctx) + Offsets::OFF_UI_CONTEXT_MOUSE_FOCUS);
+    void *focus = Game::Read<void *>(ctx, Offsets::OFF_UI_CONTEXT_MOUSE_FOCUS);
 
     const Cursor cur = ReadCursor(L);
 
     std::vector<Hit> hits;
-    void *node = *reinterpret_cast<void *const *>(
-        reinterpret_cast<uint8_t *>(ctx) + Offsets::OFF_UI_CONTEXT_FRAME_LIST_HEAD);
+    void *node = Game::Read<void *>(ctx, Offsets::OFF_UI_CONTEXT_FRAME_LIST_HEAD);
     while (node != nullptr && (reinterpret_cast<uintptr_t>(node) & 1) == 0) {
         // Read the next link before any Lua work (the walk is engine-list
         // based, independent of the Lua stack, but this keeps it obvious).
-        void *next = *reinterpret_cast<void *const *>(
-            reinterpret_cast<uint8_t *>(node) + Offsets::OFF_FRAME_ENUM_NEXT);
+        void *next = Game::Read<void *>(node, Offsets::OFF_FRAME_ENUM_NEXT);
 
         Game::Lua::SetTop(L, 0);
         UI::FrameObject::Push(L, node); // (self)
@@ -164,8 +159,7 @@ int __fastcall Script_GetMouseFoci(void *L) {
             Game::Lua::SetTop(L, 1);
             CallScript(Offsets::FUN_SCRIPT_FRAME_GET_STRATA, L); // (self, strata)
             const int rank = StrataRank(Game::Lua::ToString(L, 2));
-            const int level = *reinterpret_cast<const int *>(
-                reinterpret_cast<uint8_t *>(node) + Offsets::OFF_FRAME_LEVEL);
+            const int level = Game::Read<int>(node, Offsets::OFF_FRAME_LEVEL);
             hits.push_back(Hit{node, rank, level});
         }
 

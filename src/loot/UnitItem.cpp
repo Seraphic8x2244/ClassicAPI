@@ -57,8 +57,8 @@ uint32_t s_desiredItemID = 0;
 int s_ticksSinceTransition = 0;
 
 uint64_t ReadLootTargetGuid() {
-    const uint32_t lo = *reinterpret_cast<const uint32_t *>(Offsets::VAR_LOOT_GUID_LO);
-    const uint32_t hi = *reinterpret_cast<const uint32_t *>(Offsets::VAR_LOOT_GUID_HI);
+    const uint32_t lo = Game::Read<uint32_t>(Offsets::VAR_LOOT_GUID_LO);
+    const uint32_t hi = Game::Read<uint32_t>(Offsets::VAR_LOOT_GUID_HI);
     return static_cast<uint64_t>(hi) << 32 | lo;
 }
 

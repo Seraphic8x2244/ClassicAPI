@@ -35,8 +35,8 @@ void ReadPlayerClassRace(uint8_t *outClassByte, uint8_t *outRaceByte) {
     auto *player = static_cast<const uint8_t *>(fn("player"));
     if (player == nullptr)
         return;
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(
+        player, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return;
     *outClassByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_CLASS_BYTE);
@@ -56,9 +56,9 @@ uint32_t FindSkillIDForSpell(int spellID) {
     if (spellID <= 0)
         return 0;
 
-    auto *const *records = *reinterpret_cast<const uint8_t *const *const *>(
+    auto *const *records = Game::Read<const uint8_t *const *>(
         static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
+    const int count = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_COUNT));
     if (records == nullptr || count <= 0)
         return 0;
@@ -75,13 +75,13 @@ uint32_t FindSkillIDForSpell(int spellID) {
         const uint8_t *rec = records[i];
         if (rec == nullptr)
             continue;
-        const int rowSpell = *reinterpret_cast<const int *>(
-            rec + Offsets::OFF_SLA_SPELL_ID);
+        const int rowSpell = Game::Read<int>(
+            rec, Offsets::OFF_SLA_SPELL_ID);
         if (rowSpell != spellID)
             continue;
 
-        const uint32_t skill = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_SKILL_ID);
+        const uint32_t skill = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_SKILL_ID);
         if (skill == 0)
             continue;
         if (fallback == 0)
@@ -92,14 +92,14 @@ uint32_t FindSkillIDForSpell(int spellID) {
         if (playerClassBit == 0)
             return skill;
 
-        const uint32_t classMask = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_CLASS_MASK);
-        const uint32_t raceMask = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_RACE_MASK);
-        const uint32_t excludeClass = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_EXCLUDE_CLASS);
-        const uint32_t excludeRace = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_EXCLUDE_RACE);
+        const uint32_t classMask = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_CLASS_MASK);
+        const uint32_t raceMask = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_RACE_MASK);
+        const uint32_t excludeClass = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_EXCLUDE_CLASS);
+        const uint32_t excludeRace = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_EXCLUDE_RACE);
         if ((excludeClass & playerClassBit) != 0)
             continue;
         if ((excludeRace & playerRaceBit) != 0)
@@ -246,8 +246,8 @@ int __fastcall Script_GetSkillLineRank(void *L) {
         return 1;
     }
 
-    auto *sub = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    auto *sub = Game::Read<const uint8_t *>(
+        player, Offsets::OFF_CGPLAYER_INFO);
     if (sub == nullptr) {
         Game::Lua::PushNil(L);
         return 1;
@@ -256,11 +256,11 @@ int __fastcall Script_GetSkillLineRank(void *L) {
     const uint8_t *rec = sub + Offsets::OFF_SKILL_INFO_TABLE +
                          slot * Offsets::SKILL_INFO_STRIDE;
     const uint32_t cur =
-        *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_CUR);
+        Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_CUR);
     const uint32_t max =
-        *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_MAX);
+        Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_MAX);
     const uint32_t modifier =
-        *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_BONUS);
+        Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_BONUS);
 
     Game::Lua::PushNumber(L, static_cast<double>(cur));
     Game::Lua::PushNumber(L, static_cast<double>(max));

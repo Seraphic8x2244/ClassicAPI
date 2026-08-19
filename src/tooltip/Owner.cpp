@@ -53,15 +53,14 @@ static int __fastcall Script_GameTooltipGetOwner(void *L) {
     if (tooltip == nullptr)
         return 0;
 
-    auto *layoutFrame = *reinterpret_cast<uint8_t *const *>(
-        static_cast<uint8_t *>(tooltip) + Offsets::OFF_TOOLTIP_OWNER);
+    auto *layoutFrame = Game::Read<uint8_t *>(tooltip, Offsets::OFF_TOOLTIP_OWNER);
     if (layoutFrame == nullptr) {
         Game::Lua::PushNil(L);
         return 1;
     }
     auto *ownerFrame = layoutFrame - Offsets::OFF_FRAME_LAYOUT_SUBOBJECT;
-    const int refKey = *reinterpret_cast<const int *>(
-        ownerFrame + Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
+    const int refKey =
+        Game::Read<int>(ownerFrame, Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
     auto rawgeti = reinterpret_cast<LuaRawGetI_t>(
         Offsets::FUN_FRAMESCRIPT_PUSH_OBJECT);
     rawgeti(L, Game::Lua::REGISTRY_INDEX, refKey);

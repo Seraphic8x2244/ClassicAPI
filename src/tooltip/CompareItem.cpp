@@ -374,8 +374,7 @@ void RenderDeltas(void *self, void *L, const Accum *acc, double dpsDelta) {
 const char *FSText(const void *fs) {
     if (fs == nullptr)
         return nullptr;
-    return *reinterpret_cast<const char *const *>(
-        static_cast<const uint8_t *>(fs) + Offsets::OFF_FONTSTRING_TEXT);
+    return Game::Read<const char *>(fs, Offsets::OFF_FONTSTRING_TEXT);
 }
 
 // Whether a line's FontString is actually shown. The tooltip clear hides
@@ -384,8 +383,7 @@ const char *FSText(const void *fs) {
 bool FSVisible(const void *fs) {
     if (fs == nullptr)
         return false;
-    return *reinterpret_cast<const int *>(
-               static_cast<const uint8_t *>(fs) + Offsets::OFF_FONTSTRING_VISIBLE) != 0;
+    return Game::Read<int>(fs, Offsets::OFF_FONTSTRING_VISIBLE) != 0;
 }
 
 // Reads a FontString's current color into `*out` (4-byte {b,g,r,a}).
@@ -394,8 +392,7 @@ bool FSVisible(const void *fs) {
 bool FSColor(const void *fs, uint32_t *out) {
     if (fs == nullptr)
         return false;
-    auto *slot = *reinterpret_cast<const uint32_t *const *>(
-        static_cast<const uint8_t *>(fs) + Offsets::OFF_FONTSTRING_COLOR_PTR);
+    auto *slot = Game::Read<const uint32_t *>(fs, Offsets::OFF_FONTSTRING_COLOR_PTR);
     if (slot == nullptr)
         return false;
     *out = *slot;
@@ -421,8 +418,7 @@ using ShowHideFS_t = void(__fastcall *)(void *fs);
 void FSSetShown(void *fs, bool shown) {
     if (fs == nullptr)
         return;
-    *reinterpret_cast<int *>(static_cast<uint8_t *>(fs) +
-                             Offsets::OFF_FONTSTRING_SHOWN_FLAG) = shown ? 1 : 0;
+    Game::Ref<int>(fs, Offsets::OFF_FONTSTRING_SHOWN_FLAG) = shown ? 1 : 0;
     reinterpret_cast<ShowHideFS_t>(
         shown ? Offsets::FUN_FONTSTRING_SHOW : Offsets::FUN_FONTSTRING_HIDE)(fs);
 }
@@ -452,19 +448,19 @@ void CopyLineCell(void *dst, const void *src) {
 
 void PrependCurrentlyEquipped(void *self, void *L) {
     auto *t = static_cast<uint8_t *>(self);
-    int *numLines = reinterpret_cast<int *>(t + Offsets::OFF_GAMETOOLTIP_NUM_LINES);
+    int *numLines = Game::Ptr<int>(t, Offsets::OFF_GAMETOOLTIP_NUM_LINES);
     const int allocated =
-        *reinterpret_cast<const int *>(t + Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
+        Game::Read<int>(t, Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
     const int n = *numLines;
     if (n <= 0 || n + 1 > allocated)
         return; // nothing built, or pool full (LinePool keeps 60, so rare)
 
-    auto **leftArr = *reinterpret_cast<void ***>(
-        t + Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 8);
-    auto **rightArr = *reinterpret_cast<void ***>(
-        t + Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC + 8);
-    auto *wrapArr = *reinterpret_cast<int **>(
-        t + Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC + 8);
+    auto **leftArr = Game::Read<void **>(
+        t, Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 8);
+    auto **rightArr = Game::Read<void **>(
+        t, Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC + 8);
+    auto *wrapArr = Game::Read<int *>(
+        t, Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC + 8);
     if (leftArr == nullptr || rightArr == nullptr || wrapArr == nullptr)
         return;
 
@@ -495,16 +491,15 @@ int EquippedSuffix(const uint8_t *item) {
     auto *desc = Item::ObjectFields(item);
     if (desc == nullptr)
         return 0;
-    return static_cast<int>(*reinterpret_cast<const uint32_t *>(
-        desc + Offsets::OFF_DESCRIPTOR_RANDOM_PROPERTY));
+    return static_cast<int>(
+        Game::Read<uint32_t>(desc, Offsets::OFF_DESCRIPTOR_RANDOM_PROPERTY));
 }
 
 uint64_t EquippedGUID(const uint8_t *item) {
     auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
-    return *reinterpret_cast<const uint64_t *>(
-        instance + Offsets::OFF_INSTANCE_BLOCK_GUID);
+    return Game::Read<uint64_t>(instance, Offsets::OFF_INSTANCE_BLOCK_GUID);
 }
 
 int __fastcall Script_SetHyperlinkCompareItem(void *L) {
@@ -545,8 +540,8 @@ int __fastcall Script_SetHyperlinkCompareItem(void *L) {
     if (hoveredRec == nullptr)
         return bail(0); // no link and no comparisonTooltip item, or not cached yet
 
-    const int invType = static_cast<int>(*reinterpret_cast<const uint32_t *>(
-        hoveredRec + Offsets::OFF_ITEMSTATS_INVENTORY_TYPE));
+    const int invType = static_cast<int>(
+        Game::Read<uint32_t>(hoveredRec, Offsets::OFF_ITEMSTATS_INVENTORY_TYPE));
     int slots[2] = {0, 0};
     const int nSlots = SlotsForInvType(invType, slots);
     if (nSlots == 0)

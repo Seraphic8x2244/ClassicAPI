@@ -247,12 +247,10 @@ void *OwningFontStringOf(void *node) {
     auto ow = g_nodeOwner.find(node);
     if (ow == g_nodeOwner.end() || !LooksReadable(ow->second))
         return nullptr;
-    auto *of = reinterpret_cast<uint8_t *>(ow->second);
-    void *block = *reinterpret_cast<void **>(of + Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    void *block = Game::Read<void *>(ow->second, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
     if (!LooksReadable(block))
         return nullptr;
-    void *cur = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
-                                           Offsets::OFF_TEXTBLOCK_NODE);
+    void *cur = Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE);
     return (cur == node) ? ow->second : nullptr;
 }
 
@@ -318,12 +316,10 @@ void __fastcall RebuildString_h(void *fs) {
     g_rebuildOriginal(fs);
     if (!LooksReadable(fs))
         return;
-    void *block = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fs) +
-                                             Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    void *block = Game::Read<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
     if (!LooksReadable(block))
         return;
-    void *node = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
-                                            Offsets::OFF_TEXTBLOCK_NODE);
+    void *node = Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE);
     if (LooksReadable(node))
         g_nodeOwner[node] = fs;
 }
@@ -343,12 +339,11 @@ static const Game::HookAutoRegister _rebuildHook{Offsets::FUN_FONTSTRING_REBUILD
 // ±10% (a mid-layout stale-rect read must not poison it).
 float DeriveK(const uint8_t *n, const uint8_t *f, float originX) {
     if (LooksReadable(f)) {
-        const float left = *reinterpret_cast<const float *>(f + Offsets::OFF_REGION_RECT + 4);
-        const float right = *reinterpret_cast<const float *>(f + Offsets::OFF_REGION_RECT + 12);
-        const float insetX = *reinterpret_cast<const float *>(f + Offsets::OFF_FONTSTRING_INSET_X);
+        const float left = Game::Read<float>(f, Offsets::OFF_REGION_RECT + 4);
+        const float right = Game::Read<float>(f, Offsets::OFF_REGION_RECT + 12);
+        const float insetX = Game::Read<float>(f, Offsets::OFF_FONTSTRING_INSET_X);
         if (left < right && std::fabs(insetX) < 1e-6f) {
-            const int justify =
-                *reinterpret_cast<const int *>(n + Offsets::OFF_TEXT_NODE_JUSTIFY);
+            const int justify = Game::Read<int>(n, Offsets::OFF_TEXT_NODE_JUSTIFY);
             const float ref =
                 (justify == 1) ? (left + right) * 0.5f : ((justify == 2) ? right : left);
             if (std::fabs(ref) > 0.02f && originX > 1.0f) {
@@ -383,13 +378,12 @@ bool PtrInBuffer(const uint8_t *t, const uint8_t *buf) {
 // FUN_00772ae0 → … → FUN_005c6940 loops the tokenizer), so the measure tokenizer's
 // `text` points directly into it.
 const uint8_t *FocusedEditboxInput() {
-    const void *fe = *reinterpret_cast<const void *const *>(Offsets::VAR_FOCUSED_EDITBOX);
+    const void *fe = Game::Read<const void *>(Offsets::VAR_FOCUSED_EDITBOX);
     if (!LooksReadable(fe))
         return nullptr;
-    auto *f = reinterpret_cast<const uint8_t *>(fe);
-    const uint8_t sel = f[Offsets::OFF_EDITBOX_BUFFER_SELECT];
-    const uint8_t *inBuf = *reinterpret_cast<const uint8_t *const *>(
-        f + ((sel & 8u) ? Offsets::OFF_EDITBOX_BUFFER_MASKED : Offsets::OFF_EDITBOX_BUFFER));
+    const uint8_t sel = Game::Read<uint8_t>(fe, Offsets::OFF_EDITBOX_BUFFER_SELECT);
+    const uint8_t *inBuf = Game::Read<const uint8_t *>(
+        fe, (sel & 8u) ? Offsets::OFF_EDITBOX_BUFFER_MASKED : Offsets::OFF_EDITBOX_BUFFER);
     return LooksReadable(inBuf) ? inBuf : nullptr;
 }
 
@@ -474,9 +468,7 @@ bool InlineInterceptActive(const uint8_t *text, bool editable) {
 // global misses (multi-line editors build once, un-focused). This mirrors 4.3.4's
 // per-render texture-disable flag, adapted to 1.12's layout.
 inline bool NodeEditable(const void *node) {
-    return (*reinterpret_cast<const uint32_t *>(reinterpret_cast<const uint8_t *>(node) +
-                                                Offsets::OFF_TEXT_NODE_FLAGS) &
-            0x40u) != 0;
+    return (Game::Read<uint32_t>(node, Offsets::OFF_TEXT_NODE_FLAGS) & 0x40u) != 0;
 }
 
 // Geometry constants, calibrated in-game during bring-up (via a since-removed
@@ -745,14 +737,11 @@ float __fastcall StringWidth_h(void *fs) {
     const float base = g_stringWidthOriginal(fs);
     if (!LooksReadable(fs))
         return base;
-    const auto *f = reinterpret_cast<const uint8_t *>(fs);
     // fs+0x120 bit 0x1000 → gxu editbox bit 0x40: an editbox measures the raw
     // markup it renders, so its width must stay unadjusted (caret alignment).
     const bool editable =
-        (*reinterpret_cast<const uint32_t *>(f + Offsets::OFF_FONTSTRING_MEASURE_FLAGS) &
-         0x1000u) != 0;
-    const uint8_t *text =
-        *reinterpret_cast<const uint8_t *const *>(f + Offsets::OFF_FONTSTRING_TEXT);
+        (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_MEASURE_FLAGS) & 0x1000u) != 0;
+    const uint8_t *text = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_TEXT);
     if (!LooksReadable(text) || !InlineInterceptActive(text, editable))
         return base;
     int len = 0;
@@ -760,8 +749,8 @@ float __fastcall StringWidth_h(void *fs) {
         ++len;
     if (!HasInlineTexture(text, len))
         return base;
-    const float mul = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_DIV);
+    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
     if (!(mul > 0.0f) || !(div > 0.0f))
         return base;
     const float anchorToPx = div * Offsets::UI_COORD_SCALE_UNIT / mul; // ≈1468 (the push K)
@@ -810,12 +799,9 @@ float __fastcall StringHeight_h(void *fs) {
     const float base = g_stringHeightOriginal(fs);
     if (!LooksReadable(fs))
         return base;
-    const auto *f = reinterpret_cast<const uint8_t *>(fs);
     const bool editable =
-        (*reinterpret_cast<const uint32_t *>(f + Offsets::OFF_FONTSTRING_MEASURE_FLAGS) &
-         0x1000u) != 0;
-    const uint8_t *text =
-        *reinterpret_cast<const uint8_t *const *>(f + Offsets::OFF_FONTSTRING_TEXT);
+        (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_MEASURE_FLAGS) & 0x1000u) != 0;
+    const uint8_t *text = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_TEXT);
     if (!LooksReadable(text) || !InlineInterceptActive(text, editable))
         return base;
     int len = 0;
@@ -823,8 +809,8 @@ float __fastcall StringHeight_h(void *fs) {
         ++len;
     if (!HasInlineTexture(text, len))
         return base;
-    const float mul = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_DIV);
+    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
     if (!(mul > 0.0f) || !(div > 0.0f))
         return base;
     const float anchorToPx = div * Offsets::UI_COORD_SCALE_UNIT / mul;
@@ -878,10 +864,8 @@ void __fastcall LinkRectAdd_h(void *node, void *edx, float yA, float xLeft, floa
         if (HasInlineTexture(escStart, len)) {
             // The line's font pixel height, the emitter's own recipe (ecx =
             // (nodeFlags>>7)&1, stack = node fontSize).
-            const uint32_t nodeFlags = *reinterpret_cast<const uint32_t *>(
-                reinterpret_cast<const uint8_t *>(node) + Offsets::OFF_TEXT_NODE_FLAGS);
-            const float fontSize = *reinterpret_cast<const float *>(
-                reinterpret_cast<const uint8_t *>(node) + Offsets::OFF_TEXT_NODE_FONT_SIZE);
+            const uint32_t nodeFlags = Game::Read<uint32_t>(node, Offsets::OFF_TEXT_NODE_FLAGS);
+            const float fontSize = Game::Read<float>(node, Offsets::OFF_TEXT_NODE_FONT_SIZE);
             const float fontH = reinterpret_cast<float(__fastcall *)(int, float)>(
                 Offsets::FUN_TEXT_FONT_HEIGHT)(static_cast<int>((nodeFlags >> 7) & 1u), fontSize);
             const float overflow = MaxIconOverflowPx(escStart, len, fontH);
@@ -1168,8 +1152,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     const bool firstLine =
         (node == g_buildNode)
             ? (g_buildEmitSeq++ == 0)
-            : (text == *reinterpret_cast<uint8_t **>(reinterpret_cast<uint8_t *>(node) +
-                                                     Offsets::OFF_TEXT_NODE_TEXT));
+            : (text == Game::Read<uint8_t *>(node, Offsets::OFF_TEXT_NODE_TEXT));
     if (firstLine)
         g_nodeIcons.erase(node);
 
@@ -1195,8 +1178,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // the batch-clear ONCE per build (a len-0 original call with bit 3 still set,
     // only on the first wrapped line), then clearing bit 3 so our per-segment calls
     // APPEND. Restore the flags before returning.
-    uint32_t *const flagsPtr = reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(node) +
-                                                            Offsets::OFF_TEXT_NODE_FLAGS);
+    uint32_t *const flagsPtr = Game::Ptr<uint32_t>(node, Offsets::OFF_TEXT_NODE_FLAGS);
     const uint32_t savedFlags = *flagsPtr;
     const bool batchClearMode = (savedFlags & 8u) != 0;
     if (batchClearMode) {
@@ -1225,17 +1207,14 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // near the text top). Mirrors the emitter's own call: ecx = (nodeFlags>>7)&1,
     // stack = the node's font size [node+0x1c].
     const int fontFlag = static_cast<int>((savedFlags >> 7) & 1u);
-    const float fontSize =
-        *reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(node) +
-                                   Offsets::OFF_TEXT_NODE_FONT_SIZE);
+    const float fontSize = Game::Read<float>(node, Offsets::OFF_TEXT_NODE_FONT_SIZE);
     const float fontH = reinterpret_cast<float(__fastcall *)(int, float)>(
         Offsets::FUN_TEXT_FONT_HEIGHT)(fontFlag, fontSize);
 
     // Font face + native→pen advance scale, mirroring the emitter's own
     // `local_10 = fontH / (float)nativeHeight`. Used by drawRun's terminal-
     // advance correction (glyph-record advances are native-font units).
-    void *const fontFace = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(node) +
-                                                      Offsets::OFF_TEXT_NODE_FONT_FACE);
+    void *const fontFace = Game::Read<void *>(node, Offsets::OFF_TEXT_NODE_FONT_FACE);
     using FontNativeHeight_t = int(__fastcall *)(void *font);
     const int fontNativeH =
         (fontFace != nullptr)
@@ -1260,8 +1239,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // (right) so the whole text+icons block is justified as a unit. Left-justify
     // (chat, justify 0) needs no shift. node+0x54: 1 = centre, 2 = right (verified
     // in the draw builder FUN_005cdc20's justify branch).
-    const int justify = *reinterpret_cast<const int *>(
-        reinterpret_cast<const uint8_t *>(node) + Offsets::OFF_TEXT_NODE_JUSTIFY);
+    const int justify = Game::Read<int>(node, Offsets::OFF_TEXT_NODE_JUSTIFY);
     if (justify == 1 || justify == 2) {
         // Shared helper so the pre-shift matches the real advances exactly
         // (including the positive-offsetX term an earlier inline copy omitted).
@@ -1447,9 +1425,8 @@ Paint_t g_paintOriginal = nullptr;
 void FlushLayout(void *layout) {
     if (!LooksReadable(layout))
         return;
-    auto *L = reinterpret_cast<uint8_t *>(layout);
-    const int linkOff = *reinterpret_cast<int *>(L + Offsets::OFF_TEXT_LAYOUT_NODE_LINK);
-    void *node = *reinterpret_cast<void **>(L + Offsets::OFF_TEXT_LAYOUT_NODE_HEAD);
+    const int linkOff = Game::Read<int>(layout, Offsets::OFF_TEXT_LAYOUT_NODE_LINK);
+    void *node = Game::Read<void *>(layout, Offsets::OFF_TEXT_LAYOUT_NODE_HEAD);
 
     for (int guard = 0; node != nullptr && (reinterpret_cast<uintptr_t>(node) & 1) == 0 &&
                         guard < 4096;
@@ -1457,7 +1434,7 @@ void FlushLayout(void *layout) {
         if (!LooksReadable(node))
             break;
         auto *n = reinterpret_cast<uint8_t *>(node);
-        void *const next = *reinterpret_cast<void **>(n + linkOff + 4);
+        void *const next = Game::Read<void *>(n, linkOff + 4);
 
         // Resolve the owning fontstring up front: a node with NO icons must
         // still clear its fontstring's regions — the fs may have just been
@@ -1470,12 +1447,9 @@ void FlushLayout(void *layout) {
         {
             auto ow = g_nodeOwner.find(node);
             if (ow != g_nodeOwner.end() && LooksReadable(ow->second)) {
-                auto *of = reinterpret_cast<uint8_t *>(ow->second);
-                void *block =
-                    *reinterpret_cast<void **>(of + Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+                void *block = Game::Read<void *>(ow->second, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
                 if (LooksReadable(block) &&
-                    *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
-                                               Offsets::OFF_TEXTBLOCK_NODE) == node) {
+                    Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE) == node) {
                     fs = ow->second;
                 } else if (block == nullptr) {
                     // Stuck-blockless fs: RebuildString released the block (a
@@ -1484,8 +1458,7 @@ void FlushLayout(void *layout) {
                     // fs's rebuild-dirty bit so the engine rebuilds next update
                     // and the icon pipeline resumes. Byte write only — safe
                     // from the paint tail (consumed by the fs's own update).
-                    uint8_t *flags = of + Offsets::OFF_FONTSTRING_DIRTY_FLAGS;
-                    *flags |= 1u;
+                    Game::Ref<uint8_t>(ow->second, Offsets::OFF_FONTSTRING_DIRTY_FLAGS) |= 1u;
                 }
             }
         }
@@ -1503,8 +1476,7 @@ void FlushLayout(void *layout) {
         // check erases good records on every clean paint: the all-icons-gone
         // regression.)
         if (it != g_nodeIcons.end() && !it->second.empty() && fs != nullptr) {
-            const char *ftext = *reinterpret_cast<const char *const *>(
-                reinterpret_cast<uint8_t *>(fs) + Offsets::OFF_FONTSTRING_TEXT);
+            const char *ftext = Game::Read<const char *>(fs, Offsets::OFF_FONTSTRING_TEXT);
             bool fsHasMarkup = false;
             if (LooksReadable(ftext)) {
                 for (int k = 1; k < 2048 && ftext[k] != '\0'; ++k)
@@ -1550,26 +1522,23 @@ void FlushLayout(void *layout) {
             // node alpha too). One-frame lag (flush runs post-paint), same as
             // the icon fade mirror. Chat (bit-3 clear) is excluded: the engine
             // re-bakes those on colour change itself.
-            if ((*reinterpret_cast<const uint32_t *>(n + Offsets::OFF_TEXT_NODE_FLAGS) &
-                 8u) != 0) {
-                const uint8_t liveA = n[Offsets::OFF_TEXT_NODE_COLOR + 3];
+            if ((Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_FLAGS) & 8u) != 0) {
+                const uint8_t liveA = Game::Read<uint8_t>(n, Offsets::OFF_TEXT_NODE_COLOR + 3);
                 for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
-                    auto *buf = *reinterpret_cast<uint8_t *const *>(
-                        n + Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+                    auto *buf =
+                        Game::Read<uint8_t *>(n, Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
                     if (buf == nullptr)
                         continue;
-                    const int count = *reinterpret_cast<const int *>(
-                        buf + Offsets::OFF_TEXT_PAGE_COLOR_COUNT);
-                    auto *colors =
-                        *reinterpret_cast<uint8_t *const *>(buf + Offsets::OFF_TEXT_PAGE_COLORS);
+                    const int count = Game::Read<int>(buf, Offsets::OFF_TEXT_PAGE_COLOR_COUNT);
+                    auto *colors = Game::Read<uint8_t *>(buf, Offsets::OFF_TEXT_PAGE_COLORS);
                     if (colors == nullptr || count <= 0 || colors[3] == liveA)
                         continue;
                     for (int i = 0; i < count; ++i)
                         colors[i * 4 + 3] = liveA;
                 }
             }
-            const float ox = *reinterpret_cast<float *>(n + Offsets::OFF_TEXT_NODE_ORIGIN_X);
-            const float oy = *reinterpret_cast<float *>(n + Offsets::OFF_TEXT_NODE_ORIGIN_Y);
+            const float ox = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_X);
+            const float oy = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_Y);
             // The fs rect, read HERE in the same flush as the icon coords — a
             // coherent snapshot. Placements are stored FS-RELATIVE: an
             // apply-time rect read raced the chat relayout (SetText invalidates
@@ -1581,8 +1550,7 @@ void FlushLayout(void *layout) {
             float fsLeft = 0.0f, fsBottom = 0.0f;
             bool fsRectValid = false;
             if (fs != nullptr) {
-                const float *rc = reinterpret_cast<const float *>(
-                    reinterpret_cast<uint8_t *>(fs) + Offsets::OFF_REGION_RECT);
+                const float *rc = Game::Ptr<const float>(fs, Offsets::OFF_REGION_RECT);
                 fsBottom = (rc[0] < rc[2]) ? rc[0] : rc[2];
                 fsLeft = (rc[1] < rc[3]) ? rc[1] : rc[3];
                 fsRectValid = rc[1] != rc[3]; // unresolved rect reads 0-width

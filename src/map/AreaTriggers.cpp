@@ -80,7 +80,7 @@ bool PushTriggerInfo(void *L, int id) {
     if (rec == nullptr)
         return false;
 
-    const int mapID = *reinterpret_cast<const int *>(rec + Offsets::OFF_AT_MAP_ID);
+    const int mapID = Game::Read<int>(rec, Offsets::OFF_AT_MAP_ID);
     const float x = FloatField(rec, Offsets::OFF_AT_X);
     const float y = FloatField(rec, Offsets::OFF_AT_Y);
     const float z = FloatField(rec, Offsets::OFF_AT_Z);
@@ -134,8 +134,7 @@ int __fastcall Script_GetAreaTriggers(void *L) {
     Game::Lua::SetTop(L, 0);
     Game::Lua::NewTable(L);
 
-    const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_AREATRIGGER_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_AREATRIGGER_COUNT);
     int outIdx = 0;
     for (int id = 1; id <= count; ++id) {
         const uint8_t *rec = DBC::Record(Offsets::VAR_AREATRIGGER_RECORDS,
@@ -144,7 +143,7 @@ int __fastcall Script_GetAreaTriggers(void *L) {
         if (rec == nullptr)
             continue;
         if (filter &&
-            *reinterpret_cast<const int *>(rec + Offsets::OFF_AT_MAP_ID) != wantMap)
+            Game::Read<int>(rec, Offsets::OFF_AT_MAP_ID) != wantMap)
             continue;
 
         outIdx += 1;

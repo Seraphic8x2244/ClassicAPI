@@ -13,6 +13,7 @@
 
 #include "item/TooltipItem.h"
 
+#include "Game.h"
 #include "Offsets.h"
 #include "item/ID.h"
 #include "item/Location.h"
@@ -27,10 +28,10 @@ int CurrentID(const void *tooltipObj, uint64_t *outGuid) {
     auto *c = static_cast<const uint8_t *>(tooltipObj);
 
     const uint64_t itemGuid =
-        *reinterpret_cast<const uint64_t *>(c + Offsets::OFF_TOOLTIP_ITEM_GUID_LO);
+        Game::Read<uint64_t>(c, Offsets::OFF_TOOLTIP_ITEM_GUID_LO);
 
     // Link item: the itemID field is authoritative (and reliably cleared).
-    const int linkItemID = *reinterpret_cast<const int *>(c + Offsets::OFF_TOOLTIP_ITEM_ID);
+    const int linkItemID = Game::Read<int>(c, Offsets::OFF_TOOLTIP_ITEM_ID);
     if (linkItemID > 0) {
         if (outGuid != nullptr)
             *outGuid = itemGuid;
@@ -44,11 +45,11 @@ int CurrentID(const void *tooltipObj, uint64_t *outGuid) {
     // it to the itemID (this also yields the dressed link for callers).
     if (itemGuid == 0)
         return 0;
-    if (*reinterpret_cast<const uint64_t *>(c + Offsets::OFF_TOOLTIP_UNIT_GUID_LO) != 0)
+    if (Game::Read<uint64_t>(c, Offsets::OFF_TOOLTIP_UNIT_GUID_LO) != 0)
         return 0;
-    if (*reinterpret_cast<const uint64_t *>(c + Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO) != 0)
+    if (Game::Read<uint64_t>(c, Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO) != 0)
         return 0;
-    if (*reinterpret_cast<const int *>(c + Offsets::OFF_TOOLTIP_SPELL_ID) > 0)
+    if (Game::Read<int>(c, Offsets::OFF_TOOLTIP_SPELL_ID) > 0)
         return 0;
 
     const uint8_t *cg = Item::Location::ResolveByGUID(itemGuid);

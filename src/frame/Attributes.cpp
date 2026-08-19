@@ -315,12 +315,11 @@ std::unordered_map<const void *, std::string> g_unitByFrame;
 uint64_t g_lastSet = 0;
 
 const void *CurrentMouseFocus() {
-    const void *ctx = *reinterpret_cast<const void *const *>(
+    const void *ctx = Game::Read<const void *>(
         static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
     if (ctx == nullptr)
         return nullptr;
-    return *reinterpret_cast<const void *const *>(
-        reinterpret_cast<const uint8_t *>(ctx) + Offsets::OFF_UI_CONTEXT_MOUSE_FOCUS);
+    return Game::Read<const void *>(ctx, Offsets::OFF_UI_CONTEXT_MOUSE_FOCUS);
 }
 
 // The engine's real mouseover setter — `__stdcall(guidLo, guidHi, prevLo,
@@ -353,7 +352,7 @@ bool GuidHasLiveUnit(uint64_t guid) {
 // works for an offline member). The engine's setter (FUN_00492890) gates this
 // call on a live object, so offline members get nothing — we do it here.
 void BuildRosterUnitTooltip(uint64_t guid) {
-    void *tooltip = *reinterpret_cast<void *const *>(
+    void *tooltip = Game::Read<void *>(
         static_cast<uintptr_t>(Offsets::VAR_GAMETOOLTIP_OBJECT_PTR));
     if (tooltip == nullptr)
         return;
@@ -365,9 +364,8 @@ void BuildRosterUnitTooltip(uint64_t guid) {
     // no owner and never re-appears (only a subsequent live-unit hover, which
     // takes the engine's own anchor path, would). Use the self-contained
     // invoker FUN_FRAME_INVOKE_SCRIPT, safe to call from the WorldTick.
-    const int anchorHandler = *reinterpret_cast<const int *>(
-        reinterpret_cast<uint8_t *>(tooltip) +
-        Offsets::OFF_TOOLTIP_SET_DEFAULT_ANCHOR_HANDLER);
+    const int anchorHandler = Game::Read<int>(
+        tooltip, Offsets::OFF_TOOLTIP_SET_DEFAULT_ANCHOR_HANDLER);
     if (anchorHandler != 0)
         reinterpret_cast<void(__fastcall *)(int, void *)>(
             static_cast<uintptr_t>(Offsets::FUN_FRAME_INVOKE_SCRIPT))(anchorHandler,
@@ -598,10 +596,10 @@ bool DispatchVerb(void *L, int fi, const char *prefix, const char *suffix,
         const bool swapped = unit != nullptr;
         if (swapped) {
             prevTarget =
-                (static_cast<uint64_t>(*reinterpret_cast<volatile uint32_t *>(
+                (static_cast<uint64_t>(Game::Read<volatile uint32_t>(
                      Offsets::VAR_CURRENT_SELECTION_GUID_HI))
                  << 32) |
-                *reinterpret_cast<volatile uint32_t *>(
+                Game::Read<volatile uint32_t>(
                     Offsets::VAR_CURRENT_SELECTION_GUID_LO);
             Game::Lua::CallGlobalString(L, "TargetUnit", unit);
         }

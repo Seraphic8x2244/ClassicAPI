@@ -241,16 +241,16 @@ static int __fastcall Script_GameTooltipGetItem(void *L) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return 0;
     }
-    const char *name = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_ITEMSTATS_NAME);
+    const char *name = Game::Read<const char *>(
+        record, Offsets::OFF_ITEMSTATS_NAME);
     if (name == nullptr || *name == '\0')
         return 0;
-    const uint32_t quality = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_QUALITY);
+    const uint32_t quality = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_QUALITY);
 
     int suffix = 0;
-    if (*reinterpret_cast<const int *>(base + Offsets::OFF_TOOLTIP_COMPARE_FLAG) != 0)
-        suffix = *reinterpret_cast<const int *>(base + Offsets::OFF_TOOLTIP_COMPARE_SUFFIX);
+    if (Game::Read<int>(base, Offsets::OFF_TOOLTIP_COMPARE_FLAG) != 0)
+        suffix = Game::Read<int>(base, Offsets::OFF_TOOLTIP_COMPARE_SUFFIX);
 
     char link[256];
     std::snprintf(link, sizeof(link),

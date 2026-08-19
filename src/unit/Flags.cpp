@@ -26,19 +26,19 @@ namespace Unit::Flags {
 bool IsPlayerControlled(const uint8_t *unit) {
     if (unit == nullptr)
         return false;
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *fields =
+        Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
     if (fields == nullptr)
         return false;
-    const uint32_t unitFlags = *reinterpret_cast<const uint32_t *>(
-        fields + Offsets::OFF_UNIT_FIELD_FLAGS);
+    const uint32_t unitFlags =
+        Game::Read<uint32_t>(fields, Offsets::OFF_UNIT_FIELD_FLAGS);
     return (unitFlags & Offsets::UNIT_FLAG_PLAYER_CONTROLLED) != 0;
 }
 
 bool IsPlayerObject(const uint8_t *unit) {
     if (unit == nullptr)
         return false;
-    return *reinterpret_cast<const int *>(unit + Offsets::OFF_CGOBJECT_TYPE_ID) ==
+    return Game::Read<int>(unit, Offsets::OFF_CGOBJECT_TYPE_ID) ==
            Offsets::OBJECT_TYPE_PLAYER;
 }
 
@@ -80,12 +80,12 @@ bool TestPlayerFlag(void *L, uint32_t flagMask) {
     if (!IsPlayerObject(unit))
         return false;
 
-    auto *playerInfo = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_CGPLAYER_INFO);
+    auto *playerInfo =
+        Game::Read<const uint8_t *>(unit, Offsets::OFF_CGPLAYER_INFO);
     if (playerInfo == nullptr)
         return false;
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        playerInfo + Offsets::OFF_PLAYER_INFO_FLAGS);
+    const uint32_t flags =
+        Game::Read<uint32_t>(playerInfo, Offsets::OFF_PLAYER_INFO_FLAGS);
     return (flags & flagMask) != 0;
 }
 
@@ -129,14 +129,14 @@ int __fastcall Script_UnitIsFeignDeath(void *L) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
     }
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *fields =
+        Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
     if (fields == nullptr) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
     }
-    const uint32_t unitFlags = *reinterpret_cast<const uint32_t *>(
-        fields + Offsets::OFF_UNIT_FIELD_FLAGS);
+    const uint32_t unitFlags =
+        Game::Read<uint32_t>(fields, Offsets::OFF_UNIT_FIELD_FLAGS);
     Game::Lua::PushBoolean(L,
         (unitFlags & Offsets::UNIT_FLAG_FEIGN_DEATH) != 0);
     return 1;
@@ -154,12 +154,10 @@ uint32_t ReadGuildKey(const uint8_t *unit) {
     // and crash (issue: UnitIsInMyGuild on a nameplate pet/totem).
     if (!IsPlayerObject(unit))
         return 0;
-    auto *info = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_CGPLAYER_INFO);
+    auto *info = Game::Read<const uint8_t *>(unit, Offsets::OFF_CGPLAYER_INFO);
     if (info == nullptr)
         return 0;
-    return *reinterpret_cast<const uint32_t *>(
-        info + Offsets::OFF_PLAYER_INFO_GUILD_KEY);
+    return Game::Read<uint32_t>(info, Offsets::OFF_PLAYER_INFO_GUILD_KEY);
 }
 
 using TokenToGUID_t = uint64_t(__fastcall *)(const char *token);
@@ -212,8 +210,7 @@ const char *NameFromGuid(uint64_t guid, char (&nameBuf)[64]) {
         return nullptr;
 
     std::snprintf(nameBuf, sizeof(nameBuf), "%s",
-                  reinterpret_cast<const char *>(
-                      entry + Offsets::OFF_PLAYER_INFO_NAME));
+                  Game::Ptr<const char>(entry, Offsets::OFF_PLAYER_INFO_NAME));
     return nameBuf;
 }
 
@@ -323,10 +320,8 @@ int __fastcall Script_UnitIsInMyGuild(void *L) {
         nameToFind = input;
     }
 
-    auto **roster = *reinterpret_cast<uint8_t ***>(
-        Offsets::VAR_GUILD_ROSTER_PTR);
-    const int total = *reinterpret_cast<const int *>(
-        Offsets::VAR_GUILD_ROSTER_TOTAL_COUNT);
+    auto **roster = Game::Read<uint8_t **>(Offsets::VAR_GUILD_ROSTER_PTR);
+    const int total = Game::Read<int>(Offsets::VAR_GUILD_ROSTER_TOTAL_COUNT);
     if (roster == nullptr || total <= 0) {
         Game::Lua::PushNil(L);
         return 1;
@@ -335,8 +330,8 @@ int __fastcall Script_UnitIsInMyGuild(void *L) {
         const uint8_t *entry = roster[i];
         if (entry == nullptr)
             continue;
-        const char *name = reinterpret_cast<const char *>(
-            entry + Offsets::OFF_GUILD_MEMBER_NAME);
+        const char *name =
+            Game::Ptr<const char>(entry, Offsets::OFF_GUILD_MEMBER_NAME);
         if (std::strcmp(name, nameToFind) == 0) {
             Game::Lua::PushNumber(L, 1.0);
             return 1;
@@ -368,14 +363,14 @@ int __fastcall Script_UnitIsPossessed(void *L) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
     }
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *fields =
+        Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
     if (fields == nullptr) {
         Game::Lua::PushBoolean(L, 0);
         return 1;
     }
-    const uint32_t unitFlags = *reinterpret_cast<const uint32_t *>(
-        fields + Offsets::OFF_UNIT_FIELD_FLAGS);
+    const uint32_t unitFlags =
+        Game::Read<uint32_t>(fields, Offsets::OFF_UNIT_FIELD_FLAGS);
     Game::Lua::PushBoolean(L,
         (unitFlags & Offsets::UNIT_FLAG_POSSESSED) != 0);
     return 1;

@@ -38,7 +38,7 @@ namespace Item::GetData {
 namespace {
 
 int CurrentLocaleIndex() {
-    return *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
+    return Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
 }
 
 // Mirrors the lookup in `Item::Info`. ItemClass.dbc record `+0x0C` is
@@ -53,10 +53,10 @@ const char *LookupClassName(uint32_t classID) {
 // ItemSubClass.dbc walker — same fallback chain as Script_GetItemInfo
 // (verbose name first, short name on miss).
 const char *LookupSubClassName(uint32_t classID, uint32_t subClassID) {
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_ITEMSUBCLASS_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_ITEMSUBCLASS_COUNT);
     if (count <= 0)
         return "";
-    auto *records = *reinterpret_cast<const uint8_t *const *>(Offsets::VAR_ITEMSUBCLASS_RECORDS);
+    auto *records = Game::Read<const uint8_t *>(Offsets::VAR_ITEMSUBCLASS_RECORDS);
     if (records == nullptr)
         return "";
     const int locale = CurrentLocaleIndex();
@@ -66,12 +66,12 @@ const char *LookupSubClassName(uint32_t classID, uint32_t subClassID) {
             continue;
         if (*reinterpret_cast<const uint32_t *>(record + 0x04) != subClassID)
             continue;
-        const char *verbose = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_ITEMSUBCLASS_DISPLAY_NAME + locale * 4);
+        const char *verbose = Game::Read<const char *>(
+            record, Offsets::OFF_ITEMSUBCLASS_DISPLAY_NAME + locale * 4);
         if (verbose != nullptr && verbose[0] != '\0')
             return verbose;
-        const char *shortName = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_ITEMSUBCLASS_NAME + locale * 4);
+        const char *shortName = Game::Read<const char *>(
+            record, Offsets::OFF_ITEMSUBCLASS_NAME + locale * 4);
         return (shortName != nullptr && shortName[0] != '\0') ? shortName : "";
     }
     return "";
@@ -172,10 +172,10 @@ void SetF32Array(void *L, const uint8_t *record, const char *key,
 void SetStatsMap(void *L, const uint8_t *record) {
     Game::Lua::PushString(L, "stats");
     Game::Lua::NewTable(L);
-    auto *types = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_STAT_TYPE);
-    auto *values = reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_ITEMSTATS_STAT_VALUE);
+    auto *types = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_STAT_TYPE);
+    auto *values = Game::Ptr<const int32_t>(
+        record, Offsets::OFF_ITEMSTATS_STAT_VALUE);
     for (int i = 0; i < Offsets::ITEMSTATS_STAT_SLOT_COUNT; ++i) {
         if (types[i] == 0 && values[i] == 0)
             continue;
@@ -193,18 +193,18 @@ void SetStatsMap(void *L, const uint8_t *record) {
 void SetSpellsArray(void *L, const uint8_t *record) {
     Game::Lua::PushString(L, "spells");
     Game::Lua::NewTable(L);
-    auto *ids = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_ID);
-    auto *triggers = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_TRIGGER);
-    auto *charges = reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_CHARGES);
-    auto *cooldowns = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_COOLDOWN);
-    auto *categories = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_CATEGORY);
-    auto *catCooldowns = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_CATEGORY_CD);
+    auto *ids = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_ID);
+    auto *triggers = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_TRIGGER);
+    auto *charges = Game::Ptr<const int32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_CHARGES);
+    auto *cooldowns = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_COOLDOWN);
+    auto *categories = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_CATEGORY);
+    auto *catCooldowns = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_CATEGORY_CD);
     int written = 0;
     for (int i = 0; i < Offsets::ITEMSTATS_SPELL_SLOT_COUNT; ++i) {
         if (ids[i] == 0)
@@ -234,38 +234,38 @@ void PushItemDataTable(void *L, uint32_t itemID, const uint8_t *record) {
     Game::Lua::SetFieldNumber(L, "itemID", static_cast<double>(itemID));
 
     // Identity strings
-    const char *name = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_ITEMSTATS_NAME);
+    const char *name = Game::Read<const char *>(
+        record, Offsets::OFF_ITEMSTATS_NAME);
     Game::Lua::SetFieldString(L, "name", name);
-    const char *description = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_ITEMSTATS_DESCRIPTION);
+    const char *description = Game::Read<const char *>(
+        record, Offsets::OFF_ITEMSTATS_DESCRIPTION);
     if (description != nullptr && description[0] != '\0')
         Game::Lua::SetFieldString(L, "description", description);
 
     // Display
-    const uint32_t displayInfoID = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
+    const uint32_t displayInfoID = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
     Game::Lua::SetFieldNumber(L, "displayInfoID", static_cast<double>(displayInfoID));
     char iconPath[260];
     if (BuildIconPath(displayInfoID, iconPath, sizeof(iconPath)))
         Game::Lua::SetFieldString(L, "icon", iconPath);
 
     // Quality / classification
-    const uint32_t quality = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_QUALITY);
+    const uint32_t quality = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_QUALITY);
     Game::Lua::SetFieldNumber(L, "quality", static_cast<double>(quality));
 
-    const uint32_t classID = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_CLASS);
-    const uint32_t subClassID = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SUBCLASS);
+    const uint32_t classID = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_CLASS);
+    const uint32_t subClassID = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SUBCLASS);
     Game::Lua::SetFieldNumber(L, "classID", static_cast<double>(classID));
     Game::Lua::SetFieldNumber(L, "subclassID", static_cast<double>(subClassID));
     Game::Lua::SetFieldString(L, "className", LookupClassName(classID));
     Game::Lua::SetFieldString(L, "subclassName", LookupSubClassName(classID, subClassID));
 
-    const uint32_t invType = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_INVENTORY_TYPE);
+    const uint32_t invType = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_INVENTORY_TYPE);
     Game::Lua::SetFieldNumber(L, "inventoryType", static_cast<double>(invType));
     Game::Lua::SetFieldString(L, "equipLoc", LookupInvType(invType));
 
@@ -273,8 +273,8 @@ void PushItemDataTable(void *L, uint32_t itemID, const uint8_t *record) {
     SetU32(L, record, "bindType", Offsets::OFF_ITEMSTATS_BONDING);
 
     // Flags: raw + decoded bits.
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_FLAGS);
+    const uint32_t flags = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_FLAGS);
     Game::Lua::SetFieldNumber(L, "flags", static_cast<double>(flags));
     Game::Lua::SetFieldBool(L, "isConjured",
                             (flags & Offsets::ITEM_FLAG_CONJURED) != 0);
@@ -289,8 +289,8 @@ void PushItemDataTable(void *L, uint32_t itemID, const uint8_t *record) {
     SetI32(L, record, "maxStackSize", Offsets::OFF_ITEMSTATS_STACKABLE);
     SetI32(L, record, "maxCount", Offsets::OFF_ITEMSTATS_MAX_COUNT);
     SetU32(L, record, "containerSlots", Offsets::OFF_ITEMSTATS_CONTAINER_SLOTS);
-    const uint32_t rawBagFamily = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_BAG_FAMILY);
+    const uint32_t rawBagFamily = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_BAG_FAMILY);
     Game::Lua::SetFieldNumber(L, "bagFamily",
                               static_cast<double>(BagFamilyIdToBitmask(rawBagFamily)));
 

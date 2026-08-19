@@ -210,8 +210,8 @@ int __fastcall Script_GameTooltipSetEquipmentSet(void *L) {
             unnamedMissing++;
             continue;
         }
-        const char *name = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_ITEMSTATS_NAME);
+        const char *name = Game::Read<const char *>(
+            record, Offsets::OFF_ITEMSTATS_NAME);
         if (name == nullptr || name[0] == '\0') {
             unnamedMissing++;
             continue;

@@ -59,13 +59,13 @@ int __fastcall Script_UnitRaceBase(void *L) {
     // tokens go through the unit descriptor.
     uint8_t raceByte = 0;
     if (Unit::Identity::IsPlayerToken(token)) {
-        raceByte = *reinterpret_cast<const uint8_t *>(Offsets::VAR_PLAYER_RACE_BYTE);
+        raceByte = Game::Read<uint8_t>(Offsets::VAR_PLAYER_RACE_BYTE);
     } else {
         auto resolve = reinterpret_cast<ResolveUnitToken_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN);
         auto *unit = static_cast<const uint8_t *>(resolve(token));
         if (unit != nullptr) {
-            auto *desc = *reinterpret_cast<const uint8_t *const *>(
-                unit + Offsets::OFF_UNIT_DESCRIPTOR);
+            auto *desc =
+                Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
             if (desc != nullptr)
                 raceByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_RACE_BYTE);
         }
@@ -78,8 +78,8 @@ int __fastcall Script_UnitRaceBase(void *L) {
             const uint8_t *rec = Unit::Identity::PlayerInfoRecord(
                 Unit::Identity::GuidForToken(token));
             if (rec != nullptr)
-                raceByte = static_cast<uint8_t>(*reinterpret_cast<const uint32_t *>(
-                    rec + Offsets::OFF_PLAYER_INFO_RACE));
+                raceByte = static_cast<uint8_t>(
+                    Game::Read<uint32_t>(rec, Offsets::OFF_PLAYER_INFO_RACE));
         }
     }
     if (raceByte == 0) {

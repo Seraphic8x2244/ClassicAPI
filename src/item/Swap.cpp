@@ -44,8 +44,8 @@ bool ReadGuid(const void *cgObject, uint32_t *lo, uint32_t *hi) {
     auto *inst = Item::InstanceBlock(base);
     if (inst == nullptr)
         return false;
-    *lo = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);
-    *hi = *reinterpret_cast<const uint32_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID + 4);
+    *lo = Game::Read<uint32_t>(inst, Offsets::OFF_INSTANCE_BLOCK_GUID);
+    *hi = Game::Read<uint32_t>(inst, Offsets::OFF_INSTANCE_BLOCK_GUID + 4);
     return true;
 }
 
@@ -259,8 +259,8 @@ bool MoveCount(void *L, int srcBag, int srcSlot, int dstBag, int dstSlot, int co
     // have to special-case "move everything".
     auto *srcDescriptor = Item::ObjectFields(srcItem);
     const int srcStack = srcDescriptor == nullptr ? 0 :
-        static_cast<int>(*reinterpret_cast<const uint32_t *>(
-            srcDescriptor + Offsets::OFF_DESCRIPTOR_STACK_COUNT));
+        static_cast<int>(Game::Read<uint32_t>(
+            srcDescriptor, Offsets::OFF_DESCRIPTOR_STACK_COUNT));
     if (count > srcStack)
         return false; // server would reject anyway; fail fast and locally
     if (count == srcStack)

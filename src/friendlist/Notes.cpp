@@ -18,6 +18,7 @@
 
 #include "Notes.h"
 
+#include "Game.h"
 #include "Offsets.h"
 
 #include <cstdint>
@@ -41,14 +42,14 @@ std::string g_path;
 bool g_loaded = false;
 
 const char *ReadAccountName() {
-    return *reinterpret_cast<const char *const *>(Offsets::VAR_ACCOUNT_NAME_PTR);
+    return Game::Read<const char *>(Offsets::VAR_ACCOUNT_NAME_PTR);
 }
 
 const char *ReadRealmName() {
-    auto *info = *reinterpret_cast<uint8_t **>(Offsets::VAR_REALM_INFO_PTR);
+    auto *info = Game::Read<uint8_t *>(Offsets::VAR_REALM_INFO_PTR);
     if (info == nullptr)
         return nullptr;
-    return *reinterpret_cast<const char *const *>(info + Offsets::OFF_REALM_INFO_NAME);
+    return Game::Read<const char *>(info, Offsets::OFF_REALM_INFO_NAME);
 }
 
 const char *ReadCharacterName() {

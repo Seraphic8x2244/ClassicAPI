@@ -60,10 +60,10 @@ int __fastcall Script_GetMapWorldSize(void *L) {
     if (rec == nullptr)
         return 0;
 
-    const float left = *reinterpret_cast<const float *>(rec + Offsets::OFF_WMA_LOC_LEFT);
-    const float right = *reinterpret_cast<const float *>(rec + Offsets::OFF_WMA_LOC_RIGHT);
-    const float top = *reinterpret_cast<const float *>(rec + Offsets::OFF_WMA_LOC_TOP);
-    const float bottom = *reinterpret_cast<const float *>(rec + Offsets::OFF_WMA_LOC_BOTTOM);
+    const float left = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_LEFT);
+    const float right = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_RIGHT);
+    const float top = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_TOP);
+    const float bottom = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_BOTTOM);
 
     Game::Lua::PushNumber(L, static_cast<double>(left) - right);   // width  (world Y span)
     Game::Lua::PushNumber(L, static_cast<double>(top) - bottom);   // height (world X span)

@@ -72,10 +72,10 @@ int __fastcall Script_GetGameObjectInfoByID(void *L) {
     if (rec == nullptr)
         return 0; // not cached -> nil
 
-    const uint32_t type = *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_GAMEOBJECT_TYPE);
+    const uint32_t type = Game::Read<uint32_t>(rec, Offsets::OFF_GAMEOBJECT_TYPE);
     const uint32_t displayID =
-        *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_GAMEOBJECT_DISPLAYID);
-    const char *name = *reinterpret_cast<const char *const *>(rec + Offsets::OFF_GAMEOBJECT_NAME);
+        Game::Read<uint32_t>(rec, Offsets::OFF_GAMEOBJECT_DISPLAYID);
+    const char *name = Game::Read<const char *>(rec, Offsets::OFF_GAMEOBJECT_NAME);
 
     Game::Lua::NewTable(L);
     Game::Lua::SetFieldNumber(L, "gameObjectID", goID);

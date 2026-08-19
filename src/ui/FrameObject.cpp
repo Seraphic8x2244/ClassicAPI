@@ -60,12 +60,10 @@ void Push(void *L, void *frame) {
         static_cast<uintptr_t>(Offsets::FUN_FRAMESCRIPT_OBJECT_SCRIPT_REGISTER));
 
     auto *cobj = static_cast<uint8_t *>(frame);
-    int refKey = *reinterpret_cast<const int *>(
-        cobj + Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
+    int refKey = Game::Read<int>(cobj, Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
     if (refKey <= 0) {
         scriptRegister(frame, nullptr, nullptr);
-        refKey = *reinterpret_cast<const int *>(
-            cobj + Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
+        refKey = Game::Read<int>(cobj, Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
     }
 
     rawgeti(L, Game::Lua::REGISTRY_INDEX, refKey);
@@ -76,10 +74,9 @@ void Push(void *L, void *frame) {
     // Slot got freed somewhere — re-register to rebuild a fresh wrapper
     // and slot. Zero the refcount so `ScriptRegister` re-enters its build
     // branch.
-    *reinterpret_cast<int *>(cobj + Offsets::OFF_COBJECT_LUA_REFCOUNT) = 0;
+    Game::Ref<int>(cobj, Offsets::OFF_COBJECT_LUA_REFCOUNT) = 0;
     scriptRegister(frame, nullptr, nullptr);
-    refKey = *reinterpret_cast<const int *>(
-        cobj + Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
+    refKey = Game::Read<int>(cobj, Offsets::OFF_COBJECT_LUA_REGISTRY_REF);
     rawgeti(L, Game::Lua::REGISTRY_INDEX, refKey);
 }
 

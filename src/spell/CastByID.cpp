@@ -44,9 +44,9 @@ static const char *LocaleNameForID(int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return nullptr;
-    const int locale = *reinterpret_cast<const int *>(
+    const int locale = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
-    return *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
+    return Game::Read<const char *>(record, Offsets::OFF_SPELL_NAMES + locale * 4);
 }
 
 // Hook on the single name → spellbook-slot resolver

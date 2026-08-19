@@ -30,7 +30,7 @@ namespace Item::Info {
 
 static const char *PushedOrEmpty(const char *s) { return (s != nullptr && s[0] != 0) ? s : ""; }
 
-static int CurrentLocaleIndex() { return *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX); }
+static int CurrentLocaleIndex() { return Game::Read<int>(Offsets::VAR_LOCALE_INDEX); }
 
 static const char *LookupItemClassName(uint32_t classID) {
     return PushedOrEmpty(DBC::LocalizedField(
@@ -39,10 +39,10 @@ static const char *LookupItemClassName(uint32_t classID) {
 }
 
 static const char *LookupItemSubClassName(uint32_t classID, uint32_t subClassID) {
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_ITEMSUBCLASS_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_ITEMSUBCLASS_COUNT);
     if (count <= 0)
         return "";
-    auto *records = *reinterpret_cast<const uint8_t *const *>(Offsets::VAR_ITEMSUBCLASS_RECORDS);
+    auto *records = Game::Read<const uint8_t *>(Offsets::VAR_ITEMSUBCLASS_RECORDS);
     if (records == nullptr)
         return "";
     const int locale = CurrentLocaleIndex();
@@ -54,12 +54,12 @@ static const char *LookupItemSubClassName(uint32_t classID, uint32_t subClassID)
             continue;
         // Mirror Script_GetItemInfo's fallback chain at 0x48E311..0x48E32C:
         // try the verbose name first, fall back to the short name.
-        const char *verbose = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_ITEMSUBCLASS_DISPLAY_NAME + locale * 4);
+        const char *verbose = Game::Read<const char *>(
+            record, Offsets::OFF_ITEMSUBCLASS_DISPLAY_NAME + locale * 4);
         if (verbose != nullptr && verbose[0] != 0)
             return verbose;
-        const char *shortName = *reinterpret_cast<const char *const *>(
-            record + Offsets::OFF_ITEMSUBCLASS_NAME + locale * 4);
+        const char *shortName = Game::Read<const char *>(
+            record, Offsets::OFF_ITEMSUBCLASS_NAME + locale * 4);
         return PushedOrEmpty(shortName);
     }
     return "";
@@ -112,13 +112,13 @@ static int __fastcall Script_GetItemInfoInstant(void *L) {
     }
 
     const uint32_t classID =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_CLASS);
+        Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_CLASS);
     const uint32_t subClassID =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_SUBCLASS);
+        Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_SUBCLASS);
     const uint32_t displayInfoID =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
+        Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
     const uint32_t invType =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_INVENTORY_TYPE);
+        Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_INVENTORY_TYPE);
 
     char iconPath[260];
     if (!BuildIconPath(displayInfoID, iconPath, sizeof(iconPath)))
@@ -143,8 +143,8 @@ static int PushIconForItemID(void *L, int itemID) {
     const uint8_t *record = Item::PeekRecord(static_cast<uint32_t>(itemID));
     if (record == nullptr)
         return 0;
-    const uint32_t displayInfoID = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
+    const uint32_t displayInfoID = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_DISPLAY_INFO_ID);
     char iconPath[260];
     if (!BuildIconPath(displayInfoID, iconPath, sizeof(iconPath)))
         return 0;
@@ -274,10 +274,10 @@ static int __fastcall Script_C_Item_GetItemInfo(void *L) {
     const uint32_t sellPrice = u32(Offsets::OFF_ITEMSTATS_SELL_PRICE);
     const uint32_t bindType = u32(Offsets::OFF_ITEMSTATS_BONDING);
     const uint32_t setID = u32(Offsets::OFF_ITEMSTATS_ITEM_SET);
-    const char *name = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_ITEMSTATS_NAME);
-    const char *description = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_ITEMSTATS_DESCRIPTION);
+    const char *name = Game::Read<const char *>(
+        record, Offsets::OFF_ITEMSTATS_NAME);
+    const char *description = Game::Read<const char *>(
+        record, Offsets::OFF_ITEMSTATS_DESCRIPTION);
 
     // Apply the link's random suffix ("... of the Owl") to both the name and
     // the reconstructed link when the input carried one (arg.suffix); with no

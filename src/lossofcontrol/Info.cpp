@@ -61,14 +61,14 @@ using Time::Clock::NowMs;
 using Time::Clock::Reached;
 
 const char *SpellName(const uint8_t *rec) {
-    const int locale = *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
+    const int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
     const char *n =
-        *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
+        Game::Read<const char *>(rec, Offsets::OFF_SPELL_NAMES + locale * 4);
     return (n != nullptr) ? n : "";
 }
 
 const char *SpellIconPath(const uint8_t *rec) {
-    const int iconID = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID);
+    const int iconID = Game::Read<int>(rec, Offsets::OFF_SPELL_RECORD_ICON_ID);
     const uint8_t *iconRec = DBC::Record(Offsets::VAR_SPELL_ICON_RECORDS,
                                          Offsets::VAR_SPELL_ICON_COUNT,
                                          static_cast<uint32_t>(iconID));
@@ -79,7 +79,7 @@ const char *SpellIconPath(const uint8_t *rec) {
 }
 
 int SpellSchoolIndex(const uint8_t *rec) {
-    return *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_SCHOOL);
+    return Game::Read<int>(rec, Offsets::OFF_SPELL_SCHOOL);
 }
 
 // The control-loss classifier lives in `Spell::CrowdControl::Classify` so the

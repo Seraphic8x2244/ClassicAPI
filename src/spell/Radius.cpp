@@ -61,14 +61,14 @@ namespace Spell::Radius {
 static float MaxBaseRadius(const uint8_t *record) {
     float best = -1.0f;
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
-        const int radiusIndex = *reinterpret_cast<const int *>(
-            record + Offsets::OFF_SPELL_RECORD_EFFECT_RADIUS_INDEX + i * 4);
+        const int radiusIndex = Game::Read<int>(
+            record, Offsets::OFF_SPELL_RECORD_EFFECT_RADIUS_INDEX + i * 4);
         const uint8_t *rad = DBC::Record(Offsets::VAR_SPELL_RADIUS_RECORDS,
                                          Offsets::VAR_SPELL_RADIUS_COUNT,
                                          static_cast<uint32_t>(radiusIndex));
         if (rad == nullptr)
             continue;
-        const float r = *reinterpret_cast<const float *>(rad + Offsets::OFF_SPELL_RADIUS_VALUE);
+        const float r = Game::Read<float>(rad, Offsets::OFF_SPELL_RADIUS_VALUE);
         if (r > best)
             best = r;
     }

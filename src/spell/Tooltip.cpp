@@ -75,30 +75,30 @@ void AppendByID(void *L, int spellID) {
         return;
     auto *tt = static_cast<uint8_t *>(tooltipObj);
 
-    const int before = *reinterpret_cast<const int *>(
-        tt + Offsets::OFF_GAMETOOLTIP_NUM_LINES);
+    const int before = Game::Read<int>(
+        tt, Offsets::OFF_GAMETOOLTIP_NUM_LINES);
 
     auto BuildSpellTooltip =
         reinterpret_cast<BuildSpellTooltip_t>(Offsets::FUN_GAMETOOLTIP_BUILD_SPELL_TOOLTIP);
     BuildSpellTooltip(tooltipObj, spellID, 0, 0, 0, 0, 0, /*param_7 (append)=*/1);
 
-    const int after = *reinterpret_cast<const int *>(
-        tt + Offsets::OFF_GAMETOOLTIP_NUM_LINES);
+    const int after = Game::Read<int>(
+        tt, Offsets::OFF_GAMETOOLTIP_NUM_LINES);
     if (after <= before)
         return; // nothing appended (bad spellID / missing Spell.dbc record)
 
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return;
-    const int locale = *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_SPELL_NAMES + locale * 4);
+    const int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
+    const char *name = Game::Read<const char *>(
+        record, Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || name[0] == '\0')
         return;
 
     // Left-text FontString array: descriptor at +0x324, data ptr at +0x8.
-    auto **textLeft = *reinterpret_cast<void ***>(
-        tt + Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 8);
+    auto **textLeft = Game::Read<void **>(
+        tt, Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 8);
     if (textLeft == nullptr)
         return;
     void *fs = textLeft[before];
@@ -141,8 +141,8 @@ static int __fastcall Script_GameTooltipGetSpell(void *L) {
     if (tooltipObj == nullptr)
         return 0;
 
-    const int spellID = *reinterpret_cast<const int *>(
-        static_cast<const uint8_t *>(tooltipObj) + Offsets::OFF_TOOLTIP_SPELL_ID);
+    const int spellID = Game::Read<int>(
+        tooltipObj, Offsets::OFF_TOOLTIP_SPELL_ID);
     if (spellID <= 0)
         return 0;
 
@@ -150,11 +150,11 @@ static int __fastcall Script_GameTooltipGetSpell(void *L) {
     if (record == nullptr)
         return 0;
 
-    const int locale = *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_SPELL_NAMES + locale * 4);
-    const char *rank = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
+    const int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
+    const char *name = Game::Read<const char *>(
+        record, Offsets::OFF_SPELL_NAMES + locale * 4);
+    const char *rank = Game::Read<const char *>(
+        record, Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
 
     if (name == nullptr)
         return 0;
@@ -181,8 +181,8 @@ static int __fastcall Script_GameTooltipHasSpell(void *L) {
         Game::Lua::PushBool(L, 0);
         return 1;
     }
-    const int spellID = *reinterpret_cast<const int *>(
-        static_cast<const uint8_t *>(tooltipObj) + Offsets::OFF_TOOLTIP_SPELL_ID);
+    const int spellID = Game::Read<int>(
+        tooltipObj, Offsets::OFF_TOOLTIP_SPELL_ID);
     Game::Lua::PushBool(L, spellID > 0);
     return 1;
 }

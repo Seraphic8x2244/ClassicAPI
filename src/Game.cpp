@@ -73,7 +73,7 @@ using RegisterFrameMethods_t = void(__fastcall *)(const FrameMethodEntry *table,
 } // namespace
 
 void *State() {
-    return *reinterpret_cast<void **>(static_cast<uintptr_t>(Offsets::VAR_LUA_STATE));
+    return Game::Read<void *>(Offsets::VAR_LUA_STATE);
 }
 
 namespace {

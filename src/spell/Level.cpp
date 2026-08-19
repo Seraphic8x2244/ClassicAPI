@@ -33,8 +33,8 @@ const uint8_t *PlayerDescriptor() {
     auto *player = static_cast<const uint8_t *>(fn("player"));
     if (player == nullptr)
         return nullptr;
-    return *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_DESCRIPTOR);
+    return Game::Read<const uint8_t *>(
+        player, Offsets::OFF_UNIT_DESCRIPTOR);
 }
 
 // Builds (or returns the cached) set of every spellID that appears
@@ -51,9 +51,9 @@ std::unordered_set<int> &TalentSpellSet() {
     static std::unordered_set<int> set;
     if (!set.empty())
         return set;
-    const uint8_t *const *records = *reinterpret_cast<const uint8_t *const *const *>(
+    const uint8_t *const *records = Game::Read<const uint8_t *const *>(
         static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
+    const int count = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_COUNT));
     if (records == nullptr || count <= 0)
         return set;
@@ -63,8 +63,8 @@ std::unordered_set<int> &TalentSpellSet() {
         const uint8_t *rec = records[i];
         if (rec == nullptr)
             continue;
-        auto *ranks = reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_TALENT_SPELL_RANK);
+        auto *ranks = Game::Ptr<const uint32_t>(
+            rec, Offsets::OFF_TALENT_SPELL_RANK);
         for (int j = 0; j < 9; ++j) {
             const uint32_t spellID = ranks[j];
             if (spellID != 0)
@@ -80,8 +80,8 @@ int SpellBaseLevel(int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return 0;
-    return *reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_BASE_LEVEL);
+    return Game::Read<int32_t>(
+        record, Offsets::OFF_SPELL_RECORD_BASE_LEVEL);
 }
 
 // Spell.dbc attribute filter for the learnable-spell walk. Only the
@@ -110,8 +110,8 @@ bool SpellHiddenFromSpellbook(int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return false;
-    const uint32_t attributes = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
+    const uint32_t attributes = Game::Read<uint32_t>(
+        record, Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     return (attributes & SPELL_ATTR_HIDDEN_CLIENTSIDE) != 0;
 }
 
@@ -134,7 +134,7 @@ constexpr uint32_t SPELL_EFFECT_APPLY_AURA = 6;
 constexpr uint32_t SPELL_EFFECT_APPLY_AREA_AURA_PARTY = 35;
 
 int LocaleIndex() {
-    return *reinterpret_cast<const int *>(
+    return Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
 }
 
@@ -169,8 +169,8 @@ bool IsPositiveRankTarget(uint32_t t) {
 // single-rank buffs (Power Infusion / Innervate / Blessing of Kings, all
 // empty Rank and un-gated) vs ranked ones (Divine Spirit / Fortitude).
 bool HasRankString(const uint8_t *record) {
-    const char *rank = *reinterpret_cast<const char *const *>(
-        record + Offsets::OFF_SPELL_RECORD_RANK + LocaleIndex() * 4);
+    const char *rank = Game::Read<const char *>(
+        record, Offsets::OFF_SPELL_RECORD_RANK + LocaleIndex() * 4);
     return rank != nullptr && *rank != '\0';
 }
 
@@ -178,19 +178,19 @@ bool HasRankString(const uint8_t *record) {
 // the spell isn't subject to the ranked-positive-aura target-level rule.
 int RequiredTargetLevel(const uint8_t *record) {
     const int spellLevel =
-        *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_SPELL_LEVEL);
+        Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_SPELL_LEVEL);
     if (spellLevel <= 10) // targetLevel + 10 >= spellLevel holds for any level
         return 0;
     const uint32_t attr =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
+        Game::Read<uint32_t>(record, Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     if (attr & Offsets::SPELL_ATTR_PASSIVE)
         return 0;
     if (!HasRankString(record)) // single-rank spell → not gated
         return 0;
 
-    auto *effect = reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_EFFECT);
+    auto *effect = Game::Ptr<const uint32_t>(record, Offsets::OFF_SPELL_RECORD_EFFECT);
     auto *targetA =
-        reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
+        Game::Ptr<const uint32_t>(record, Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
     bool positiveAura = false;
     for (int i = 0; i < 3; ++i) {
         if ((effect[i] == SPELL_EFFECT_APPLY_AURA &&
@@ -221,13 +221,13 @@ int __fastcall Script_GetSpellLevelInfo(void *L) {
         return 0;
     Game::Lua::PushNumber(
         L, static_cast<double>(
-               *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_SPELL_LEVEL)));
+               Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_SPELL_LEVEL)));
     Game::Lua::PushNumber(
         L, static_cast<double>(
-               *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_BASE_LEVEL)));
+               Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_BASE_LEVEL)));
     Game::Lua::PushNumber(
         L, static_cast<double>(
-               *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_MAX_LEVEL)));
+               Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_MAX_LEVEL)));
     return 3;
 }
 
@@ -308,8 +308,8 @@ int __fastcall Script_GetCurrentLevelSpells(void *L) {
 
     const uint8_t classByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_CLASS_BYTE);
     const uint8_t raceByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_RACE_BYTE);
-    const int32_t playerLevel = *reinterpret_cast<const int32_t *>(
-        desc + Offsets::OFF_UNIT_FIELD_LEVEL);
+    const int32_t playerLevel = Game::Read<int32_t>(
+        desc, Offsets::OFF_UNIT_FIELD_LEVEL);
     if (classByte == 0 || raceByte == 0 || playerLevel <= 0)
         return 1;
 
@@ -337,9 +337,9 @@ int __fastcall Script_GetCurrentLevelSpells(void *L) {
         (1u << 0)  | (1u << 1)  | (1u << 2)  | (1u << 3)  | (1u << 4)  |
         (1u << 6)  | (1u << 7)  | (1u << 8)  | (1u << 10);
 
-    const uint8_t *const *records = *reinterpret_cast<const uint8_t *const *const *>(
+    const uint8_t *const *records = Game::Read<const uint8_t *const *>(
         static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
+    const int count = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_COUNT));
     if (records == nullptr || count <= 0)
         return 1;
@@ -357,14 +357,14 @@ int __fastcall Script_GetCurrentLevelSpells(void *L) {
         if (rec == nullptr)
             continue;
 
-        const uint32_t recClassMask = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_CLASS_MASK);
-        const uint32_t recRaceMask = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_RACE_MASK);
-        const uint32_t recExcludeClass = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_EXCLUDE_CLASS);
-        const uint32_t recExcludeRace = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_SLA_EXCLUDE_RACE);
+        const uint32_t recClassMask = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_CLASS_MASK);
+        const uint32_t recRaceMask = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_RACE_MASK);
+        const uint32_t recExcludeClass = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_EXCLUDE_CLASS);
+        const uint32_t recExcludeRace = Game::Read<uint32_t>(
+            rec, Offsets::OFF_SLA_EXCLUDE_RACE);
 
         // Skip if explicitly excluded.
         if ((recExcludeClass & playerClassBit) != 0)
@@ -406,8 +406,8 @@ int __fastcall Script_GetCurrentLevelSpells(void *L) {
         if (!isClassSpell && !isRacial)
             continue;
 
-        const int spellID = *reinterpret_cast<const int *>(
-            rec + Offsets::OFF_SLA_SPELL_ID);
+        const int spellID = Game::Read<int>(
+            rec, Offsets::OFF_SLA_SPELL_ID);
         if (spellID <= 0)
             continue;
         if (SpellBaseLevel(spellID) != queryLevel)

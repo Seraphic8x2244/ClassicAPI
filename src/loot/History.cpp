@@ -92,13 +92,13 @@ const uint8_t *LookupPlayerRecord(uint64_t guid) {
 
 const char *NameFromRecord(const uint8_t *rec) {
     return rec != nullptr
-               ? reinterpret_cast<const char *>(rec + Offsets::OFF_PLAYER_INFO_NAME)
+               ? Game::Ptr<const char>(rec, Offsets::OFF_PLAYER_INFO_NAME)
                : nullptr;
 }
 
 uint32_t ClassIdFromRecord(const uint8_t *rec) {
     return rec != nullptr
-               ? *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_PLAYER_INFO_CLASS)
+               ? Game::Read<uint32_t>(rec, Offsets::OFF_PLAYER_INFO_CLASS)
                : 0;
 }
 
@@ -312,7 +312,7 @@ int RecordAllPassed(const void *msg) {
 // the same field offsets as the message. This is the only place the random
 // fields are populated, so the result recorders leave them alone.
 void RecordStart() {
-    const uint8_t *node = *reinterpret_cast<const uint8_t *const *>(
+    const uint8_t *node = Game::Read<const uint8_t *>(
         static_cast<uintptr_t>(Offsets::VAR_LOOTROLL_STORE_HEAD));
     if (node == nullptr)
         return;

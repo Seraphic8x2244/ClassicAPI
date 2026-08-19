@@ -77,8 +77,8 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
             ResolveTalentRecordForClass(classID, tabIndex, talentIndex);
         if (rec == nullptr)
             return 0;
-        const uint32_t spellID = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_TALENT_SPELL_RANK + (rank - 1) * sizeof(uint32_t));
+        const uint32_t spellID = Game::Read<uint32_t>(
+            rec, Offsets::OFF_TALENT_SPELL_RANK + (rank - 1) * sizeof(uint32_t));
         if (spellID == 0)
             return 0; // rank slot not populated (rank > maxRank for this talent)
         Game::Lua::PushNumber(L, static_cast<double>(spellID));
@@ -89,21 +89,20 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
     // engine's `Script_GetTalentInfo` on out-of-range input. The engine
     // bails to its error path (lua_error) on bad tab, bad talent index,
     // or NULL player; we want all of those to return nil instead.
-    const int tabCount = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_COUNT));
+    const int tabCount = Game::Read<int>(Offsets::VAR_TALENT_TAB_COUNT);
     if (tabIndex > tabCount)
         return 0;
 
-    auto *tabs = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_INFO_ARRAY));
+    auto *tabs = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_TALENT_TAB_INFO_ARRAY);
     if (tabs == nullptr)
         return 0;
     const uint8_t *tabInfo = tabs[tabIndex - 1];
     if (tabInfo == nullptr)
         return 0;
 
-    const int numTalents = *reinterpret_cast<const int *>(
-        tabInfo + Offsets::OFF_TABINFO_NUM_TALENTS);
+    const int numTalents = Game::Read<int>(
+        tabInfo, Offsets::OFF_TABINFO_NUM_TALENTS);
     if (talentIndex > numTalents)
         return 0;
 
@@ -131,14 +130,14 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
             rank = 1; // unallocated talent → fall back to rank-1 spellID
     }
 
-    auto *talents = *reinterpret_cast<const uint8_t *const *>(
-        tabInfo + Offsets::OFF_TABINFO_TALENT_ARRAY);
+    auto *talents = Game::Read<const uint8_t *>(
+        tabInfo, Offsets::OFF_TABINFO_TALENT_ARRAY);
     if (talents == nullptr)
         return 0;
     const uint8_t *entry = talents +
         (talentIndex - 1) * Offsets::TALENT_ENTRY_STRIDE;
-    const uint32_t spellID = *reinterpret_cast<const uint32_t *>(
-        entry + Offsets::OFF_TALENT_SPELL_RANK + (rank - 1) * sizeof(uint32_t));
+    const uint32_t spellID = Game::Read<uint32_t>(
+        entry, Offsets::OFF_TALENT_SPELL_RANK + (rank - 1) * sizeof(uint32_t));
     if (spellID == 0)
         return 0; // rank slot not populated (rank > maxRank for this talent)
 
@@ -158,22 +157,22 @@ static int __fastcall Script_GetTalentSpellID(void *L) {
 // never race-restricted — so we apply only the class half of `FUN_004f2e50`.
 static uint32_t NthClassTalentTabID(int classID, int tabIndex) {
     const uint32_t classBit = 1u << ((classID - 1) & 0x1F);
-    auto *base = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENTTAB_DBC_FLAT_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENTTAB_DBC_FLAT_COUNT));
+    auto *base = Game::Read<const uint8_t *>(
+        Offsets::VAR_TALENTTAB_DBC_FLAT_RECORDS);
+    const int count = Game::Read<int>(
+        Offsets::VAR_TALENTTAB_DBC_FLAT_COUNT);
     if (base == nullptr)
         return 0;
     int match = 0;
     for (int i = 0; i < count; ++i) {
         const uint8_t *rec = base + i * Offsets::TALENTTAB_ENTRY_STRIDE;
-        const uint32_t classMask = *reinterpret_cast<const uint32_t *>(
-            rec + Offsets::OFF_TALENTTAB_CLASS_MASK);
+        const uint32_t classMask = Game::Read<uint32_t>(
+            rec, Offsets::OFF_TALENTTAB_CLASS_MASK);
         if (classMask != 0 && (classMask & classBit) == 0)
             continue;
         if (++match == tabIndex)
-            return *reinterpret_cast<const uint32_t *>(
-                rec + Offsets::OFF_TALENTTAB_ID);
+            return Game::Read<uint32_t>(
+                rec, Offsets::OFF_TALENTTAB_ID);
     }
     return 0;
 }
@@ -182,16 +181,16 @@ static uint32_t NthClassTalentTabID(int classID, int tabIndex) {
 // `tabID`, in DBC row order — the same order the builder assigns within a tab.
 // Returns null if there aren't that many.
 static const uint8_t *NthTabTalentRecord(uint32_t tabID, int talentIndex) {
-    auto *base = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_FLAT_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_DBC_FLAT_COUNT));
+    auto *base = Game::Read<const uint8_t *>(
+        Offsets::VAR_TALENT_DBC_FLAT_RECORDS);
+    const int count = Game::Read<int>(
+        Offsets::VAR_TALENT_DBC_FLAT_COUNT);
     if (base == nullptr)
         return nullptr;
     int match = 0;
     for (int i = 0; i < count; ++i) {
         const uint8_t *rec = base + i * Offsets::TALENT_ENTRY_STRIDE;
-        if (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_TALENT_DBC_TAB_ID) != tabID)
+        if (Game::Read<uint32_t>(rec, Offsets::OFF_TALENT_DBC_TAB_ID) != tabID)
             continue;
         if (++match == talentIndex)
             return rec;
@@ -259,26 +258,25 @@ static int __fastcall Script_GetTalentIDByIndex(void *L) {
         return 1;
     }
 
-    const int tabCount = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_COUNT));
+    const int tabCount = Game::Read<int>(Offsets::VAR_TALENT_TAB_COUNT);
     if (tabIndex > tabCount)
         return 0;
 
-    auto *tabs = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_INFO_ARRAY));
+    auto *tabs = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_TALENT_TAB_INFO_ARRAY);
     if (tabs == nullptr)
         return 0;
     const uint8_t *tabInfo = tabs[tabIndex - 1];
     if (tabInfo == nullptr)
         return 0;
 
-    const int numTalents = *reinterpret_cast<const int *>(
-        tabInfo + Offsets::OFF_TABINFO_NUM_TALENTS);
+    const int numTalents = Game::Read<int>(
+        tabInfo, Offsets::OFF_TABINFO_NUM_TALENTS);
     if (talentIndex > numTalents)
         return 0;
 
-    auto *talents = *reinterpret_cast<const uint8_t *const *>(
-        tabInfo + Offsets::OFF_TABINFO_TALENT_ARRAY);
+    auto *talents = Game::Read<const uint8_t *>(
+        tabInfo, Offsets::OFF_TABINFO_TALENT_ARRAY);
     if (talents == nullptr)
         return 0;
 

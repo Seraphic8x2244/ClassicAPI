@@ -67,8 +67,8 @@ constexpr uint32_t kAutoShotSpellId = 75;
 constexpr uint16_t kTargetFlagUnit = 0x0002;
 
 const char *LocalizedField(const uint8_t *rec, int fieldOffset) {
-    const int locale = *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
-    return *reinterpret_cast<const char *const *>(rec + fieldOffset + locale * 4);
+    const int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
+    return Game::Read<const char *>(rec, fieldOffset + locale * 4);
 }
 
 // Cast UID for a REAL (Type-3) cast — player and remote alike. Per the retail
@@ -269,7 +269,7 @@ constexpr int kChanSuccDeferMs = 500;
 bool IsChanneledSpell(int spellID) {
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
     return rec != nullptr &&
-           (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
+           (Game::Read<uint32_t>(rec, Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
             Offsets::SPELL_ATTR_EX_CHANNELED) != 0;
 }
 
@@ -552,14 +552,14 @@ void OnPlayerSucceeded(int spellID) {
 
 void PollReticle() {
     const bool active =
-        *reinterpret_cast<const int *>(Offsets::VAR_SPELL_TARGETING_FLAGS) != 0;
+        Game::Read<int>(Offsets::VAR_SPELL_TARGETING_FLAGS) != 0;
     if (active) {
         if (s_reticleSpell == 0) {
             // Reticle just came up — report the pending spell. Read the spellID
             // now (it's set by Spell_C_CastSpell before targeting begins); if
             // it's transiently 0 this frame, retry next tick.
             const int spellID =
-                *reinterpret_cast<const int *>(Offsets::VAR_PENDING_CAST_SPELL);
+                Game::Read<int>(Offsets::VAR_PENDING_CAST_SPELL);
             if (spellID != 0) {
                 s_reticleSpell = spellID;
                 s_reticlePlaced = false;

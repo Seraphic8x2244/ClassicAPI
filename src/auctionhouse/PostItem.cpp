@@ -103,14 +103,14 @@ int CGItemCount(const uint8_t *item) {
     auto *desc = Item::ObjectFields(item);
     if (desc == nullptr)
         return 0;
-    return *reinterpret_cast<const int *>(desc + Offsets::OFF_DESCRIPTOR_STACK_COUNT);
+    return Game::Read<int>(desc, Offsets::OFF_DESCRIPTOR_STACK_COUNT);
 }
 
 uint64_t CGItemGuid(const uint8_t *item) {
     auto *inst = Item::InstanceBlock(item);
     if (inst == nullptr)
         return 0;
-    return *reinterpret_cast<const uint64_t *>(inst + Offsets::OFF_INSTANCE_BLOCK_GUID);
+    return Game::Read<uint64_t>(inst, Offsets::OFF_INSTANCE_BLOCK_GUID);
 }
 
 struct SlotInfo {
@@ -135,18 +135,18 @@ SlotInfo ReadSlot(void *L, int bag, int slot) {
 // --- auction-house globals ----------------------------------------------
 
 uint64_t AuctioneerGuid() {
-    const uint32_t lo = *reinterpret_cast<const uint32_t *>(
+    const uint32_t lo = Game::Read<uint32_t>(
         Offsets::VAR_AUCTION_AUCTIONEER_GUID_LO);
-    const uint32_t hi = *reinterpret_cast<const uint32_t *>(
+    const uint32_t hi = Game::Read<uint32_t>(
         Offsets::VAR_AUCTION_AUCTIONEER_GUID_HI);
     return (static_cast<uint64_t>(hi) << 32) | lo;
 }
 bool AHOpen() { return AuctioneerGuid() != 0; }
 
 void SetSellGuid(uint64_t guid) {
-    *reinterpret_cast<uint32_t *>(Offsets::VAR_AUCTION_SELL_GUID_LO) =
+    Game::Ref<uint32_t>(Offsets::VAR_AUCTION_SELL_GUID_LO) =
         static_cast<uint32_t>(guid);
-    *reinterpret_cast<uint32_t *>(Offsets::VAR_AUCTION_SELL_GUID_HI) =
+    Game::Ref<uint32_t>(Offsets::VAR_AUCTION_SELL_GUID_HI) =
         static_cast<uint32_t>(guid >> 32);
 }
 
@@ -181,8 +181,8 @@ bool BagIsGeneral(int bag) {
     const uint8_t *rec = Item::PeekRecord(static_cast<uint32_t>(id));
     if (rec == nullptr)
         return false;
-    return *reinterpret_cast<const uint32_t *>(
-               rec + Offsets::OFF_ITEMSTATS_BAG_FAMILY) == 0;
+    return Game::Read<uint32_t>(
+               rec, Offsets::OFF_ITEMSTATS_BAG_FAMILY) == 0;
 }
 
 bool FindFreeGeneralSlot(void *L, int *outBag, int *outSlot) {

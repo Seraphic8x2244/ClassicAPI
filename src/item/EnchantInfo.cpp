@@ -83,8 +83,8 @@ int __fastcall Script_C_Item_GetEnchantInfo(void *L) {
     // Localized display name (8-slot locale array at +0x34). Clamp the
     // locale index to the array bounds — index 8 would read the locale
     // mask column that follows. enUS (0) fallback for empty slots.
-    auto names = reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELLITEMENCHANT_NAME);
-    int locale = *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
+    auto names = Game::Ptr<const char *const>(rec, Offsets::OFF_SPELLITEMENCHANT_NAME);
+    int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
     if (locale < 0 || locale >= kNumNameLocales)
         locale = 0;
     const char *name = names[locale];
@@ -93,9 +93,9 @@ int __fastcall Script_C_Item_GetEnchantInfo(void *L) {
     if (name == nullptr || name[0] == '\0')
         return 0; // unnamed record -> nil
 
-    auto type = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELLITEMENCHANT_TYPE);
-    auto amount = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELLITEMENCHANT_AMOUNT);
-    auto arg = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELLITEMENCHANT_ARG);
+    auto type = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELLITEMENCHANT_TYPE);
+    auto amount = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELLITEMENCHANT_AMOUNT);
+    auto arg = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELLITEMENCHANT_ARG);
 
     Game::Lua::NewTable(L);
     Game::Lua::SetFieldNumber(L, "enchantID", enchantID);

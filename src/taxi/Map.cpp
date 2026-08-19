@@ -117,7 +117,7 @@ int ResolveZoneByName(const char *zone) {
     if (zone == nullptr || *zone == '\0')
         return 0;
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_AREATABLE_COUNT);
+        Game::Read<int>(Offsets::VAR_AREATABLE_COUNT);
     int prefixHit = 0;
     for (int id = 1; id <= count; ++id) {
         const char *nm =
@@ -154,7 +154,7 @@ void PushPosition(void *L, const char *key, double px, double py) {
 // is ample). Returns false when the path table isn't loaded.
 constexpr int kMaxTaxiNodeID = 2048;
 bool BuildTaxiGraph(bool *endpoint, bool *dest, int size) {
-    const int count = *reinterpret_cast<const int *>(Offsets::VAR_TAXIPATH_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_TAXIPATH_COUNT);
     if (count <= 0)
         return false;
     for (int i = 1; i <= count; ++i) {
@@ -193,7 +193,7 @@ int __fastcall Script_GetTaxiNodesForMap(void *L) {
     BuildTaxiGraph(endpoint, dest, kMaxTaxiNodeID);
 
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_TAXINODES_COUNT);
+        Game::Read<int>(Offsets::VAR_TAXINODES_COUNT);
     int outIdx = 0;
     for (int id = 1; id <= count; ++id) {
         const uint8_t *rec = DBC::Record(Offsets::VAR_TAXINODES_RECORDS,
@@ -316,7 +316,7 @@ int __fastcall Script_GetAllTaxiNodes(void *L) {
     Game::Lua::NewTable(L);
 
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_TAXI_NODE_COUNT);
+        Game::Read<int>(Offsets::VAR_TAXI_NODE_COUNT);
     if (count <= 0)
         return 1; // no taxi map open
 
@@ -326,8 +326,8 @@ int __fastcall Script_GetAllTaxiNodes(void *L) {
 
     for (int slot = 0; slot < count; ++slot) {
         const uint8_t *slotRec = arrayBase + slot * Offsets::TAXI_NODE_STRIDE;
-        const uint8_t *dbcRec = *reinterpret_cast<const uint8_t *const *>(
-            slotRec + Offsets::OFF_TAXI_SLOT_RECORD);
+        const uint8_t *dbcRec = Game::Read<const uint8_t *>(
+            slotRec, Offsets::OFF_TAXI_SLOT_RECORD);
         const float x = FloatField(slotRec, Offsets::OFF_TAXI_SLOT_X);
         const float y = FloatField(slotRec, Offsets::OFF_TAXI_SLOT_Y);
 
@@ -378,7 +378,7 @@ int __fastcall Script_GetTaxiRoute(void *L) {
         return 0;
     const int slot1 = static_cast<int>(Game::Lua::ToNumber(L, 1));
     const int count =
-        *reinterpret_cast<const int *>(Offsets::VAR_TAXI_NODE_COUNT);
+        Game::Read<int>(Offsets::VAR_TAXI_NODE_COUNT);
     if (count <= 0 || slot1 < 1 || slot1 > count)
         return 0;
 
@@ -387,10 +387,10 @@ int __fastcall Script_GetTaxiRoute(void *L) {
     const uint8_t *slotRec =
         arrayBase + (slot1 - 1) * Offsets::TAXI_NODE_STRIDE;
 
-    const uint8_t *curRec = *reinterpret_cast<const uint8_t *const *>(
+    const uint8_t *curRec = Game::Read<const uint8_t *>(
         Offsets::VAR_TAXI_CURRENT_REC);
-    const uint8_t *dstRec = *reinterpret_cast<const uint8_t *const *>(
-        slotRec + Offsets::OFF_TAXI_SLOT_RECORD);
+    const uint8_t *dstRec = Game::Read<const uint8_t *>(
+        slotRec, Offsets::OFF_TAXI_SLOT_RECORD);
     if (curRec == nullptr || dstRec == nullptr)
         return 0;
     const int currentID = IntField(curRec, 0);
@@ -405,10 +405,10 @@ int __fastcall Script_GetTaxiRoute(void *L) {
         ids[n++] = currentID;
         ids[n++] = destID;
     } else if (*(slotRec + Offsets::OFF_TAXI_SLOT_MULTIHOP) != 0) {
-        const int *route = *reinterpret_cast<const int *const *>(
-            slotRec + Offsets::OFF_TAXI_SLOT_ROUTE);
-        const int rc = *reinterpret_cast<const int *>(
-            slotRec + Offsets::OFF_TAXI_SLOT_ROUTE_COUNT);
+        const int *route = Game::Read<const int *>(
+            slotRec, Offsets::OFF_TAXI_SLOT_ROUTE);
+        const int rc = Game::Read<int>(
+            slotRec, Offsets::OFF_TAXI_SLOT_ROUTE_COUNT);
         if (route == nullptr || rc < 2)
             return 0;
         const int cap = rc < 64 ? rc : 64;

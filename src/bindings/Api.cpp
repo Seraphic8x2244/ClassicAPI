@@ -352,8 +352,8 @@ int DispatchOverrideCommand(void *mgr, const char *cmd, int isDown) {
         reinterpret_cast<volatile uint32_t *>(Offsets::VAR_FRAMESCRIPT_EXEC_CONTEXT);
     volatile uint32_t *depth = reinterpret_cast<volatile uint32_t *>(
         Offsets::VAR_FRAMESCRIPT_EXEC_CONTEXT_DEPTH);
-    volatile uint32_t *executing = reinterpret_cast<volatile uint32_t *>(
-        reinterpret_cast<char *>(mgr) + Offsets::OFF_BINDING_MANAGER_EXECUTING);
+    volatile uint32_t *executing =
+        Game::Ptr<volatile uint32_t>(mgr, Offsets::OFF_BINDING_MANAGER_EXECUTING);
 
     const uint32_t savedContext = *context;
     *depth = *depth + 1;

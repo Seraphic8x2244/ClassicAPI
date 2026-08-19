@@ -138,8 +138,8 @@ ItemInfo ReadItemInfo(const uint8_t *cgItem) {
         Item::Data::WarmCache(static_cast<uint32_t>(itemID));
         return {0, 0};
     }
-    return {*reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_ITEM_LEVEL),
-            *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_ITEMSTATS_INVENTORY_TYPE)};
+    return {Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_ITEM_LEVEL),
+            Game::Read<uint32_t>(record, Offsets::OFF_ITEMSTATS_INVENTORY_TYPE)};
 }
 
 // Bank-walk helpers — bypass the bank-window gate on `GetItemBySlot`
@@ -184,8 +184,8 @@ void WalkGuidArrayRange(const uint8_t *invMgr, int firstSlot, int lastSlot,
                         std::vector<Candidate> &candidates) {
     if (invMgr == nullptr)
         return;
-    auto *guidArray = *reinterpret_cast<const uint64_t *const *>(
-        invMgr + Offsets::OFF_INVMGR_GUID_ARRAY);
+    auto *guidArray = Game::Read<const uint64_t *>(
+        invMgr, Offsets::OFF_INVMGR_GUID_ARRAY);
     if (guidArray == nullptr)
         return;
     for (int slot = firstSlot; slot <= lastSlot; ++slot) {
@@ -203,8 +203,8 @@ void WalkBankBags(std::vector<Candidate> &candidates) {
     auto *playerInvMgr = Unit::Identity::PlayerInventoryManager();
     if (playerInvMgr == nullptr)
         return;
-    auto *playerGuidArray = *reinterpret_cast<const uint64_t *const *>(
-        playerInvMgr + Offsets::OFF_INVMGR_GUID_ARRAY);
+    auto *playerGuidArray = Game::Read<const uint64_t *>(
+        playerInvMgr, Offsets::OFF_INVMGR_GUID_ARRAY);
     if (playerGuidArray == nullptr)
         return;
     for (int slot = Offsets::INVMGR_BANK_BAG_FIRST_SLOT;

@@ -17,6 +17,46 @@
 
 namespace Game {
 
+// --- Typed engine-memory access ---------------------------------------------
+//
+// The canonical way to read/write an engine object field or a fixed-VA global,
+// replacing the `*reinterpret_cast<const T *>(base + Offsets::OFF_X)` idiom
+// (and its double-cast variant when `base` isn't a byte pointer). Offsets stay
+// in Offsets.h per the single-source-of-truth rule — these only centralize the
+// cast noise, they add no checking.
+//
+//   Game::Read<int>(obj, Offsets::OFF_FIELD)      field read
+//   Game::Ref<uint32_t>(obj, Offsets::OFF_FIELD)  writable field lvalue
+//   Game::Ptr<float>(obj, Offsets::OFF_FIELD)     pointer TO a field (arrays,
+//                                                 out-params for engine calls)
+//   Game::Read<float>(Offsets::VAR_GLOBAL)        fixed-VA global read
+//   Game::Ref<int>(Offsets::VAR_GLOBAL)           fixed-VA global lvalue
+
+template <typename T>
+inline const T *Ptr(const void *base, uintptr_t offset) {
+    return reinterpret_cast<const T *>(reinterpret_cast<const uint8_t *>(base) + offset);
+}
+template <typename T>
+inline T *Ptr(void *base, uintptr_t offset) {
+    return reinterpret_cast<T *>(reinterpret_cast<uint8_t *>(base) + offset);
+}
+template <typename T>
+inline T Read(const void *base, uintptr_t offset) {
+    return *Ptr<T>(base, offset);
+}
+template <typename T>
+inline T &Ref(void *base, uintptr_t offset) {
+    return *Ptr<T>(base, offset);
+}
+template <typename T>
+inline T Read(uintptr_t address) {
+    return *reinterpret_cast<const T *>(address);
+}
+template <typename T>
+inline T &Ref(uintptr_t address) {
+    return *reinterpret_cast<T *>(address);
+}
+
 using FrameScript_Initialize_t = bool(__fastcall *)();
 using LoadScriptFunctions_t = void(__fastcall *)();
 

@@ -112,13 +112,13 @@ void SMemFree(void *ptr) {
 int TryClaim(const char *eventName) {
     if (!g_writesEnabled)
         return -1;
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
     if (base == nullptr || count <= 0)
         return -1;
     for (int i = 0; i < count; ++i) {
-        auto **namePtr = reinterpret_cast<const char **>(
-            base + i * Offsets::EVENT_ENTRY_STRIDE +
+        auto **namePtr = Game::Ptr<const char *>(
+            base + i * Offsets::EVENT_ENTRY_STRIDE,
             Offsets::OFF_EVENT_ENTRY_NAME);
         if (*namePtr == nullptr) {
             char *copy = SStrDup(eventName);
@@ -169,15 +169,15 @@ void Grow() {
         return;
     g_growLatched = true; // one attempt per build, whether or not it grows
 
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
     if (base == nullptr || count <= 0 || g_reservedCount <= 0)
         return;
 
     int nulls = 0;
     for (int i = 0; i < count; ++i)
-        if (*reinterpret_cast<const char *const *>(
-                base + i * Offsets::EVENT_ENTRY_STRIDE +
+        if (Game::Read<const char *>(
+                base + i * Offsets::EVENT_ENTRY_STRIDE,
                 Offsets::OFF_EVENT_ENTRY_NAME) == nullptr)
             ++nulls;
 
@@ -193,8 +193,8 @@ void Grow() {
     // moving the buffer would corrupt their subscription). Abort if so and
     // fall back to claim-NULL.
     for (int i = 0; i < count; ++i) {
-        const uint32_t head = *reinterpret_cast<const uint32_t *>(
-            base + i * Offsets::EVENT_ENTRY_STRIDE + Offsets::OFF_EVENT_ENTRY_HEAD);
+        const uint32_t head = Game::Read<uint32_t>(
+            base + i * Offsets::EVENT_ENTRY_STRIDE, Offsets::OFF_EVENT_ENTRY_HEAD);
         if (head != 0 && (head & 1) == 0) { // populated chain (not 0 / sentinel)
             Debug::Log::Printf(
                 "[event] grow aborted — chain live at slot %d (not first-reg)", i);
@@ -231,9 +231,9 @@ void Grow() {
     // Publish base BEFORE count so the globals never advertise more entries
     // than the buffer holds. Then free the OLD buffer only — the name
     // strings live on in newBuf and are freed by the reload teardown.
-    *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR) = newBuf;
-    *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_CAP) = newCount;
-    *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT) = newCount;
+    Game::Ref<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR) = newBuf;
+    Game::Ref<int>(Offsets::VAR_EVENT_TABLE_CAP) = newCount;
+    Game::Ref<int>(Offsets::VAR_EVENT_TABLE_COUNT) = newCount;
     SMemFree(base);
 
     Debug::Log::Printf("[event] grew table %d -> %d (%d NULL, %d reserved%s)",
@@ -268,13 +268,13 @@ int Lookup(const char *name) {
 int LookupByName(const char *name) {
     if (name == nullptr)
         return -1;
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
     if (base == nullptr || count <= 0)
         return -1;
     for (int i = 0; i < count; ++i) {
-        const char *entryName = *reinterpret_cast<const char *const *>(
-            base + i * Offsets::EVENT_ENTRY_STRIDE +
+        const char *entryName = Game::Read<const char *>(
+            base + i * Offsets::EVENT_ENTRY_STRIDE,
             Offsets::OFF_EVENT_ENTRY_NAME);
         if (entryName != nullptr && std::strcmp(entryName, name) == 0)
             return i;
@@ -285,16 +285,16 @@ int LookupByName(const char *name) {
 bool HasListeners(int slot) {
     if (slot < 0)
         return false;
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
     if (base == nullptr || slot >= count)
         return false;
     // The entry's chain head (`+0x0C`): a populated subscriber chain is a
     // non-zero pointer with the low bit clear; `0` or an odd (tagged)
     // value is the empty self-sentinel — same test the grow-safety scan
     // uses. So this is true iff at least one frame registered for the event.
-    const uint32_t head = *reinterpret_cast<const uint32_t *>(
-        base + slot * Offsets::EVENT_ENTRY_STRIDE + Offsets::OFF_EVENT_ENTRY_HEAD);
+    const uint32_t head = Game::Read<uint32_t>(
+        base + slot * Offsets::EVENT_ENTRY_STRIDE, Offsets::OFF_EVENT_ENTRY_HEAD);
     return head != 0 && (head & 1) == 0;
 }
 
@@ -330,12 +330,12 @@ int __fastcall Script_DumpSlot(void *L) {
         return 0;
     }
     const int slot = static_cast<int>(Game::Lua::ToNumber(L, 1));
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
     const char *name = nullptr;
     if (base != nullptr && slot >= 0 && slot < count) {
-        name = *reinterpret_cast<const char *const *>(
-            base + slot * Offsets::EVENT_ENTRY_STRIDE +
+        name = Game::Read<const char *>(
+            base + slot * Offsets::EVENT_ENTRY_STRIDE,
             Offsets::OFF_EVENT_ENTRY_NAME);
     }
     Debug::Log::Printf("[dumpslot] base=0x%08X count=%d slot=%d name='%s'",
@@ -345,16 +345,16 @@ int __fastcall Script_DumpSlot(void *L) {
 }
 
 int __fastcall Script_DumpAllEvents(void *) {
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
-    const int count = *reinterpret_cast<int *>(Offsets::VAR_EVENT_TABLE_COUNT);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    const int count = Game::Read<int>(Offsets::VAR_EVENT_TABLE_COUNT);
     Debug::Log::Printf("[dumpall] base=0x%08X count=%d",
                        static_cast<unsigned>(reinterpret_cast<uintptr_t>(base)),
                        count);
     if (base == nullptr)
         return 0;
     for (int i = 0; i < count; ++i) {
-        const char *name = *reinterpret_cast<const char *const *>(
-            base + i * Offsets::EVENT_ENTRY_STRIDE +
+        const char *name = Game::Read<const char *>(
+            base + i * Offsets::EVENT_ENTRY_STRIDE,
             Offsets::OFF_EVENT_ENTRY_NAME);
         if (name != nullptr && *name != '\0')
             Debug::Log::Printf("[%d] %s", i, name);

@@ -22,6 +22,7 @@
 
 #include "text/InlineTexturePool.h"
 
+#include "Game.h"
 #include "Offsets.h"
 #include "text/PtrProbe.h"
 #include "tick/FrameTick.h"
@@ -173,11 +174,9 @@ void Hide(void *tex) {
 // derivation); mirroring the byte onto the line's icon regions makes inline
 // icons fade with their text. Count 0 = never colored = opaque default.
 uint8_t FsColorAlpha(const void *fs) {
-    auto *f = reinterpret_cast<const uint8_t *>(fs);
-    if (*reinterpret_cast<const uint32_t *>(f + Offsets::OFF_FONTSTRING_COLOR_COUNT) < 1u)
+    if (Game::Read<uint32_t>(fs, Offsets::OFF_FONTSTRING_COLOR_COUNT) < 1u)
         return 0xFFu;
-    const uint8_t *colors =
-        *reinterpret_cast<const uint8_t *const *>(f + Offsets::OFF_FONTSTRING_COLOR_ARRAY);
+    const uint8_t *colors = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_COLOR_ARRAY);
     if (!LooksReadable(colors))
         return 0xFFu;
     return colors[3]; // slot 0's BGRA dword, alpha byte
@@ -216,7 +215,7 @@ void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint8_t fsAlpha
     // then froze them — the scroll-landing "randomly hidden icon" bug.
 
     if (r.path != p.path) {
-        const uint32_t blend = *reinterpret_cast<uint32_t *>(Offsets::VAR_TEXTURE_BLEND_DEFAULT);
+        const uint32_t blend = Game::Read<uint32_t>(Offsets::VAR_TEXTURE_BLEND_DEFAULT);
         reinterpret_cast<SetTexture_t>(Offsets::FUN_SIMPLETEXTURE_SET_TEXTURE)(r.tex, p.path.c_str(),
                                                                                0, blend, 0);
         r.path = p.path;
@@ -236,10 +235,9 @@ void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint8_t fsAlpha
     // the probe: a 50px SetPoint offset stored as 0.0319 internal resolved to a
     // rect at 0.0290 = 0.0319 × s (s = 0.91). So divide the desired resolved
     // delta by the region's own scale before storing.
-    float sReg = *reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(r.tex) +
-                                            Offsets::OFF_LAYOUT_SCALE);
+    float sReg = Game::Read<float>(r.tex, Offsets::OFF_LAYOUT_SCALE);
     if (!(sReg > 0.01f && sReg < 100.0f))
-        sReg = *reinterpret_cast<float *>(f + Offsets::OFF_LAYOUT_SCALE);
+        sReg = Game::Read<float>(f, Offsets::OFF_LAYOUT_SCALE);
     const float inv = (sReg > 0.01f && sReg < 100.0f) ? 1.0f / sReg : 1.0f;
 
     // Single deterministic placement; the resolver's true offset scale is

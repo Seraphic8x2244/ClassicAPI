@@ -34,8 +34,7 @@ namespace FriendList::WhoInfo {
 namespace {
 
 int WhoResultCount() {
-    return *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_WHO_RESULT_COUNT));
+    return Game::Read<int>(Offsets::VAR_WHO_RESULT_COUNT);
 }
 
 // `C_FriendList.GetNumWhoResults()` → `numWhos, totalCount`. The first is the
@@ -44,7 +43,7 @@ int WhoResultCount() {
 // global's two returns.
 int __fastcall Script_GetNumWhoResults(void *L) {
     const int displayed = WhoResultCount();
-    const int total = *reinterpret_cast<const int *>(
+    const int total = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_WHO_RESULT_COUNT) + 4);
     Game::Lua::PushNumber(L, static_cast<double>(displayed));
     Game::Lua::PushNumber(L, static_cast<double>(total));
@@ -67,15 +66,15 @@ int __fastcall Script_GetWhoInfo(void *L) {
         static_cast<uintptr_t>(Offsets::VAR_WHO_RESULTS) +
         static_cast<size_t>(index - 1) * Offsets::WHO_RESULT_STRIDE);
 
-    const char *name = reinterpret_cast<const char *>(entry + Offsets::OFF_WHO_NAME);
-    const char *guild = reinterpret_cast<const char *>(entry + Offsets::OFF_WHO_GUILD);
-    const int level = *reinterpret_cast<const int *>(entry + Offsets::OFF_WHO_LEVEL);
+    const char *name = Game::Ptr<const char>(entry, Offsets::OFF_WHO_NAME);
+    const char *guild = Game::Ptr<const char>(entry, Offsets::OFF_WHO_GUILD);
+    const int level = Game::Read<int>(entry, Offsets::OFF_WHO_LEVEL);
     const uint32_t raceID =
-        *reinterpret_cast<const uint32_t *>(entry + Offsets::OFF_WHO_RACE);
+        Game::Read<uint32_t>(entry, Offsets::OFF_WHO_RACE);
     const uint32_t classID =
-        *reinterpret_cast<const uint32_t *>(entry + Offsets::OFF_WHO_CLASS);
+        Game::Read<uint32_t>(entry, Offsets::OFF_WHO_CLASS);
     const uint32_t zoneID =
-        *reinterpret_cast<const uint32_t *>(entry + Offsets::OFF_WHO_ZONE);
+        Game::Read<uint32_t>(entry, Offsets::OFF_WHO_ZONE);
 
     Game::Lua::NewTable(L);
     Game::Lua::SetFieldString(L, "fullName", name);       // inline; "" if empty

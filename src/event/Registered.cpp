@@ -50,22 +50,20 @@ int __fastcall Script_GetFramesRegisteredForEvent(void *L) {
     if (slot < 0)
         return 0;
 
-    auto *base = *reinterpret_cast<uint8_t **>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
+    auto *base = Game::Read<uint8_t *>(Offsets::VAR_EVENT_TABLE_BASE_PTR);
     if (base == nullptr)
         return 0;
 
     const uint8_t *entry = base + slot * Offsets::EVENT_ENTRY_STRIDE;
-    const uintptr_t head = *reinterpret_cast<const uintptr_t *>(
-        entry + Offsets::OFF_EVENT_ENTRY_HEAD);
+    const uintptr_t head = Game::Read<uintptr_t>(entry, Offsets::OFF_EVENT_ENTRY_HEAD);
 
     // First pass: count subscribers so we can reserve stack up front — an
     // event with many registered frames would otherwise risk overflowing
     // the default Lua stack slack as we push.
     int count = 0;
     for (uintptr_t node = head; (node & 1) == 0 && node != 0;
-         node = *reinterpret_cast<const uintptr_t *>(
-             node + Offsets::OFF_EVENT_NODE_NEXT)) {
-        if (*reinterpret_cast<void *const *>(node + Offsets::OFF_EVENT_NODE_FRAME))
+         node = Game::Read<uintptr_t>(node + Offsets::OFF_EVENT_NODE_NEXT)) {
+        if (Game::Read<void *>(node + Offsets::OFF_EVENT_NODE_FRAME))
             ++count;
     }
     if (count == 0)
@@ -74,10 +72,8 @@ int __fastcall Script_GetFramesRegisteredForEvent(void *L) {
 
     int pushed = 0;
     for (uintptr_t node = head; (node & 1) == 0 && node != 0;
-         node = *reinterpret_cast<const uintptr_t *>(
-             node + Offsets::OFF_EVENT_NODE_NEXT)) {
-        void *frame = *reinterpret_cast<void *const *>(
-            node + Offsets::OFF_EVENT_NODE_FRAME);
+         node = Game::Read<uintptr_t>(node + Offsets::OFF_EVENT_NODE_NEXT)) {
+        void *frame = Game::Read<void *>(node + Offsets::OFF_EVENT_NODE_FRAME);
         if (frame != nullptr) {
             UI::FrameObject::Push(L, frame);
             ++pushed;

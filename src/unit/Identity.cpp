@@ -47,12 +47,11 @@ static void __cdecl EnterWorld_h() {
     g_origEnterWorld();
     // Only on a genuine commit — the rename / char-locked bail paths return
     // before the worker sets the state code to "entering world".
-    if (*reinterpret_cast<const int *>(
-            static_cast<uintptr_t>(Offsets::VAR_GLUE_LOGIN_INPROGRESS)) !=
+    if (Game::Read<int>(Offsets::VAR_GLUE_LOGIN_INPROGRESS) !=
         Offsets::GLUE_STATE_ENTERING_WORLD)
         return;
-    const uintptr_t charStruct = *reinterpret_cast<const uintptr_t *>(
-        static_cast<uintptr_t>(Offsets::VAR_GLUE_SELECTED_CHAR));
+    const uintptr_t charStruct =
+        Game::Read<uintptr_t>(Offsets::VAR_GLUE_SELECTED_CHAR);
     if (charStruct != 0)
         g_charSelectGuid = *reinterpret_cast<const uint64_t *>(
             charStruct + Offsets::OFF_GLUE_CHAR_GUID);
@@ -86,11 +85,10 @@ static const Game::HookAutoRegister _enterWorldHook{
 // this only makes the GUID *value* available early, for keying SavedVariables,
 // comparisons, our aura/cast caster checks, etc.)
 uint64_t PlayerGuid() {
-    auto *player = *reinterpret_cast<uint8_t *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_LOCAL_PLAYER_PTR));
+    auto *player = Game::Read<uint8_t *>(Offsets::VAR_LOCAL_PLAYER_PTR);
     if (player != nullptr) {
-        const uint64_t guid = *reinterpret_cast<const uint64_t *>(
-            player + Offsets::OFF_LOCAL_PLAYER_GUID);
+        const uint64_t guid =
+            Game::Read<uint64_t>(player, Offsets::OFF_LOCAL_PLAYER_GUID);
         if (guid != 0)
             return guid; // live engine value — authoritative
     }
@@ -123,16 +121,15 @@ const uint8_t *PlayerDescriptor() {
     const uint8_t *player = PlayerObject();
     if (player == nullptr)
         return nullptr;
-    return *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_DESCRIPTOR);
+    return Game::Read<const uint8_t *>(player, Offsets::OFF_UNIT_DESCRIPTOR);
 }
 
 uint64_t GuidForObject(const void *unitObject) {
     if (unitObject == nullptr)
         return 0;
     const auto *unit = static_cast<const uint8_t *>(unitObject);
-    const uint8_t *block = *reinterpret_cast<const uint8_t *const *>(
-        unit + Offsets::OFF_UNIT_GUID_PTR);
+    const uint8_t *block =
+        Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_GUID_PTR);
     if (block == nullptr)
         return 0;
     return *reinterpret_cast<const uint64_t *>(block);
@@ -179,8 +176,7 @@ const char *NameForGuid(uint64_t guid) {
     const uint8_t *rec = PlayerInfoRecord(guid);
     if (rec == nullptr)
         return nullptr;
-    const char *name =
-        reinterpret_cast<const char *>(rec + Offsets::OFF_PLAYER_INFO_NAME);
+    const char *name = Game::Ptr<const char>(rec, Offsets::OFF_PLAYER_INFO_NAME);
     return (name != nullptr && *name != '\0') ? name : nullptr;
 }
 
@@ -287,8 +283,7 @@ const char *TokenFromGUID(uint64_t target, char *buf, size_t bufSize) {
         if (partyGuids[i] != 0)
             ++partyCount;
     }
-    int raidCount = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_RAID_MEMBER_COUNT));
+    int raidCount = Game::Read<int>(Offsets::VAR_RAID_MEMBER_COUNT);
     if (raidCount > Offsets::RAID_MAX_SLOTS)
         raidCount = Offsets::RAID_MAX_SLOTS;
 

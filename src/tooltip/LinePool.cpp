@@ -76,8 +76,8 @@ uint8_t *DescData(uint8_t *tooltip, int descOffset) {
 // otherwise a -2px gap lands ~1000px off. Returns 0 if the scale globals
 // aren't populated yet (degrades to a 0-offset anchor, not a wild one).
 float PixelToInternal(float pixels) {
-    const float mul = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float divBase = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_DIV);
+    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float divBase = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
     const float denom = divBase * static_cast<float>(Offsets::UI_COORD_SCALE_UNIT);
     if (denom == 0.0f)
         return 0.0f;
@@ -89,8 +89,7 @@ float PixelToInternal(float pixels) {
 void *FontObjectOf(void *fontString) {
     if (fontString == nullptr)
         return nullptr;
-    return *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fontString) +
-                                      Offsets::OFF_FONTSTRING_FONT_OBJECT);
+    return Game::Read<void *>(fontString, Offsets::OFF_FONTSTRING_FONT_OBJECT);
 }
 
 // Builds one CSimpleFontString: alloc → ctor(parent) → name → font (copied
@@ -138,30 +137,30 @@ void AppendLine(uint8_t *tooltip, void *left, void *right) {
     auto reallocPtr = reinterpret_cast<ReallocArray_t>(Offsets::FUN_TOOLTIP_REALLOC_PTR_ARRAY);
     auto reallocInt = reinterpret_cast<ReallocArray_t>(Offsets::FUN_TOOLTIP_REALLOC_INT_ARRAY);
 
-    const uint32_t index = *reinterpret_cast<uint32_t *>(
-        tooltip + Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
+    const uint32_t index =
+        Game::Read<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
     const uint32_t newCount = index + 1;
 
     reallocPtr(tooltip + Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC, newCount);
-    *reinterpret_cast<uint32_t *>(tooltip + Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 4) = newCount;
+    Game::Ref<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC + 4) = newCount;
     reallocPtr(tooltip + Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC, newCount);
-    *reinterpret_cast<uint32_t *>(tooltip + Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC + 4) = newCount;
+    Game::Ref<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC + 4) = newCount;
     reallocInt(tooltip + Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC, newCount);
-    *reinterpret_cast<uint32_t *>(tooltip + Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC + 4) = newCount;
+    Game::Ref<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC + 4) = newCount;
 
     reinterpret_cast<void **>(DescData(tooltip, Offsets::OFF_GAMETOOLTIP_TEXTLEFT_DESC))[index] = left;
     reinterpret_cast<void **>(DescData(tooltip, Offsets::OFF_GAMETOOLTIP_TEXTRIGHT_DESC))[index] = right;
     reinterpret_cast<uint32_t *>(DescData(tooltip, Offsets::OFF_GAMETOOLTIP_WRAPFLAG_DESC))[index] = 0;
 
-    *reinterpret_cast<uint32_t *>(tooltip + Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC) = newCount;
+    Game::Ref<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC) = newCount;
 }
 
 // Grows `tooltip`'s line pool up to kMaxLines, creating + appending the
 // missing `TextLeftN`/`TextRightN` pairs. No-op if the pool is empty
 // (scan didn't populate) or already at/above the target.
 void GrowPool(uint8_t *tooltip) {
-    uint32_t count = *reinterpret_cast<uint32_t *>(
-        tooltip + Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
+    uint32_t count =
+        Game::Read<uint32_t>(tooltip, Offsets::OFF_GAMETOOLTIP_NUM_LINES_ALLOC);
     if (count == 0 || count >= kMaxLines)
         return;
 

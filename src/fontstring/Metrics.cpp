@@ -40,8 +40,8 @@ using StringHeightInternal_t = float(__fastcall *)(void *fs);
 // push chain Script_GetStringWidth uses (the inverse of
 // Tooltip::LinePool::PixelToInternal).
 double InternalToPixel(float v) {
-    const float mul = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_DIV);
+    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
     if (mul == 0.0f)
         return 0.0;
     return static_cast<double>(v) * div * Offsets::UI_COORD_SCALE_UNIT / mul;

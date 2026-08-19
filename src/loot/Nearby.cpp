@@ -76,10 +76,9 @@ constexpr int VTBL_GET_POSITION_OFFSET = 0x14;
 // bit of *race* — yields false positives for any Human / Dwarf /
 // Undead / Gnome player and false negatives for dead mobs.
 bool IsLootable(const void *unit) {
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(unit) + Offsets::OFF_UNIT_DESCRIPTOR);
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        fields + Offsets::OFF_UNIT_FIELD_DYNAMIC_FLAGS);
+    auto *fields = Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
+    const uint32_t flags =
+        Game::Read<uint32_t>(fields, Offsets::OFF_UNIT_FIELD_DYNAMIC_FLAGS);
     return (flags & Offsets::UNIT_DYNFLAG_LOOTABLE) != 0;
 }
 
@@ -87,10 +86,8 @@ bool IsLootable(const void *unit) {
 // engine uses this as the contribution from both sides (player + target)
 // in its interact-range computation.
 float BoundingRadius(const void *unit) {
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(unit) + Offsets::OFF_UNIT_DESCRIPTOR);
-    return *reinterpret_cast<const float *>(
-        fields + Offsets::OFF_UNIT_FIELD_BOUNDING_RADIUS);
+    auto *fields = Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
+    return Game::Read<float>(fields, Offsets::OFF_UNIT_FIELD_BOUNDING_RADIUS);
 }
 
 // Invokes the unit's virtual `GetPosition` (vtable slot at offset

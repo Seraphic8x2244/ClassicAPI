@@ -53,7 +53,7 @@ static const char *MechanicName(uint32_t mechanicID) {
                                      Offsets::VAR_SPELLMECHANIC_COUNT, mechanicID);
     if (rec == nullptr)
         return nullptr;
-    auto names = reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELLMECHANIC_NAME);
+    auto names = Game::Ptr<const char *const>(rec, Offsets::OFF_SPELLMECHANIC_NAME);
     const char *s = names[0]; // enUS
     return (s != nullptr && s[0] != '\0') ? s : nullptr;
 }
@@ -65,7 +65,7 @@ static int __fastcall Script_GetSpellMechanicByID(void *L) {
         return 0; // nil for invalid / out-of-range spell IDs
 
     const uint32_t mechanicID =
-        *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_MECHANIC);
+        Game::Read<uint32_t>(record, Offsets::OFF_SPELL_RECORD_MECHANIC);
 
     Game::Lua::PushNumber(L, static_cast<double>(mechanicID));
 

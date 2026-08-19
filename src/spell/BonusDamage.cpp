@@ -83,8 +83,8 @@ const uint8_t *PlayerFields() {
     const uint8_t *player = Unit::Identity::PlayerObject();
     if (player == nullptr)
         return nullptr;
-    return *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    return Game::Read<const uint8_t *>(
+        player, Offsets::OFF_CGPLAYER_INFO);
 }
 
 // Net spell damage for a 0-based school (0=physical .. 6=arcane). POS is the
@@ -94,10 +94,10 @@ long SpellDamageForSchool(int school0) {
     const uint8_t *pf = PlayerFields();
     if (pf == nullptr)
         return 0;
-    const int32_t pos = *reinterpret_cast<const int32_t *>(
-        pf + Offsets::OFF_PLAYER_FIELD_MOD_DAMAGE_DONE_POS + school0 * 4);
-    const int32_t neg = *reinterpret_cast<const int32_t *>(
-        pf + Offsets::OFF_PLAYER_FIELD_MOD_DAMAGE_DONE_NEG + school0 * 4);
+    const int32_t pos = Game::Read<int32_t>(
+        pf, Offsets::OFF_PLAYER_FIELD_MOD_DAMAGE_DONE_POS + school0 * 4);
+    const int32_t neg = Game::Read<int32_t>(
+        pf, Offsets::OFF_PLAYER_FIELD_MOD_DAMAGE_DONE_NEG + school0 * 4);
     return static_cast<long>(pos) - static_cast<long>(neg);
 }
 
@@ -128,12 +128,12 @@ long ItemFlatHealing(const uint8_t *cgItem) {
         // Random suffix ("… of Restoration") + applied permanent (slot 0) and
         // temporary (slot 1) enchants (Healing Power, Mana Oil, …).
         Item::StatAccum::ApplyRandomSuffix(
-            acc, *reinterpret_cast<const int32_t *>(
-                     desc + Offsets::OFF_DESCRIPTOR_RANDOM_PROPERTY), +1);
+            acc, Game::Read<int32_t>(
+                     desc, Offsets::OFF_DESCRIPTOR_RANDOM_PROPERTY), +1);
         for (int slot = 0; slot <= 1; ++slot)
             Item::StatAccum::ApplyEnchant(
-                acc, *reinterpret_cast<const uint32_t *>(
-                         desc + Offsets::OFF_DESCRIPTOR_ENCHANTMENT_ID +
+                acc, Game::Read<uint32_t>(
+                         desc, Offsets::OFF_DESCRIPTOR_ENCHANTMENT_ID +
                          slot * Offsets::DESCRIPTOR_ENCHANTMENT_SLOT_STRIDE), +1);
     }
     return Item::StatAccum::Value(acc, "ITEM_MOD_SPELL_HEALING_DONE_SHORT");
@@ -165,15 +165,15 @@ void AddSpellHealingAuras(long &total, int spellID, int32_t spirit,
     if (sp == nullptr)
         return;
     if (requirePassive &&
-        !(*reinterpret_cast<const uint32_t *>(sp + Offsets::OFF_SPELL_RECORD_ATTRIBUTES) &
+        !(Game::Read<uint32_t>(sp, Offsets::OFF_SPELL_RECORD_ATTRIBUTES) &
           Offsets::SPELL_ATTR_PASSIVE))
         return;
-    auto aura = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME);
-    auto base = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
-    auto dice = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
+    auto aura = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME);
+    auto base = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
+    auto dice = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
         const long amount = static_cast<long>(base[i]) + static_cast<long>(dice[i]);
         if (aura[i] == kAuraModHealingDone)
@@ -194,21 +194,21 @@ long ComputeHealing() {
 
     // Player Spirit / Armor for the aura-175 / aura-199 conversions.
     const uint8_t *desc = Unit::Identity::PlayerDescriptor();
-    const int32_t spirit = desc ? *reinterpret_cast<const int32_t *>(
-        desc + Offsets::OFF_UNIT_FIELD_STAT_SPIRIT) : 0;
-    const int32_t armor = desc ? *reinterpret_cast<const int32_t *>(
-        desc + Offsets::OFF_UNIT_FIELD_RESISTANCE_ARMOR) : 0;
+    const int32_t spirit = desc ? Game::Read<int32_t>(
+        desc, Offsets::OFF_UNIT_FIELD_STAT_SPIRIT) : 0;
+    const int32_t armor = desc ? Game::Read<int32_t>(
+        desc, Offsets::OFF_UNIT_FIELD_RESISTANCE_ARMOR) : 0;
 
     // Active buffs — flat healing + Spirit/Armor conversions, one pass.
     auto *table = reinterpret_cast<const uint8_t *>(
         static_cast<uintptr_t>(Offsets::VAR_PLAYER_BUFF_TABLE));
     for (int i = 0; i < Offsets::PLAYER_BUFF_TABLE_COUNT; ++i) {
         const uint8_t *entry = table + i * Offsets::PLAYER_BUFF_ENTRY_STRIDE;
-        if (*reinterpret_cast<const int32_t *>(
-                entry + Offsets::OFF_PLAYER_BUFF_SLOT_CODE) < 0)
+        if (Game::Read<int32_t>(
+                entry, Offsets::OFF_PLAYER_BUFF_SLOT_CODE) < 0)
             continue;
-        AddSpellHealingAuras(total, *reinterpret_cast<const int32_t *>(
-                                        entry + Offsets::OFF_PLAYER_BUFF_SPELL_ID),
+        AddSpellHealingAuras(total, Game::Read<int32_t>(
+                                        entry, Offsets::OFF_PLAYER_BUFF_SPELL_ID),
                              spirit, armor, /*requirePassive=*/false);
     }
 
@@ -216,9 +216,9 @@ long ComputeHealing() {
     // and any passive flat healing, via the known-spell bitmap (bounded by
     // spellCount). The passive gate assumes ranks supersede (only the learned
     // rank is known), so no per-rank dedup is needed.
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
+    auto *bitmap = Game::Read<const uint32_t *>(
         static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
-    const int spellCount = *reinterpret_cast<const int *>(
+    const int spellCount = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
     if (bitmap != nullptr && spellCount > 0) {
         for (int id = 1; id <= spellCount; ++id)

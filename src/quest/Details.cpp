@@ -52,7 +52,7 @@ const char *LookupQuestType(uint32_t row) {
     if (!record)
         return nullptr;
     const int localeIdx =
-        *reinterpret_cast<const int *>(Offsets::VAR_LOCALE_INDEX);
+        Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
     if (localeIdx < 0 || localeIdx > 8)
         return nullptr;
     auto *names = reinterpret_cast<const char *const *>(record + 4);

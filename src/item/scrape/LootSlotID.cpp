@@ -38,13 +38,13 @@ static int __fastcall Script_GetLootSlotItemID(void *L) {
     }
     int slot = static_cast<int>(Game::Lua::ToNumber(L, 1));
 
-    const uint32_t guidLo = *reinterpret_cast<const uint32_t *>(Offsets::VAR_LOOT_GUID_LO);
-    const uint32_t guidHi = *reinterpret_cast<const uint32_t *>(Offsets::VAR_LOOT_GUID_HI);
+    const uint32_t guidLo = Game::Read<uint32_t>(Offsets::VAR_LOOT_GUID_LO);
+    const uint32_t guidHi = Game::Read<uint32_t>(Offsets::VAR_LOOT_GUID_HI);
     if ((guidLo | guidHi) == 0)
         return 0;
 
     slot -= 1;
-    if (*reinterpret_cast<const uint32_t *>(Offsets::VAR_LOOT_LOOTABLE) != 0) {
+    if (Game::Read<uint32_t>(Offsets::VAR_LOOT_LOOTABLE) != 0) {
         if (slot <= 0)
             return 0;
         slot -= 1;

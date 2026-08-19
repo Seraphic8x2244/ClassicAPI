@@ -170,8 +170,8 @@ bool MovementInterruptible(int spellID) {
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
     if (rec == nullptr)
         return true;
-    return (*reinterpret_cast<const uint32_t *>(
-                rec + Offsets::OFF_SPELL_RECORD_INTERRUPT_FLAGS) &
+    return (Game::Read<uint32_t>(
+                rec, Offsets::OFF_SPELL_RECORD_INTERRUPT_FLAGS) &
             Offsets::SPELL_INTERRUPT_FLAG_MOVEMENT) != 0;
 }
 
@@ -190,11 +190,11 @@ bool PlayerMoving() {
     const uint8_t *player = Unit::Identity::PlayerObject();
     if (player == nullptr)
         return false;
-    const uint8_t *move = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_MOVEMENT_INFO_PTR);
+    const uint8_t *move = Game::Read<const uint8_t *>(
+        player, Offsets::OFF_UNIT_MOVEMENT_INFO_PTR);
     if (move == nullptr)
         return false;
-    return (*reinterpret_cast<const uint32_t *>(move + Offsets::OFF_MOVEMENT_FLAGS) &
+    return (Game::Read<uint32_t>(move, Offsets::OFF_MOVEMENT_FLAGS) &
             Offsets::MOVEFLAG_MASK_CAST_DROP) != 0;
 }
 
@@ -244,9 +244,9 @@ int CastTimeMs(int spellID) {
         const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
         if (rec != nullptr) {
             const uint32_t attr =
-                *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
+                Game::Read<uint32_t>(rec, Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
             const uint32_t attrEx2 =
-                *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
+                Game::Read<uint32_t>(rec, Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
             if ((attr & SPELL_ATTR_RANGED) && !(attrEx2 & Offsets::SPELL_ATTR_EX2_AUTOREPEAT_FLAG))
                 ms += 500;
         }
@@ -267,12 +267,12 @@ int ChannelDurationMs(int spellID) {
 }
 
 const char *SpellName(const uint8_t *rec) {
-    const int locale = *reinterpret_cast<int *>(Offsets::VAR_LOCALE_INDEX);
-    return *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
+    const int locale = Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
+    return Game::Read<const char *>(rec, Offsets::OFF_SPELL_NAMES + locale * 4);
 }
 
 bool IsTradeskill(const uint8_t *rec) {
-    return (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES) &
+    return (Game::Read<uint32_t>(rec, Offsets::OFF_SPELL_RECORD_ATTRIBUTES) &
             SPELL_ATTR_TRADESPELL) != 0;
 }
 
@@ -280,13 +280,13 @@ bool IsTradeskill(const uint8_t *rec) {
 // already stores the full "Interface\Icons\..." path (unlike item icons,
 // which are bare filenames) — so it's used verbatim, no prefix.
 const char *SpellIconPath(const uint8_t *rec) {
-    const int iconID = *reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID);
+    const int iconID = Game::Read<int>(rec, Offsets::OFF_SPELL_RECORD_ICON_ID);
     const uint8_t *iconRec = DBC::Record(Offsets::VAR_SPELL_ICON_RECORDS,
                                          Offsets::VAR_SPELL_ICON_COUNT,
                                          static_cast<uint32_t>(iconID));
     if (iconRec == nullptr)
         return "";
-    const char *path = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
+    const char *path = Game::Read<const char *>(iconRec, Offsets::OFF_SPELLICON_PATH);
     return (path != nullptr) ? path : "";
 }
 
@@ -400,7 +400,7 @@ const Game::HookAutoRegister _castStartHook{
 // times to `UnitChannelInfo` (validated against the live +0x228 field).
 
 bool IsChannelSpell(const uint8_t *rec) {
-    return (*reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
+    return (Game::Read<uint32_t>(rec, Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX) &
             Offsets::SPELL_ATTR_EX_CHANNELED) != 0;
 }
 
@@ -702,8 +702,7 @@ ClearCastingSpell_t g_origClearCastingSpell = nullptr;
 void __fastcall ClearCastingSpell_h(void *unit, void *edx, int spellID,
                                     char notify, char cleanup) {
     if (unit != nullptr && spellID != 0) {
-        const int current = *reinterpret_cast<const int *>(
-            static_cast<const uint8_t *>(unit) + Offsets::OFF_UNIT_CAST_SPELL);
+        const int current = Game::Read<int>(unit, Offsets::OFF_UNIT_CAST_SPELL);
         if (current != 0 && current == spellID)
             HandleCastAborted(Unit::Identity::GuidForObject(unit), spellID);
     }
@@ -753,7 +752,7 @@ void OnWorldTick() {
     // so they're exempt — they expire on their computed endMs (self-expiry in
     // PushCastInfo).
     if (g_cast.spellID != 0 && !g_castFromServer &&
-        *reinterpret_cast<const int *>(Offsets::VAR_CURRENT_CAST_SPELL) == 0)
+        Game::Read<int>(Offsets::VAR_CURRENT_CAST_SPELL) == 0)
         g_cast.spellID = 0;
 
     // End a move-dropped cast (issue #23): the engine cleared its cast-state on
@@ -783,9 +782,9 @@ void OnWorldTick() {
     // SENT castGUID); on cancel it simply stays cleared. Gated on
     // !g_castFromServer so it can never touch that server re-stamp.
     if (g_cast.spellID != 0 && !g_castFromServer &&
-        *reinterpret_cast<const int *>(Offsets::VAR_SPELL_TARGETING_FLAGS) != 0 &&
+        Game::Read<int>(Offsets::VAR_SPELL_TARGETING_FLAGS) != 0 &&
         g_cast.spellID ==
-            *reinterpret_cast<const int *>(Offsets::VAR_PENDING_CAST_SPELL))
+            Game::Read<int>(Offsets::VAR_PENDING_CAST_SPELL))
         g_cast.spellID = 0;
 
     // Detect a player CHANNEL that ended before its computed endMs — the
@@ -806,8 +805,8 @@ void OnWorldTick() {
     if (g_channel.spellID != 0) {
         const uint8_t *desc = Unit::Identity::PlayerDescriptor();
         if (desc != nullptr) {
-            const int chan = *reinterpret_cast<const int *>(
-                desc + Offsets::OFF_UNIT_FIELD_CHANNEL_SPELL);
+            const int chan = Game::Read<int>(
+                desc, Offsets::OFF_UNIT_FIELD_CHANNEL_SPELL);
             if (chan == g_channel.spellID)
                 g_channelConfirmed = true;
             else if (chan == 0 && g_channelConfirmed)
@@ -894,14 +893,14 @@ static int __fastcall Script_UnitChannelInfo(void *L) {
     if (u == Resolve("player"))
         return PushChannelInfo(L, g_channel.spellID, g_channel.startMs, g_channel.endMs, true);
 
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(u) + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(
+        u, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return 0;
     // The live +0x228 field is authoritative for "is this unit channeling
     // right now"; the SMSG_SPELL_START cache adds real start/end times when
     // we observed the channel begin (and still matches the current spell).
-    const int spellID = *reinterpret_cast<const int *>(desc + Offsets::OFF_UNIT_FIELD_CHANNEL_SPELL);
+    const int spellID = Game::Read<int>(desc, Offsets::OFF_UNIT_FIELD_CHANNEL_SPELL);
     if (spellID == 0)
         return 0;
     const RemoteCast *rc = FindRemoteCast(Unit::Identity::GuidForObject(u));

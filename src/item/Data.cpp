@@ -115,8 +115,8 @@ static int ResolveLocationToItemID(void *L, int idx) {
     auto *instance = Item::InstanceBlock(item);
     if (instance == nullptr)
         return 0;
-    return static_cast<int>(*reinterpret_cast<const uint32_t *>(
-        instance + Offsets::OFF_INSTANCE_BLOCK_ITEM_ID));
+    return static_cast<int>(Game::Read<uint32_t>(
+        instance, Offsets::OFF_INSTANCE_BLOCK_ITEM_ID));
 }
 
 static int __fastcall Script_IsItemDataCachedByID(void *L) {
@@ -383,8 +383,8 @@ static void AddOwned(uint32_t itemID) {
 static void CollectOwnedFrom(const uint8_t *invMgr, int first, int last) {
     if (invMgr == nullptr)
         return;
-    auto *guids = *reinterpret_cast<const uint64_t *const *>(
-        invMgr + Offsets::OFF_INVMGR_GUID_ARRAY);
+    auto *guids = Game::Read<const uint64_t *>(
+        invMgr, Offsets::OFF_INVMGR_GUID_ARRAY);
     if (guids == nullptr)
         return;
     for (int slot = first; slot <= last; ++slot) {
@@ -409,7 +409,7 @@ static void RebuildOwned() {
             if (bagInv == nullptr)
                 continue;
             const int count = static_cast<int>(
-                *reinterpret_cast<const uint32_t *>(bagInv + Offsets::OFF_INVMGR_SLOT_COUNT));
+                Game::Read<uint32_t>(bagInv, Offsets::OFF_INVMGR_SLOT_COUNT));
             if (count > 0)
                 CollectOwnedFrom(bagInv, 0, count - 1);
         }

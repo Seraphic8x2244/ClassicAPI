@@ -31,7 +31,7 @@ static int __fastcall Script_GetInboxItemID(void *L) {
     if (mailID < 0)
         return 0;
 
-    const int count = static_cast<int>(*reinterpret_cast<const uint32_t *>(
+    const int count = static_cast<int>(Game::Read<uint32_t>(
         Offsets::VAR_INBOX_COUNT));
     if (mailID >= count)
         return 0;
@@ -39,15 +39,15 @@ static int __fastcall Script_GetInboxItemID(void *L) {
     // `VAR_INBOX_ENTRIES` is a pointer slot, not the array — the
     // engine reads it via `MOV ECX, [imm32]; MOV EDI, [ECX + idx*4]`
     // (two derefs total before the entry pointer is in hand).
-    auto **entries = *reinterpret_cast<const uint8_t ***>(Offsets::VAR_INBOX_ENTRIES);
+    auto **entries = Game::Read<const uint8_t **>(Offsets::VAR_INBOX_ENTRIES);
     if (entries == nullptr)
         return 0;
     auto *entry = entries[mailID];
     if (entry == nullptr)
         return 0;
 
-    const int itemID = static_cast<int>(*reinterpret_cast<const uint32_t *>(
-        entry + Offsets::OFF_INBOX_ENTRY_ITEM_ID));
+    const int itemID = static_cast<int>(Game::Read<uint32_t>(
+        entry, Offsets::OFF_INBOX_ENTRY_ITEM_ID));
     if (itemID == 0)
         return 0;
 

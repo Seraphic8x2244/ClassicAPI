@@ -63,10 +63,10 @@ static int __fastcall Script_GameTooltipGetGameObject(void *L) {
         return 0;
 
     const auto *base = static_cast<const uint8_t *>(tooltipObj);
-    const uint32_t guidLo = *reinterpret_cast<const uint32_t *>(
-        base + Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO);
-    const uint32_t guidHi = *reinterpret_cast<const uint32_t *>(
-        base + Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_HI);
+    const uint32_t guidLo =
+        Game::Read<uint32_t>(base, Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO);
+    const uint32_t guidHi =
+        Game::Read<uint32_t>(base, Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_HI);
     if (guidLo == 0 && guidHi == 0)
         return 0;
 
@@ -111,10 +111,10 @@ static int __fastcall Script_GameTooltipHasGameObject(void *L) {
         return 1;
     }
     const auto *base = static_cast<const uint8_t *>(tooltipObj);
-    const uint32_t guidLo = *reinterpret_cast<const uint32_t *>(
-        base + Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO);
-    const uint32_t guidHi = *reinterpret_cast<const uint32_t *>(
-        base + Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_HI);
+    const uint32_t guidLo =
+        Game::Read<uint32_t>(base, Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_LO);
+    const uint32_t guidHi =
+        Game::Read<uint32_t>(base, Offsets::OFF_TOOLTIP_GAMEOBJECT_GUID_HI);
     Game::Lua::PushBool(L, guidLo != 0 || guidHi != 0);
     return 1;
 }

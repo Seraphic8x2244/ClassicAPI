@@ -143,18 +143,15 @@ constexpr float MIN_INTERACT_RANGE = 5.0f;
 // === Range / lootability helpers (identical to Loot::Nearby) ===
 
 bool IsLootableUnit(const void *unit) {
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(unit) + Offsets::OFF_UNIT_DESCRIPTOR);
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        fields + Offsets::OFF_UNIT_FIELD_DYNAMIC_FLAGS);
+    auto *fields = Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
+    const uint32_t flags =
+        Game::Read<uint32_t>(fields, Offsets::OFF_UNIT_FIELD_DYNAMIC_FLAGS);
     return (flags & Offsets::UNIT_DYNFLAG_LOOTABLE) != 0;
 }
 
 float BoundingRadius(const void *unit) {
-    auto *fields = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(unit) + Offsets::OFF_UNIT_DESCRIPTOR);
-    return *reinterpret_cast<const float *>(
-        fields + Offsets::OFF_UNIT_FIELD_BOUNDING_RADIUS);
+    auto *fields = Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
+    return Game::Read<float>(fields, Offsets::OFF_UNIT_FIELD_BOUNDING_RADIUS);
 }
 
 const C3Vector *GetPosition(const void *unit, C3Vector *outBuf) {
@@ -190,8 +187,7 @@ bool InInteractRange(const void *player, const void *target) {
 // `FUN_LOOT_CONTROLLER` run, so the slot table is fully filled in
 // and the link builder works against it.
 void ScrapeCurrentLoot(LootEntry *out) {
-    const uint32_t coinRaw = *reinterpret_cast<const uint32_t *>(
-        Offsets::VAR_LOOT_LOOTABLE);
+    const uint32_t coinRaw = Game::Read<uint32_t>(Offsets::VAR_LOOT_LOOTABLE);
     out->coin = (coinRaw == 0xFFFFFFFFu) ? 0u : coinRaw;
 
     const bool hasCoin = coinRaw != 0;
@@ -239,8 +235,7 @@ void ScrapeCurrentLoot(LootEntry *out) {
 void LootCurrentWindow() {
     // Coin present when `VAR_LOOT_LOOTABLE` holds a real amount (0 = none;
     // 0xFFFFFFFF = already-looted sentinel, never seen on a fresh open).
-    const uint32_t coinRaw = *reinterpret_cast<const uint32_t *>(
-        Offsets::VAR_LOOT_LOOTABLE);
+    const uint32_t coinRaw = Game::Read<uint32_t>(Offsets::VAR_LOOT_LOOTABLE);
     if (coinRaw != 0 && coinRaw != 0xFFFFFFFFu) {
         auto LootMoney = reinterpret_cast<LootMoney_t>(Offsets::FUN_CMSG_LOOT_MONEY);
         LootMoney(s_scan.player);

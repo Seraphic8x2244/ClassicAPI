@@ -86,10 +86,10 @@ bool RestrictedOut(uint32_t mask, uint32_t index1Based) {
 // item's class *has* a proficiency concept (mask != 0) and the item's
 // subclass bit is unset.
 bool ProficiencyMet(const uint8_t *record) {
-    const uint32_t itemClass = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_CLASS);
-    const uint32_t subClass = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SUBCLASS);
+    const uint32_t itemClass = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_CLASS);
+    const uint32_t subClass = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SUBCLASS);
     if (itemClass > 16) // table is 17 entries (m_class 0..16)
         return true;
     auto *table = reinterpret_cast<const uint32_t *>(
@@ -105,27 +105,26 @@ bool ProficiencyMet(const uint8_t *record) {
 // item's SkillLine.dbc row to the player's skill slot; the player must
 // have the line at an effective rank (current + temp bonus) >= required.
 bool RequiredSkillMet(const uint8_t *player, const uint8_t *record) {
-    const uint32_t reqSkill = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_SKILL);
+    const uint32_t reqSkill = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_SKILL);
     if (reqSkill == 0)
         return true; // no skill requirement
-    const uint32_t reqRank = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_SKILL_RANK);
+    const uint32_t reqRank = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_SKILL_RANK);
 
     auto toSlot = reinterpret_cast<SkillLineToSlot_t>(Offsets::FUN_SKILL_LINE_TO_SLOT);
     const int slot = toSlot(const_cast<uint8_t *>(player), reqSkill);
     if (slot < 0)
         return false; // player doesn't have the skill line at all
 
-    auto *sub = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    auto *sub = Game::Read<const uint8_t *>(player, Offsets::OFF_CGPLAYER_INFO);
     if (sub == nullptr)
         return false;
     const uint8_t *rec = sub + Offsets::OFF_SKILL_INFO_TABLE +
                          slot * Offsets::SKILL_INFO_STRIDE;
-    uint32_t rank = *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_CUR);
+    uint32_t rank = Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_CUR);
     if (rank != 0) // add the temp bonus only when there's a base value
-        rank += *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_BONUS);
+        rank += Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_BONUS);
     return rank >= reqRank;
 }
 
@@ -138,11 +137,11 @@ bool RequiredSkillMet(const uint8_t *player, const uint8_t *record) {
 bool PlayerKnowsSpell(int spellID) {
     if (spellID <= 0)
         return false;
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
+    auto *bitmap = Game::Read<const uint32_t *>(
         static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
     if (bitmap == nullptr)
         return false;
-    const int spellCount = *reinterpret_cast<const int *>(
+    const int spellCount = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
     if (spellID > spellCount)
         return false;
@@ -163,8 +162,8 @@ bool PlayerKnowsSpell(int spellID) {
 // specialization/proficiency in practice, so the chain walk is
 // belt-and-suspenders, but it makes the check exact.
 bool RequiredSpellMet(const uint8_t *player, const uint8_t *record) {
-    const int reqSpell = *reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_SPELL);
+    const int reqSpell = Game::Read<int32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_SPELL);
     if (reqSpell <= 0)
         return true; // no requirement
     if (::Spell::Lookup::RecordForID(reqSpell) == nullptr)
@@ -180,8 +179,8 @@ bool RequiredSpellMet(const uint8_t *player, const uint8_t *record) {
 // RequiredHonorRank — the player's PvP honor rank must be >= the item's.
 // `sub` is the CGPlayer +0xE68 sub-struct (may be null pre-world).
 bool RequiredHonorRankMet(const uint8_t *sub, const uint8_t *record) {
-    const uint32_t req = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_HONOR_RANK);
+    const uint32_t req = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_HONOR_RANK);
     if (req == 0)
         return true;
     if (sub == nullptr)
@@ -193,14 +192,14 @@ bool RequiredHonorRankMet(const uint8_t *sub, const uint8_t *record) {
 // RequiredCityRank — a PvP-medal bitmask gate: the item's rank R passes
 // when the player has earned bit (R-1) in the medal mask.
 bool RequiredCityRankMet(const uint8_t *sub, const uint8_t *record) {
-    const uint32_t req = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_CITY_RANK);
+    const uint32_t req = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_CITY_RANK);
     if (req == 0)
         return true;
     if (sub == nullptr)
         return false;
-    const uint32_t medals = *reinterpret_cast<const uint32_t *>(
-        sub + Offsets::OFF_CGPLAYER_PVP_MEDALS);
+    const uint32_t medals = Game::Read<uint32_t>(
+        sub, Offsets::OFF_CGPLAYER_PVP_MEDALS);
     return (medals & (1u << ((req - 1) & 31))) != 0;
 }
 
@@ -209,17 +208,17 @@ bool RequiredCityRankMet(const uint8_t *sub, const uint8_t *record) {
 // indexes the engine's reaction-min threshold table; the player's total
 // rep with the faction must be >= that threshold.
 bool RequiredReputationMet(const uint8_t *record) {
-    const int faction = *reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_FACTION);
+    const int faction = Game::Read<int32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_FACTION);
     if (faction == 0)
         return true;
-    const uint32_t band = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_FACTION_RANK);
+    const uint32_t band = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_FACTION_RANK);
     if (band > 7) // reaction-min table is 8 bands (0..7); guard OOB
         return true;
     auto getStanding = reinterpret_cast<RepStanding_t>(Offsets::FUN_REPUTATION_GET_STANDING);
     const int current = getStanding(faction);
-    const int threshold = *reinterpret_cast<const int *>(
+    const int threshold = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_REACTION_MIN_TABLE) + band * 4);
     return current >= threshold;
 }
@@ -233,29 +232,27 @@ bool ComputeCanUse(int itemID) {
     auto *player = Unit::Identity::PlayerObject();
     if (player == nullptr)
         return false; // pre-login / no player
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(player, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return false;
 
     if (!ProficiencyMet(record))
         return false;
 
-    const int playerLevel = *reinterpret_cast<const int *>(
-        desc + Offsets::OFF_UNIT_FIELD_LEVEL);
-    const uint32_t reqLevel = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_REQUIRED_LEVEL);
+    const int playerLevel = Game::Read<int>(desc, Offsets::OFF_UNIT_FIELD_LEVEL);
+    const uint32_t reqLevel = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_REQUIRED_LEVEL);
     if (static_cast<int>(reqLevel) > playerLevel)
         return false;
 
-    const uint32_t allowClass = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_ALLOWABLE_CLASS);
+    const uint32_t allowClass = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_ALLOWABLE_CLASS);
     const uint32_t playerClass = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_CLASS_BYTE);
     if (RestrictedOut(allowClass, playerClass))
         return false;
 
-    const uint32_t allowRace = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_ALLOWABLE_RACE);
+    const uint32_t allowRace = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_ALLOWABLE_RACE);
     const uint32_t playerRace = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_RACE_BYTE);
     if (RestrictedOut(allowRace, playerRace))
         return false;
@@ -267,8 +264,7 @@ bool ComputeCanUse(int itemID) {
         return false;
 
     // PvP rank + reputation gates read the CGPlayer +0xE68 sub-struct.
-    auto *sub = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    auto *sub = Game::Read<const uint8_t *>(player, Offsets::OFF_CGPLAYER_INFO);
     if (!RequiredHonorRankMet(sub, record))
         return false;
     if (!RequiredCityRankMet(sub, record))

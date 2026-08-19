@@ -52,8 +52,7 @@ constexpr float kMaxTraceYards = 150.0f;   // guard: raw call can crash beyond
 constexpr float kSamePointYards = 0.05f;
 
 int ObjectType(void *obj) {
-    return *reinterpret_cast<int *>(reinterpret_cast<uint8_t *>(obj) +
-                                    Offsets::OFF_CGOBJECT_TYPE_ID);
+    return Game::Read<int>(obj, Offsets::OFF_CGOBJECT_TYPE_ID);
 }
 
 bool IsUnitOrPlayer(void *obj) {
@@ -65,8 +64,8 @@ bool IsUnitOrPlayer(void *obj) {
 // CMovement sub-struct. 0 if the movement pointer is absent (degrades to a
 // foot-level trace rather than crashing).
 float EyeHeight(void *unit) {
-    const uint32_t cmov = *reinterpret_cast<uint32_t *>(
-        reinterpret_cast<uint8_t *>(unit) + Offsets::OFF_UNIT_MOVEMENT_INFO_PTR);
+    const uint32_t cmov =
+        Game::Read<uint32_t>(unit, Offsets::OFF_UNIT_MOVEMENT_INFO_PTR);
     if (cmov == 0)
         return 0.0f;
     return *reinterpret_cast<float *>(cmov +

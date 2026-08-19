@@ -30,20 +30,20 @@ static int __fastcall Script_GetMerchantItemID(void *L) {
     if (index < 0)
         return 0;
 
-    const uint32_t guidLo = *reinterpret_cast<const uint32_t *>(Offsets::VAR_MERCHANT_NPC_GUID_LO);
-    const uint32_t guidHi = *reinterpret_cast<const uint32_t *>(Offsets::VAR_MERCHANT_NPC_GUID_HI);
+    const uint32_t guidLo = Game::Read<uint32_t>(Offsets::VAR_MERCHANT_NPC_GUID_LO);
+    const uint32_t guidHi = Game::Read<uint32_t>(Offsets::VAR_MERCHANT_NPC_GUID_HI);
     if ((guidLo | guidHi) == 0)
         return 0;
 
-    const int count = static_cast<int>(*reinterpret_cast<const uint32_t *>(
+    const int count = static_cast<int>(Game::Read<uint32_t>(
         Offsets::VAR_MERCHANT_COUNT));
     if (index >= count)
         return 0;
 
     auto *entry = reinterpret_cast<const uint8_t *>(
         Offsets::VAR_MERCHANT_ITEMS + index * Offsets::MERCHANT_STRIDE);
-    const int itemID = static_cast<int>(*reinterpret_cast<const uint32_t *>(
-        entry + Offsets::OFF_MERCHANT_ITEM_ID));
+    const int itemID = static_cast<int>(Game::Read<uint32_t>(
+        entry, Offsets::OFF_MERCHANT_ITEM_ID));
     if (itemID == 0)
         return 0;
 

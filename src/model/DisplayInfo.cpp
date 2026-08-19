@@ -69,11 +69,9 @@ Fn Vmethod(void *obj, int byteOffset) {
 // Model method call; mirror that assignment (FUN_0076d950's prologue) so a
 // type-check is valid even if no stock Model method has run yet.
 int ModelTypeId() {
-    auto &typeId = *reinterpret_cast<int *>(
-        static_cast<uintptr_t>(Offsets::VAR_MODEL_LUA_TYPE_ID));
+    auto &typeId = Game::Ref<int>(Offsets::VAR_MODEL_LUA_TYPE_ID);
     if (typeId == 0) {
-        auto &counter = *reinterpret_cast<int *>(
-            static_cast<uintptr_t>(Offsets::VAR_FRAMESCRIPT_TYPE_ID_COUNTER));
+        auto &counter = Game::Ref<int>(Offsets::VAR_FRAMESCRIPT_TYPE_ID_COUNTER);
         counter += 1;
         typeId = counter;
     }
@@ -107,8 +105,8 @@ void ApplySkins(void *model, const char *modelPath, const uint8_t *displayRec) {
         Offsets::FUN_MODEL_SET_REPLACEABLE_TEXTURE);
     constexpr int kMonsterSlot[3] = {11, 12, 13};
     for (int i = 0; i < 3; ++i) {
-        const char *variation = *reinterpret_cast<const char *const *>(
-            displayRec + Offsets::OFF_CREATUREDISPLAYINFO_TEXTURE_VARIATION + i * 4);
+        const char *variation = Game::Read<const char *>(
+            displayRec, Offsets::OFF_CREATUREDISPLAYINFO_TEXTURE_VARIATION + i * 4);
         if (variation == nullptr || variation[0] == '\0')
             continue;
         const std::string skin = dir + variation;
@@ -229,14 +227,14 @@ DressJob *ClaimJob(void *frame) {
 // engine's own early-out: an Extra record with no bake name gets no
 // customization at all (FUN_005fb200 returns before creating the builder).
 void ScheduleDress(void *frame, const uint8_t *extraRec) {
-    const char *bake = *reinterpret_cast<const char *const *>(
-        extraRec + Offsets::OFF_CREATUREDISPLAYINFOEXTRA_BAKE_NAME);
+    const char *bake = Game::Read<const char *>(
+        extraRec, Offsets::OFF_CREATUREDISPLAYINFOEXTRA_BAKE_NAME);
     if (bake == nullptr || bake[0] == '\0')
         return;
     DressJob *job = ClaimJob(frame);
     job->frame = frame;
-    job->instance = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(frame) +
-                                               Offsets::OFF_SIMPLEMODELFFX_MODEL_INSTANCE);
+    job->instance = Game::Read<void *>(frame,
+                                       Offsets::OFF_SIMPLEMODELFFX_MODEL_INSTANCE);
     job->extraRec = extraRec;
 }
 
@@ -244,8 +242,8 @@ void ScheduleDress(void *frame, const uint8_t *extraRec) {
 // equipment (the engine's order: SetInfo, then the 10 Extra equipment slots),
 // then pump until done. Field-for-field mirror of FUN_005fb200's NPC branch.
 void StepJob(DressJob &job) {
-    void *instance = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(job.frame) +
-                                                Offsets::OFF_SIMPLEMODELFFX_MODEL_INSTANCE);
+    void *instance = Game::Read<void *>(job.frame,
+                                        Offsets::OFF_SIMPLEMODELFFX_MODEL_INSTANCE);
     if (job.instance == nullptr)
         job.instance = instance;
     if (instance == nullptr || instance != job.instance || ++job.ticks > kMaxDressTicks) {
@@ -266,7 +264,7 @@ void StepJob(DressJob &job) {
 
         const uint8_t *extra = job.extraRec;
         auto field = [extra](int off) {
-            return *reinterpret_cast<const uint32_t *>(extra + off);
+            return Game::Read<uint32_t>(extra, off);
         };
         CharCompInfo info = {};
         info.race = field(Offsets::OFF_CREATUREDISPLAYINFOEXTRA_RACE);
@@ -278,8 +276,8 @@ void StepJob(DressJob &job) {
         info.hairStyle = field(Offsets::OFF_CREATUREDISPLAYINFOEXTRA_HAIR_STYLE);
         info.model = instance;
         info.useBake = 1;
-        const char *bake = *reinterpret_cast<const char *const *>(
-            extra + Offsets::OFF_CREATUREDISPLAYINFOEXTRA_BAKE_NAME);
+        const char *bake = Game::Read<const char *>(
+            extra, Offsets::OFF_CREATUREDISPLAYINFOEXTRA_BAKE_NAME);
         std::snprintf(info.bakePath, sizeof(info.bakePath), "%s%s",
                       "Textures\\BakedNpcTextures\\", bake);
         std::memcpy(info.geosetDefaults, kGeosetGroupDefaults, sizeof(kGeosetGroupDefaults));
@@ -308,10 +306,10 @@ void StepJob(DressJob &job) {
             reinterpret_cast<SetRenderCb_t>(Offsets::FUN_MODEL_INSTANCE_SET_RENDER_CB);
         const void *lightFogCb =
             reinterpret_cast<const void *>(Offsets::FUN_SIMPLEMODELFFX_LIGHT_FOG_CB);
-        for (auto *child = *reinterpret_cast<uint8_t **>(
-                 reinterpret_cast<uint8_t *>(instance) + Offsets::OFF_MODEL_INSTANCE_CHILD_HEAD);
-             child != nullptr; child = *reinterpret_cast<uint8_t **>(
-                                   child + Offsets::OFF_MODEL_INSTANCE_CHILD_NEXT))
+        for (auto *child = Game::Read<uint8_t *>(
+                 instance, Offsets::OFF_MODEL_INSTANCE_CHILD_HEAD);
+             child != nullptr; child = Game::Read<uint8_t *>(
+                                   child, Offsets::OFF_MODEL_INSTANCE_CHILD_NEXT))
             setRenderCb(child, lightFogCb, job.frame);
 
         job.configured = true;
@@ -340,8 +338,8 @@ void LoadDisplay(void *model, int displayID) {
                                             static_cast<uint32_t>(displayID));
     if (displayRec == nullptr)
         return;
-    const uint32_t modelID = *reinterpret_cast<const uint32_t *>(
-        displayRec + Offsets::OFF_CREATUREDISPLAYINFO_MODEL_ID);
+    const uint32_t modelID = Game::Read<uint32_t>(
+        displayRec, Offsets::OFF_CREATUREDISPLAYINFO_MODEL_ID);
 
     const char *modelPath = DBC::StringField(Offsets::VAR_CREATUREMODELDATA_RECORDS,
                                              Offsets::VAR_CREATUREMODELDATA_COUNT,
@@ -360,8 +358,8 @@ void LoadDisplay(void *model, int displayID) {
 
     // Character-based display (Character\Race\Sex base): dress it through the
     // engine compositor, else body and hair render white with every geoset on.
-    const uint32_t extID = *reinterpret_cast<const uint32_t *>(
-        displayRec + Offsets::OFF_CREATUREDISPLAYINFO_EXTENDED_ID);
+    const uint32_t extID = Game::Read<uint32_t>(
+        displayRec, Offsets::OFF_CREATUREDISPLAYINFO_EXTENDED_ID);
     if (extID != 0) {
         const uint8_t *extraRec = DBC::Record(Offsets::VAR_CREATUREDISPLAYINFOEXTRA_RECORDS,
                                               Offsets::VAR_CREATUREDISPLAYINFOEXTRA_COUNT, extID);

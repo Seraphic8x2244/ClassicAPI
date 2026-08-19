@@ -94,8 +94,8 @@ using Crop_t = void(__fastcall *)(void *region, void *edx, float *rect);
 // region's LOCAL pixels must be folded through its effective scale (+0x7C)
 // before this factor applies; WriteCorners does that.
 float PixelToInternal(float px) {
-    const float mul = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_MUL);
-    const float div = *reinterpret_cast<const float *>(Offsets::VAR_UI_COORD_SCALE_DIV);
+    const float mul = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float div = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_DIV);
     if (div == 0.0f)
         return 0.0f;
     return px * mul / (div * Offsets::UI_COORD_SCALE_UNIT);
@@ -139,14 +139,12 @@ void WriteCorners(void *region, float left, float right, float top, float bottom
     const float cy = bottom + xf.cyN * (top - bottom);
     const float c = std::cos(xf.angle);
     const float s = std::sin(xf.angle);
-    float scale = *reinterpret_cast<const float *>(
-        reinterpret_cast<const char *>(region) + Offsets::OFF_REGION_EFFECTIVE_SCALE);
+    float scale = Game::Read<float>(region, Offsets::OFF_REGION_EFFECTIVE_SCALE);
     if (!(scale > 0.0f))
         scale = 1.0f;
     const float xs[4] = {left, left, right, right};
     const float ys[4] = {bottom, top, bottom, top};
-    float *base = reinterpret_cast<float *>(
-        reinterpret_cast<char *>(region) + Offsets::OFF_SIMPLETEXTURE_CORNERS);
+    float *base = Game::Ptr<float>(region, Offsets::OFF_SIMPLETEXTURE_CORNERS);
     // Compute each corner's TARGET rect-space position first.
     float tx[4], ty[4];
     for (int i = 0; i < 4; ++i) {
@@ -204,8 +202,7 @@ bool ApplyFromRect(void *region, const Xf &xf) {
     // BOTH states, so this immediate apply and the corner-store co-hook below
     // (which re-derives edges from whatever rect the engine stored) can never
     // disagree about the base rect.
-    if (*reinterpret_cast<const int *>(reinterpret_cast<char *>(region) +
-                                       Offsets::OFF_REGION_TEXCOORD_MODIFIES_RECT) != 0)
+    if (Game::Read<int>(region, Offsets::OFF_REGION_TEXCOORD_MODIFIES_RECT) != 0)
         reinterpret_cast<Crop_t>(Offsets::FUN_REGION_TEXCOORD_CROP)(region, nullptr, rect);
     // rect = {top, left, bottom, right}
     WriteCorners(region, rect[1], rect[3], rect[0], rect[2], xf);
@@ -238,8 +235,7 @@ void __fastcall StoreCorners_h(void *region, void *edx, float *rect) {
     auto it = g_xf.find(region);
     if (it == g_xf.end() || !it->second.active())
         return;
-    const float *base = reinterpret_cast<const float *>(
-        reinterpret_cast<char *>(region) + Offsets::OFF_SIMPLETEXTURE_CORNERS);
+    const float *base = Game::Ptr<const float>(region, Offsets::OFF_SIMPLETEXTURE_CORNERS);
     const float left = base[0];   // corner0 BL.x
     const float bottom = base[1]; // corner0 BL.y
     const float top = base[4];    // corner1 TL.y
@@ -297,13 +293,11 @@ template <class Fn>
 int ForEachVert(uint8_t *n, Fn fn) {
     int visited = 0;
     for (int page = 0; page < Offsets::TEXT_NODE_PAGE_COUNT; ++page) {
-        auto *buf = *reinterpret_cast<uint8_t *const *>(
-            n + Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
+        auto *buf = Game::Read<uint8_t *>(n, Offsets::OFF_TEXT_NODE_PAGE_BUFFERS + page * 4);
         if (buf == nullptr)
             continue;
-        const int count =
-            *reinterpret_cast<const int *>(buf + Offsets::OFF_TEXT_PAGE_VERT_COUNT);
-        auto *verts = *reinterpret_cast<float *const *>(buf + Offsets::OFF_TEXT_PAGE_VERTS);
+        const int count = Game::Read<int>(buf, Offsets::OFF_TEXT_PAGE_VERT_COUNT);
+        auto *verts = Game::Read<float *>(buf, Offsets::OFF_TEXT_PAGE_VERTS);
         if (verts == nullptr || count <= 0)
             continue;
         for (int i = 0; i < count; ++i) {
@@ -382,12 +376,10 @@ bool RestoreBaseline(uint8_t *n, const std::vector<float> &base) {
 // The CSimpleFontString's current live text node (fs+0xF8 → block, block+8), or
 // null when the text isn't laid out yet.
 void *FontStringNode(void *fs) {
-    void *block = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fs) +
-                                             Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    void *block = Game::Read<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
     if (block == nullptr)
         return nullptr;
-    return *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(block) +
-                                      Offsets::OFF_TEXTBLOCK_NODE);
+    return Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE);
 }
 
 // Applies the fontstring's stored rotation to `node`'s verts, starting from an
@@ -516,8 +508,7 @@ int __fastcall Script_GetCorners(void *L) {
         Game::Lua::Error(L, "Usage: texture:GetCorners()");
         return 0;
     }
-    const float *base = reinterpret_cast<const float *>(
-        reinterpret_cast<char *>(tex) + Offsets::OFF_SIMPLETEXTURE_CORNERS);
+    const float *base = Game::Ptr<const float>(tex, Offsets::OFF_SIMPLETEXTURE_CORNERS);
     for (int i = 0; i < 4; ++i) {
         Game::Lua::PushNumber(L, base[i * 3 + 0]);
         Game::Lua::PushNumber(L, base[i * 3 + 1]);

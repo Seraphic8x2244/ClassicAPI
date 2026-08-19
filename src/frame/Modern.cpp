@@ -131,8 +131,7 @@ int __fastcall Script_IsMouseOver(void *L) {
         Game::Lua::PushBool(L, false);
         return 1;
     }
-    const float effScale = *reinterpret_cast<const float *>(
-        reinterpret_cast<const uint8_t *>(obj) + Offsets::OFF_REGION_EFFECTIVE_SCALE);
+    const float effScale = Game::Read<float>(obj, Offsets::OFF_REGION_EFFECTIVE_SCALE);
 
     double left, right, top, bottom;
     if (effScale == 0.0f ||
@@ -193,13 +192,10 @@ int __fastcall Script_GetRect(void *L) {
 // there, so it reports false, as it should.
 int __fastcall Script_IsDragging(void *L) {
     void *self = Game::Lua::ResolveObject(L, 1);
-    void *ctx = *reinterpret_cast<void *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
+    void *ctx = Game::Read<void *>(static_cast<uintptr_t>(Offsets::VAR_UI_CONTEXT_PTR));
     void *dragTarget =
         ctx != nullptr
-            ? *reinterpret_cast<void *const *>(
-                  reinterpret_cast<const uint8_t *>(ctx) +
-                  Offsets::OFF_UI_CONTEXT_DRAG_TARGET)
+            ? Game::Read<void *>(ctx, Offsets::OFF_UI_CONTEXT_DRAG_TARGET)
             : nullptr;
     Game::Lua::PushBool(L, self != nullptr && self == dragTarget);
     return 1;
@@ -348,9 +344,9 @@ int __fastcall Script_HookScript(void *L) {
 using SStrCmpI_t = int(__stdcall *)(const char *a, const char *b, int n);
 
 bool FrameHasEvent(void *frame, const char *eventName) {
-    const uint32_t count = *reinterpret_cast<const uint32_t *>(
+    const uint32_t count = Game::Read<uint32_t>(
         static_cast<uintptr_t>(Offsets::VAR_EVENT_TABLE_COUNT));
-    auto *base = *reinterpret_cast<const uint8_t *const *>(
+    auto *base = Game::Read<const uint8_t *>(
         static_cast<uintptr_t>(Offsets::VAR_EVENT_TABLE_BASE_PTR));
     if (count == 0 || base == nullptr)
         return false;
@@ -360,21 +356,19 @@ bool FrameHasEvent(void *frame, const char *eventName) {
 
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t *entry = base + i * Offsets::EVENT_ENTRY_STRIDE;
-        const char *name = *reinterpret_cast<const char *const *>(
-            entry + Offsets::OFF_EVENT_ENTRY_NAME);
+        const char *name = Game::Read<const char *>(
+            entry, Offsets::OFF_EVENT_ENTRY_NAME);
         if (name == nullptr)
             continue;
         if (sstrcmpi(name, eventName, 0x7FFFFFFF) != 0)
             continue;
         // Names are unique, so this is the one entry — walk its chain.
-        uintptr_t node = *reinterpret_cast<const uintptr_t *>(
-            entry + Offsets::OFF_EVENT_ENTRY_HEAD);
+        uintptr_t node = Game::Read<uintptr_t>(
+            entry, Offsets::OFF_EVENT_ENTRY_HEAD);
         while ((node & 1) == 0 && node != 0) {
-            if (*reinterpret_cast<void *const *>(
-                    node + Offsets::OFF_EVENT_NODE_FRAME) == frame)
+            if (Game::Read<void *>(node + Offsets::OFF_EVENT_NODE_FRAME) == frame)
                 return true;
-            node = *reinterpret_cast<const uintptr_t *>(
-                node + Offsets::OFF_EVENT_NODE_NEXT);
+            node = Game::Read<uintptr_t>(node + Offsets::OFF_EVENT_NODE_NEXT);
         }
         return false;
     }

@@ -32,7 +32,7 @@ uint32_t PlayerSpellFamily() {
     auto *unit = static_cast<const uint8_t *>(resolve("player"));
     if (unit == nullptr)
         return 0;
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(unit + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(unit, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return 0;
     const uint8_t classByte = *(desc + Offsets::OFF_UNIT_DESCRIPTOR_CLASS_BYTE);
@@ -40,7 +40,7 @@ uint32_t PlayerSpellFamily() {
                                      Offsets::VAR_CHRCLASSES_COUNT, classByte);
     if (cls == nullptr)
         return 0;
-    return *reinterpret_cast<const uint32_t *>(cls + Offsets::OFF_CHRCLASSES_SPELL_FAMILY);
+    return Game::Read<uint32_t>(cls, Offsets::OFF_CHRCLASSES_SPELL_FAMILY);
 }
 
 } // namespace
@@ -49,18 +49,18 @@ float Apply(const uint8_t *spellRecord, int op, float base) {
     if (spellRecord == nullptr)
         return base;
 
-    const uint32_t familyName = *reinterpret_cast<const uint32_t *>(
-        spellRecord + Offsets::OFF_SPELL_RECORD_FAMILY_NAME);
-    const uint32_t attrEx3 = *reinterpret_cast<const uint32_t *>(
-        spellRecord + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3);
+    const uint32_t familyName = Game::Read<uint32_t>(
+        spellRecord, Offsets::OFF_SPELL_RECORD_FAMILY_NAME);
+    const uint32_t attrEx3 = Game::Read<uint32_t>(
+        spellRecord, Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3);
     if (familyName == 0 ||
         (attrEx3 & Offsets::SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) != 0)
         return base;
     if (familyName != PlayerSpellFamily())
         return base;
 
-    const uint64_t familyFlags = *reinterpret_cast<const uint64_t *>(
-        spellRecord + Offsets::OFF_SPELL_RECORD_FAMILY_FLAGS);
+    const uint64_t familyFlags = Game::Read<uint64_t>(
+        spellRecord, Offsets::OFF_SPELL_RECORD_FAMILY_FLAGS);
     if (familyFlags == 0)
         return base;
 

@@ -40,11 +40,11 @@ using GetSpellCost_t = uint32_t(__fastcall *)(int spellID, int unit);
 bool PlayerKnowsSpell(int spellID) {
     if (spellID <= 0)
         return false;
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
+    auto *bitmap = Game::Read<const uint32_t *>(
         static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
     if (bitmap == nullptr)
         return false;
-    const int spellCount = *reinterpret_cast<const int *>(
+    const int spellCount = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
     if (spellID > spellCount)
         return false;
@@ -56,8 +56,8 @@ const uint8_t *PlayerDescriptor() {
     auto *player = static_cast<const uint8_t *>(resolve("player"));
     if (player == nullptr)
         return nullptr;
-    return *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_UNIT_DESCRIPTOR);
+    return Game::Read<const uint8_t *>(
+        player, Offsets::OFF_UNIT_DESCRIPTOR);
 }
 
 // Calls the engine's cooldown helper at `FUN_SPELL_QUERY_COOLDOWN`
@@ -101,8 +101,8 @@ int CountItemInBags(void *L, int targetItemID) {
             auto *itemDesc = Item::ObjectFields(item);
             if (itemDesc == nullptr)
                 continue;
-            total += static_cast<int>(*reinterpret_cast<const uint32_t *>(
-                itemDesc + Offsets::OFF_DESCRIPTOR_STACK_COUNT));
+            total += static_cast<int>(Game::Read<uint32_t>(
+                itemDesc, Offsets::OFF_DESCRIPTOR_STACK_COUNT));
         }
     }
     return total;
@@ -113,10 +113,10 @@ int CountItemInBags(void *L, int targetItemID) {
 // Spells with zero reagents trivially pass.
 bool HasReagents(void *L, const uint8_t *record) {
     for (int i = 0; i < Offsets::SPELL_MAX_REAGENTS; i++) {
-        const int reagentItemID = static_cast<int>(*reinterpret_cast<const int32_t *>(
-            record + Offsets::OFF_SPELL_REAGENT_ID + i * 4));
-        const int reagentCount = static_cast<int>(*reinterpret_cast<const int32_t *>(
-            record + Offsets::OFF_SPELL_REAGENT_COUNT + i * 4));
+        const int reagentItemID = static_cast<int>(Game::Read<int32_t>(
+            record, Offsets::OFF_SPELL_REAGENT_ID + i * 4));
+        const int reagentCount = static_cast<int>(Game::Read<int32_t>(
+            record, Offsets::OFF_SPELL_REAGENT_COUNT + i * 4));
         if (reagentItemID <= 0 || reagentCount <= 0)
             continue;
         if (CountItemInBags(L, reagentItemID) < reagentCount)
@@ -162,8 +162,8 @@ Usability ComputeUsability(void *L, int spellID) {
     if (desc == nullptr)
         return r;
 
-    const int health = *reinterpret_cast<const int *>(
-        desc + Offsets::OFF_UNIT_FIELD_HEALTH);
+    const int health = Game::Read<int>(
+        desc, Offsets::OFF_UNIT_FIELD_HEALTH);
     if (health <= 0)
         return r;
 
@@ -176,16 +176,16 @@ Usability ComputeUsability(void *L, int spellID) {
     // not just the base ManaCost. Falls back to base if the engine can't
     // resolve a cost (shouldn't happen here: the player descriptor
     // resolved above, so it has a player context).
-    const int powerType = static_cast<int>(*reinterpret_cast<const int8_t *>(
-        record + Offsets::OFF_SPELL_RECORD_POWER_TYPE));
+    const int powerType = static_cast<int>(Game::Read<int8_t>(
+        record, Offsets::OFF_SPELL_RECORD_POWER_TYPE));
     if (powerType >= 0 && powerType <= 4) {
         auto getCost = reinterpret_cast<GetSpellCost_t>(Offsets::FUN_GET_SPELL_COST);
         uint32_t cost = getCost(spellID, 0 /* local player */);
         if (cost == 0xFFFFFFFF)
-            cost = *reinterpret_cast<const uint32_t *>(record + Offsets::OFF_SPELL_RECORD_MANA_COST);
+            cost = Game::Read<uint32_t>(record, Offsets::OFF_SPELL_RECORD_MANA_COST);
         if (cost > 0) {
-            const int currentPower = *reinterpret_cast<const int *>(
-                desc + Offsets::OFF_UNIT_FIELD_POWER1 + powerType * 4);
+            const int currentPower = Game::Read<int>(
+                desc, Offsets::OFF_UNIT_FIELD_POWER1 + powerType * 4);
             if (currentPower < static_cast<int>(cost)) {
                 r.noMana = true;
                 return r;

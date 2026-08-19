@@ -87,8 +87,8 @@ bool IsCraftRecipe(int spellID) {
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
     if (rec == nullptr)
         return false;
-    const int32_t *eff = reinterpret_cast<const int32_t *>(
-        rec + Offsets::OFF_SPELL_RECORD_EFFECT);
+    const int32_t *eff = Game::Ptr<const int32_t>(
+        rec, Offsets::OFF_SPELL_RECORD_EFFECT);
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
         const int e = eff[i];
         if (e == Offsets::SPELL_EFFECT_CREATE_ITEM ||
@@ -108,10 +108,10 @@ bool IsCraftRecipe(int spellID) {
 // use, so the bit-index space is identical.
 int BuildRecipeList(uint32_t skillLineID, int *outSpell, int *outGrey,
                     int *outGreen, int maxOut) {
-    auto *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_COUNT));
+    auto *const *records = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_SKILL_LINE_ABILITY_RECORDS);
+    const int count = Game::Read<int>(
+        Offsets::VAR_SKILL_LINE_ABILITY_COUNT);
     if (records == nullptr || count <= 0)
         return 0;
 
@@ -120,19 +120,19 @@ int BuildRecipeList(uint32_t skillLineID, int *outSpell, int *outGrey,
         const uint8_t *rec = records[i];
         if (rec == nullptr)
             continue;
-        if (static_cast<uint32_t>(*reinterpret_cast<const int *>(
-                rec + Offsets::OFF_SLA_SKILL_ID)) != skillLineID)
+        if (static_cast<uint32_t>(Game::Read<int>(
+                rec, Offsets::OFF_SLA_SKILL_ID)) != skillLineID)
             continue;
         const int spellID =
-            *reinterpret_cast<const int *>(rec + Offsets::OFF_SLA_SPELL_ID);
+            Game::Read<int>(rec, Offsets::OFF_SLA_SPELL_ID);
         if (!IsCraftRecipe(spellID))
             continue;
         if (outGrey != nullptr)
-            outGrey[n] = *reinterpret_cast<const int *>(
-                rec + Offsets::OFF_SLA_TRIVIAL_SKILL_HIGH);
+            outGrey[n] = Game::Read<int>(
+                rec, Offsets::OFF_SLA_TRIVIAL_SKILL_HIGH);
         if (outGreen != nullptr)
-            outGreen[n] = *reinterpret_cast<const int *>(
-                rec + Offsets::OFF_SLA_TRIVIAL_SKILL_LOW);
+            outGreen[n] = Game::Read<int>(
+                rec, Offsets::OFF_SLA_TRIVIAL_SKILL_LOW);
         outSpell[n++] = spellID;
     }
     return n;
@@ -143,8 +143,8 @@ int BuildRecipeList(uint32_t skillLineID, int *outSpell, int *outGrey,
 bool IsKnownSpell(int spellID) {
     if (spellID <= 0)
         return false;
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
+    auto *bitmap = Game::Read<const uint32_t *>(
+        Offsets::VAR_PLAYER_SPELL_BITMAP);
     if (bitmap == nullptr)
         return false;
     return (bitmap[static_cast<uint32_t>(spellID) >> 5] &
@@ -158,19 +158,19 @@ bool IsKnownSpell(int spellID) {
 uint32_t SkillForSpell(int spellID) {
     if (spellID <= 0)
         return 0;
-    auto *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_RECORDS));
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_SKILL_LINE_ABILITY_COUNT));
+    auto *const *records = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_SKILL_LINE_ABILITY_RECORDS);
+    const int count = Game::Read<int>(
+        Offsets::VAR_SKILL_LINE_ABILITY_COUNT);
     if (records == nullptr || count <= 0)
         return 0;
     for (int i = 1; i <= count; ++i) {
         const uint8_t *rec = records[i];
         if (rec != nullptr &&
-            *reinterpret_cast<const int *>(rec + Offsets::OFF_SLA_SPELL_ID) ==
+            Game::Read<int>(rec, Offsets::OFF_SLA_SPELL_ID) ==
                 spellID)
             return static_cast<uint32_t>(
-                *reinterpret_cast<const int *>(rec + Offsets::OFF_SLA_SKILL_ID));
+                Game::Read<int>(rec, Offsets::OFF_SLA_SKILL_ID));
     }
     return 0;
 }
@@ -178,8 +178,7 @@ uint32_t SkillForSpell(int spellID) {
 // Skill line of the open Craft window (Enchanting, pet training) — derived
 // from its first real recipe entry, mirroring the engine. 0 if none open.
 uint32_t CraftSkillLine() {
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_CRAFT_COUNT));
+    const int count = Game::Read<int>(Offsets::VAR_CRAFT_COUNT);
     if (count <= 0)
         return 0;
     const int cap = (count < kMaxRecipes) ? count : kMaxRecipes;
@@ -238,16 +237,16 @@ void ReadPlayerSkillRank(int skillLine, int *outCur, int *outMax) {
         Offsets::FUN_SKILL_LINE_TO_SLOT)(player, skillLine);
     if (slot < 0)
         return;
-    const uint8_t *base = *reinterpret_cast<const uint8_t *const *>(
-        player + Offsets::OFF_CGPLAYER_INFO);
+    const uint8_t *base = Game::Read<const uint8_t *>(
+        player, Offsets::OFF_CGPLAYER_INFO);
     if (base == nullptr)
         return;
     const uint8_t *rec =
         base + Offsets::OFF_SKILL_INFO_TABLE + slot * Offsets::SKILL_INFO_STRIDE;
-    uint32_t cur = *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_CUR);
-    uint32_t mx = *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_MAX);
+    uint32_t cur = Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_CUR);
+    uint32_t mx = Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_MAX);
     const uint32_t bonus =
-        *reinterpret_cast<const uint16_t *>(rec + Offsets::OFF_SKILL_INFO_BONUS);
+        Game::Read<uint16_t>(rec, Offsets::OFF_SKILL_INFO_BONUS);
     if (cur != 0)
         cur += bonus;
     if (mx != 0)
@@ -274,14 +273,13 @@ int BuildLink(void *L, bool useCraft) {
     int skillLine;
     if (useCraft) {
         // Craft-window open-state flag; zeroed by the engine on close.
-        if (*reinterpret_cast<const int *>(
-                static_cast<uintptr_t>(Offsets::VAR_CRAFT_WINDOW_STATE)) == 0)
+        if (Game::Read<int>(Offsets::VAR_CRAFT_WINDOW_STATE) == 0)
             return 0;
         skillLine = static_cast<int>(CraftSkillLine());
     } else {
         // TradeSkill skill-line global; zeroed by the engine on close.
-        skillLine = *reinterpret_cast<const int *>(
-            static_cast<uintptr_t>(Offsets::VAR_CURRENT_TRADESKILL_LINE));
+        skillLine = Game::Read<int>(
+            Offsets::VAR_CURRENT_TRADESKILL_LINE);
     }
     if (skillLine <= 0)
         return 0;
@@ -373,16 +371,16 @@ int __fastcall Script_GetTradeSkillListRecipes(void *L) {
         int createdItem = 0;
         int numMade = 0;
         if (srec != nullptr) {
-            createdItem = *reinterpret_cast<const int *>(
-                srec + Offsets::OFF_SPELL_RECORD_CREATED_ITEM);
+            createdItem = Game::Read<int>(
+                srec, Offsets::OFF_SPELL_RECORD_CREATED_ITEM);
             // Yield: the CREATE_ITEM effect's magnitude (base points + dice),
             // mirroring the engine's item-creation math. 0 for enchants.
-            const int32_t *eff = reinterpret_cast<const int32_t *>(
-                srec + Offsets::OFF_SPELL_RECORD_EFFECT);
-            const int32_t *basePts = reinterpret_cast<const int32_t *>(
-                srec + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
-            const int32_t *baseDice = reinterpret_cast<const int32_t *>(
-                srec + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
+            const int32_t *eff = Game::Ptr<const int32_t>(
+                srec, Offsets::OFF_SPELL_RECORD_EFFECT);
+            const int32_t *basePts = Game::Ptr<const int32_t>(
+                srec, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
+            const int32_t *baseDice = Game::Ptr<const int32_t>(
+                srec, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
             for (int e = 0; e < Offsets::SPELL_RECORD_EFFECT_COUNT; ++e) {
                 if (eff[e] == Offsets::SPELL_EFFECT_CREATE_ITEM) {
                     numMade = basePts[e] + baseDice[e];
@@ -408,10 +406,10 @@ int __fastcall Script_GetTradeSkillListRecipes(void *L) {
         Game::Lua::PushString(L, "reagents");
         Game::Lua::NewTable(L);
         if (srec != nullptr) {
-            const int32_t *rids = reinterpret_cast<const int32_t *>(
-                srec + Offsets::OFF_SPELL_REAGENT_ID);
-            const int32_t *rcounts = reinterpret_cast<const int32_t *>(
-                srec + Offsets::OFF_SPELL_REAGENT_COUNT);
+            const int32_t *rids = Game::Ptr<const int32_t>(
+                srec, Offsets::OFF_SPELL_REAGENT_ID);
+            const int32_t *rcounts = Game::Ptr<const int32_t>(
+                srec, Offsets::OFF_SPELL_REAGENT_COUNT);
             int outIdx = 0;
             for (int r = 0; r < Offsets::SPELL_MAX_REAGENTS; ++r) {
                 if (rids[r] == 0)

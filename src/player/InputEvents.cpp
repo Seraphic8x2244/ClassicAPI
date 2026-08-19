@@ -31,6 +31,7 @@
 //     the free-look bit is held AND the camera yaw changes; STOPPED
 //     fires on LMB release.
 
+#include "Game.h"
 #include "Offsets.h"
 #include "event/Custom.h"
 #include "tick/WorldTick.h"
@@ -67,7 +68,7 @@ bool g_havePrevCameraYaw = false;
 using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 
 const uint8_t *Controller() {
-    return *reinterpret_cast<const uint8_t *const *>(Offsets::VAR_UI_INPUT_CONTROLLER);
+    return Game::Read<const uint8_t *>(Offsets::VAR_UI_INPUT_CONTROLLER);
 }
 
 const uint8_t *Player() {
@@ -76,12 +77,12 @@ const uint8_t *Player() {
 }
 
 const uint8_t *Camera() {
-    const uint8_t *gameState = *reinterpret_cast<const uint8_t *const *>(
+    const uint8_t *gameState = Game::Read<const uint8_t *>(
         Offsets::VAR_GAME_STATE_PTR);
     if (gameState == nullptr)
         return nullptr;
-    return *reinterpret_cast<const uint8_t *const *>(
-        gameState + Offsets::OFF_GAME_STATE_CAMERA_PTR);
+    return Game::Read<const uint8_t *>(
+        gameState, Offsets::OFF_GAME_STATE_CAMERA_PTR);
 }
 
 void FireTransition(bool now, bool &prev, const char *startedName,
@@ -109,8 +110,7 @@ void OnWorldTick() {
         return;
     }
 
-    const uint32_t flags = *reinterpret_cast<const uint32_t *>(
-        ctrl + Offsets::OFF_UI_INPUT_FLAGS);
+    const uint32_t flags = Game::Read<uint32_t>(ctrl, Offsets::OFF_UI_INPUT_FLAGS);
     const bool freeLookHeld  = (flags & Offsets::INPUT_FLAG_FREE_LOOK) != 0;
     const bool mouselookHeld = (flags & Offsets::INPUT_FLAG_MOUSELOOK) != 0;
 
@@ -133,8 +133,7 @@ void OnWorldTick() {
     // Once STARTED has fired during a hold, the latch stays on
     // until the bit clears — so a drag-stop-drag motion within
     // the same RMB hold doesn't flap STARTED/STOPPED.
-    const float bodyYaw = *reinterpret_cast<const float *>(
-        player + Offsets::OFF_PLAYER_BODY_YAW);
+    const float bodyYaw = Game::Read<float>(player, Offsets::OFF_PLAYER_BODY_YAW);
     bool turning;
     if (!mouselookHeld) {
         turning = false;
@@ -159,8 +158,8 @@ void OnWorldTick() {
     } else if (camera == nullptr) {
         looking = false; // can't read camera yaw — bail
     } else {
-        const float cameraYaw = *reinterpret_cast<const float *>(
-            camera + Offsets::OFF_CAMERA_RELATIVE_YAW);
+        const float cameraYaw = Game::Read<float>(
+            camera, Offsets::OFF_CAMERA_RELATIVE_YAW);
         if (g_wasLooking) {
             looking = true;
         } else if (g_havePrevCameraYaw &&

@@ -155,14 +155,14 @@ void AddSpellStatAuras(Accum *acc, int spellID, long sign) {
                                     static_cast<uint32_t>(spellID));
     if (sp == nullptr)
         return;
-    auto aura = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME);
-    auto misc = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_MISC_VALUE);
-    auto base = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
-    auto dice = reinterpret_cast<const int32_t *>(
-        sp + Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
+    auto aura = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_APPLY_AURA_NAME);
+    auto misc = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_MISC_VALUE);
+    auto base = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_POINTS);
+    auto dice = Game::Ptr<const int32_t>(
+        sp, Offsets::OFF_SPELL_RECORD_EFFECT_BASE_DICE);
 
     // Vanilla "+N Attack Power" spells carry a melee (99) AND a ranged
     // (124) aura with the same value; the generic melee key subsumes the
@@ -248,10 +248,10 @@ void AddSpellStatAuras(Accum *acc, int spellID, long sign) {
 // mp5 / defense on base items (vanilla stores them as equip spells, not
 // stat slots).
 void AddEquipSpellStats(Accum *acc, const uint8_t *record, long sign) {
-    auto ids = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_ID);
-    auto triggers = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_SPELL_TRIGGER);
+    auto ids = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_ID);
+    auto triggers = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_SPELL_TRIGGER);
     for (int i = 0; i < Offsets::ITEMSTATS_SPELL_SLOT_COUNT; ++i)
         if (ids[i] != 0 && triggers[i] == 1) // ON_EQUIP
             AddSpellStatAuras(acc, static_cast<int>(ids[i]), sign);
@@ -288,14 +288,14 @@ long Value(const Accum *acc, const char *key) {
 double ComputeDPS(const uint8_t *record) {
     if (record == nullptr)
         return 0.0;
-    const uint32_t delayMs = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_DELAY);
+    const uint32_t delayMs = Game::Read<uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_DELAY);
     if (delayMs == 0)
         return 0.0;
-    auto *dmgMin = reinterpret_cast<const float *>(
-        record + Offsets::OFF_ITEMSTATS_DAMAGE_MIN);
-    auto *dmgMax = reinterpret_cast<const float *>(
-        record + Offsets::OFF_ITEMSTATS_DAMAGE_MAX);
+    auto *dmgMin = Game::Ptr<const float>(
+        record, Offsets::OFF_ITEMSTATS_DAMAGE_MIN);
+    auto *dmgMax = Game::Ptr<const float>(
+        record, Offsets::OFF_ITEMSTATS_DAMAGE_MAX);
     double avgTotal = 0.0;
     for (int i = 0; i < Offsets::ITEMSTATS_DAMAGE_SLOT_COUNT; ++i)
         avgTotal += (static_cast<double>(dmgMin[i]) +
@@ -312,9 +312,9 @@ void ApplyEnchant(Accum *acc, uint32_t enchantID, long sign) {
                                     Offsets::VAR_SPELLITEMENCHANT_COUNT, enchantID);
     if (en == nullptr)
         return;
-    auto type = reinterpret_cast<const int32_t *>(en + Offsets::OFF_SPELLITEMENCHANT_TYPE);
-    auto amount = reinterpret_cast<const int32_t *>(en + Offsets::OFF_SPELLITEMENCHANT_AMOUNT);
-    auto arg = reinterpret_cast<const int32_t *>(en + Offsets::OFF_SPELLITEMENCHANT_ARG);
+    auto type = Game::Ptr<const int32_t>(en, Offsets::OFF_SPELLITEMENCHANT_TYPE);
+    auto amount = Game::Ptr<const int32_t>(en, Offsets::OFF_SPELLITEMENCHANT_AMOUNT);
+    auto arg = Game::Ptr<const int32_t>(en, Offsets::OFF_SPELLITEMENCHANT_ARG);
     for (int i = 0; i < 3; ++i) { // SpellItemEnchantment has 3 effect slots
         switch (type[i]) {
         case 3: // equip spell — stat/resist value lives in the spell
@@ -341,8 +341,8 @@ void ApplyRandomSuffix(Accum *acc, int suffixID, long sign) {
                                     static_cast<uint32_t>(suffixID));
     if (rp == nullptr)
         return;
-    auto enchants = reinterpret_cast<const uint32_t *>(
-        rp + Offsets::OFF_ITEMRANDOMPROP_ENCHANT);
+    auto enchants = Game::Ptr<const uint32_t>(
+        rp, Offsets::OFF_ITEMRANDOMPROP_ENCHANT);
     for (int s = 0; s < Offsets::ITEMRANDOMPROP_ENCHANT_SLOT_COUNT; ++s)
         ApplyEnchant(acc, enchants[s], sign);
 }
@@ -350,10 +350,10 @@ void ApplyRandomSuffix(Accum *acc, int suffixID, long sign) {
 void AccumulateRecord(Accum *acc, const uint8_t *record, long sign) {
     if (record == nullptr)
         return;
-    auto *types = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_ITEMSTATS_STAT_TYPE);
-    auto *values = reinterpret_cast<const int32_t *>(
-        record + Offsets::OFF_ITEMSTATS_STAT_VALUE);
+    auto *types = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_ITEMSTATS_STAT_TYPE);
+    auto *values = Game::Ptr<const int32_t>(
+        record, Offsets::OFF_ITEMSTATS_STAT_VALUE);
     for (int i = 0; i < Offsets::ITEMSTATS_STAT_SLOT_COUNT; ++i)
         AddByKey(acc, StatKeyForItemModType(types[i]),
                  sign * static_cast<long>(values[i]));

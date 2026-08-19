@@ -49,14 +49,14 @@ int64_t ComputeCurrentEpoch() {
     auto *base = reinterpret_cast<const uint8_t *>(
         static_cast<uintptr_t>(Offsets::VAR_GAMETIME_STRUCT));
 
-    const int year = *reinterpret_cast<const int *>(base + Offsets::OFF_GAMETIME_YEAR);
+    const int year = Game::Read<int>(base, Offsets::OFF_GAMETIME_YEAR);
     if (year <= 0)
         return 0; // pre-login / not yet sync'd
 
-    const int month = *reinterpret_cast<const int *>(base + Offsets::OFF_GAMETIME_MONTH);
-    const int day = *reinterpret_cast<const int *>(base + Offsets::OFF_GAMETIME_DAY);
-    const int hour = *reinterpret_cast<const int *>(base + Offsets::OFF_GAMETIME_HOUR);
-    const int minute = *reinterpret_cast<const int *>(base + Offsets::OFF_GAMETIME_MINUTE);
+    const int month = Game::Read<int>(base, Offsets::OFF_GAMETIME_MONTH);
+    const int day = Game::Read<int>(base, Offsets::OFF_GAMETIME_DAY);
+    const int hour = Game::Read<int>(base, Offsets::OFF_GAMETIME_HOUR);
+    const int minute = Game::Read<int>(base, Offsets::OFF_GAMETIME_MINUTE);
 
     const DWORD now = GetTickCount();
     if (year != g_lastYear || month != g_lastMonth || day != g_lastDay ||

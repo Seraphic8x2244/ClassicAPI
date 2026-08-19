@@ -92,7 +92,7 @@ using Time::Clock::NowMs;
 
 // The totem tool item a spell requires (`Totem[0]`), or 0.
 uint32_t TotemToolItem(const uint8_t *rec) {
-    const int32_t t = *reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_TOTEM);
+    const int32_t t = Game::Read<int32_t>(rec, Offsets::OFF_SPELL_RECORD_TOTEM);
     return t > 0 ? static_cast<uint32_t>(t) : 0;
 }
 
@@ -122,7 +122,7 @@ void ScanTools() {
         const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
         if (rec == nullptr)
             continue;
-        const auto *eff = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT);
+        const auto *eff = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELL_RECORD_EFFECT);
         for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
             const int e = eff[i];
             if (e < kEffectSummonTotemSlot1 || e > kEffectSummonTotemSlot4)
@@ -190,12 +190,12 @@ int __fastcall ScanCallback(ScanCtx *ctx, void * /*unusedEdx*/, uint64_t guid) {
     void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(obj) + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(
+        obj, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return 1;
-    const uint64_t createdBy = *reinterpret_cast<const uint64_t *>(
-        desc + Offsets::OFF_UNIT_FIELD_CREATEDBY);
+    const uint64_t createdBy = Game::Read<uint64_t>(
+        desc, Offsets::OFF_UNIT_FIELD_CREATEDBY);
     if (createdBy == ctx->playerGuid)
         ctx->present[match] = true;
     return 1; // keep scanning — other slots may match other creatures
@@ -218,12 +218,12 @@ int __fastcall FindGuidCallback(FindGuidCtx *ctx, void * /*unusedEdx*/,
     void *obj = Object::ByGuid(Offsets::TYPEMASK_UNIT, guid, nullptr, 0);
     if (obj == nullptr)
         return 1;
-    auto *desc = *reinterpret_cast<const uint8_t *const *>(
-        static_cast<const uint8_t *>(obj) + Offsets::OFF_UNIT_DESCRIPTOR);
+    auto *desc = Game::Read<const uint8_t *>(
+        obj, Offsets::OFF_UNIT_DESCRIPTOR);
     if (desc == nullptr)
         return 1;
-    if (*reinterpret_cast<const uint64_t *>(
-            desc + Offsets::OFF_UNIT_FIELD_CREATEDBY) == ctx->playerGuid) {
+    if (Game::Read<uint64_t>(
+            desc, Offsets::OFF_UNIT_FIELD_CREATEDBY) == ctx->playerGuid) {
         ctx->found = guid;
         return 0; // stop
     }
@@ -233,7 +233,7 @@ int __fastcall FindGuidCallback(FindGuidCtx *ctx, void * /*unusedEdx*/,
 uint64_t FindTotemGuid(uint32_t entry) {
     if (entry == 0)
         return 0;
-    if (*reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) ==
+    if (Game::Read<void *volatile>(Offsets::VAR_LOCAL_PLAYER_PTR) ==
         nullptr)
         return 0;
     const uint64_t player = Unit::Identity::PlayerGuid();
@@ -294,7 +294,7 @@ void OnTick() {
     // object-manager enumerator derefs the manager unconditionally, so it's
     // gated on the local player existing.
     if (anyActive && now - g_lastScanMs >= kScanIntervalMs &&
-        *reinterpret_cast<void *volatile *>(Offsets::VAR_LOCAL_PLAYER_PTR) !=
+        Game::Read<void *volatile>(Offsets::VAR_LOCAL_PLAYER_PTR) !=
             nullptr) {
         const uint64_t player = Unit::Identity::PlayerGuid();
         if (player != 0) {
@@ -331,12 +331,11 @@ const Tick::WorldTick::AutoSubscribe _tick{&OnTick};
 const char *IconPath(int iconID) {
     if (iconID <= 0)
         return nullptr;
-    const int count = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_SPELL_ICON_COUNT));
+    const int count = Game::Read<int>(Offsets::VAR_SPELL_ICON_COUNT);
     if (iconID > count)
         return nullptr;
-    auto *const *records = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_SPELL_ICON_RECORDS));
+    auto *const *records = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_SPELL_ICON_RECORDS);
     if (records == nullptr || records[iconID] == nullptr)
         return nullptr;
     return *reinterpret_cast<const char *const *>(records[iconID] + 4);
@@ -390,13 +389,12 @@ int __fastcall Script_GetTotemInfo(void *L) {
     const char *icon = nullptr;
     if (rec != nullptr) {
         const int locale =
-            *reinterpret_cast<const int *>(static_cast<uintptr_t>(
-                Offsets::VAR_LOCALE_INDEX));
-        const char *n = *reinterpret_cast<const char *const *>(
-            rec + Offsets::OFF_SPELL_NAMES + locale * 4);
+            Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
+        const char *n = Game::Read<const char *>(
+            rec, Offsets::OFF_SPELL_NAMES + locale * 4);
         if (n != nullptr)
             name = n;
-        icon = IconPath(*reinterpret_cast<const int *>(rec + Offsets::OFF_SPELL_RECORD_ICON_ID));
+        icon = IconPath(Game::Read<int>(rec, Offsets::OFF_SPELL_RECORD_ICON_ID));
     }
 
     Game::Lua::PushBool(L, haveTotem);
@@ -540,9 +538,9 @@ int __fastcall Script_GameTooltipSetTotem(void *L) {
     if (rec == nullptr)
         return 0;
     const int locale =
-        *reinterpret_cast<const int *>(static_cast<uintptr_t>(Offsets::VAR_LOCALE_INDEX));
+        Game::Read<int>(Offsets::VAR_LOCALE_INDEX);
     const char *name =
-        *reinterpret_cast<const char *const *>(rec + Offsets::OFF_SPELL_NAMES + locale * 4);
+        Game::Read<const char *>(rec, Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || name[0] == '\0')
         return 0;
 
@@ -605,8 +603,8 @@ void OnPlayerSpellGo(uint32_t spellID) {
     if (rec == nullptr)
         return;
 
-    const auto *effects = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT);
-    const auto *misc = reinterpret_cast<const int32_t *>(rec + Offsets::OFF_SPELL_RECORD_EFFECT_MISC_VALUE);
+    const auto *effects = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELL_RECORD_EFFECT);
+    const auto *misc = Game::Ptr<const int32_t>(rec, Offsets::OFF_SPELL_RECORD_EFFECT_MISC_VALUE);
     for (int i = 0; i < Offsets::SPELL_RECORD_EFFECT_COUNT; ++i) {
         const int eff = effects[i];
         if (eff < kEffectSummonTotemSlot1 || eff > kEffectSummonTotemSlot4)

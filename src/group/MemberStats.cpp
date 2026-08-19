@@ -13,6 +13,7 @@
 
 #include "group/MemberStats.h"
 
+#include "Game.h"
 #include "Offsets.h"
 
 namespace Group::MemberStats {
@@ -23,7 +24,7 @@ namespace {
 using Lookup_t = const uint8_t *(__fastcall *)(uint64_t *guid);
 
 uint16_t U16(const uint8_t *p, int off) {
-    return *reinterpret_cast<const uint16_t *>(p + off);
+    return Game::Read<uint16_t>(p, off);
 }
 
 } // namespace
@@ -67,13 +68,13 @@ Stats Lookup(uint64_t guid) {
         s.level = U16(e, Offsets::OFF_RAID_SLOT_LEVEL);
         s.areaId = U16(e, Offsets::OFF_RAID_SLOT_AREA_ID);
         const uint32_t flags =
-            *reinterpret_cast<const uint32_t *>(e + Offsets::OFF_RAID_SLOT_FLAGS);
+            Game::Read<uint32_t>(e, Offsets::OFF_RAID_SLOT_FLAGS);
         s.online = (flags & Offsets::RAID_SLOT_FLAG_ONLINE) != 0;
         s.dead = (flags & Offsets::RAID_SLOT_FLAG_DEAD) != 0;
-        s.subgroup = static_cast<int>(*reinterpret_cast<const uint32_t *>(
-                         e + Offsets::OFF_RAID_SLOT_SUBGROUP)) + 1;
+        s.subgroup = static_cast<int>(Game::Read<uint32_t>(
+                         e, Offsets::OFF_RAID_SLOT_SUBGROUP)) + 1;
         s.rank = static_cast<int>(
-            *reinterpret_cast<const uint32_t *>(e + Offsets::OFF_RAID_SLOT_RANK));
+            Game::Read<uint32_t>(e, Offsets::OFF_RAID_SLOT_RANK));
         return s;
     }
 
@@ -93,8 +94,8 @@ const uint16_t *AuraArray(uint64_t guid) {
         if ((e[Offsets::OFF_GROUP_MEMBER_STATUS_FLAGS] &
              Offsets::GROUP_MEMBER_STATUS_ONLINE) == 0)
             return nullptr;
-        return reinterpret_cast<const uint16_t *>(
-            e + Offsets::OFF_GROUP_MEMBER_STATS_AURAS);
+        return Game::Ptr<const uint16_t>(
+            e, Offsets::OFF_GROUP_MEMBER_STATS_AURAS);
     }
 
     // Raid slot — auras at +0x64, no online gate (mirrors the engine's raid
@@ -102,8 +103,8 @@ const uint16_t *AuraArray(uint64_t guid) {
     auto slotFn = reinterpret_cast<Lookup_t>(
         static_cast<uintptr_t>(Offsets::FUN_GROUP_MEMBER_SLOT_LOOKUP));
     if (const uint8_t *e = slotFn(&guid)) {
-        return reinterpret_cast<const uint16_t *>(
-            e + Offsets::OFF_RAID_SLOT_AURAS);
+        return Game::Ptr<const uint16_t>(
+            e, Offsets::OFF_RAID_SLOT_AURAS);
     }
 
     return nullptr;

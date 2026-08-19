@@ -49,7 +49,7 @@ int __fastcall Script_GetTaxiPaths(void *L) {
     Game::Lua::SetTop(L, 0);
     Game::Lua::NewTable(L);
 
-    const int count = *reinterpret_cast<const int *>(Offsets::VAR_TAXIPATH_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_TAXIPATH_COUNT);
     int outIdx = 0;
     for (int id = 1; id <= count; ++id) {
         const uint8_t *rec = DBC::Record(Offsets::VAR_TAXIPATH_RECORDS,
@@ -86,7 +86,7 @@ int __fastcall Script_GetTaxiPathWaypoints(void *L) {
         int mapID;
     };
     std::vector<Waypoint> pts;
-    const int count = *reinterpret_cast<const int *>(Offsets::VAR_TAXIPATHNODE_COUNT);
+    const int count = Game::Read<int>(Offsets::VAR_TAXIPATHNODE_COUNT);
     for (int id = 1; id <= count; ++id) {
         const uint8_t *rec = DBC::Record(Offsets::VAR_TAXIPATHNODE_RECORDS,
                                          Offsets::VAR_TAXIPATHNODE_COUNT,

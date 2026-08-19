@@ -129,26 +129,26 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
 
     out.spellID = spellID;
-    out.name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
-    out.rank = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
+    out.name = Game::Read<const char *>(record, Offsets::OFF_SPELL_NAMES + locale * 4);
+    out.rank = Game::Read<const char *>(record, Offsets::OFF_SPELL_RECORD_RANK + locale * 4);
 
     out.iconPath = nullptr;
-    const int iconID = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_ICON_ID);
+    const int iconID = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_ICON_ID);
     if (auto *iconRec = LookupSubRecord(Offsets::VAR_SPELL_ICON_RECORDS,
                                         Offsets::VAR_SPELL_ICON_COUNT, iconID)) {
-        out.iconPath = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
+        out.iconPath = Game::Read<const char *>(iconRec, Offsets::OFF_SPELLICON_PATH);
     }
 
-    out.cost = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_MANA_COST);
+    out.cost = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_MANA_COST);
 
-    const uint32_t attrEx2 = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
+    const uint32_t attrEx2 = Game::Read<uint32_t>(
+        record, Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX2);
     out.isFunnel = (attrEx2 & SPELL_ATTR_EX2_HEALTH_FUNNEL) != 0;
 
-    out.powerType = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_POWER_TYPE);
+    out.powerType = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_POWER_TYPE);
 
     out.castTimeMs = 0;
-    const int castIndex = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_CASTING_TIME_INDEX);
+    const int castIndex = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_CASTING_TIME_INDEX);
     if (auto *castRec = LookupSubRecord(Offsets::VAR_SPELL_CAST_TIMES_RECORDS,
                                         Offsets::VAR_SPELL_CAST_TIMES_COUNT, castIndex)) {
         out.castTimeMs = *reinterpret_cast<const int *>(castRec + 4);
@@ -156,7 +156,7 @@ static bool ReadSpellInfo(int spellID, SpellInfoData &out) {
 
     out.minRange = 0.0f;
     out.maxRange = 0.0f;
-    const int rangeIndex = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_RANGE_INDEX);
+    const int rangeIndex = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_RANGE_INDEX);
     if (auto *rangeRec = LookupSubRecord(Offsets::VAR_SPELL_RANGE_RECORDS,
                                          Offsets::VAR_SPELL_RANGE_COUNT, rangeIndex)) {
         out.minRange = *reinterpret_cast<const float *>(rangeRec + 4);
@@ -276,7 +276,7 @@ static int __fastcall Script_C_GetSpellName(void *L) {
         return 0; // nil for unknown spellID
 
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
+    const char *name = Game::Read<const char *>(record, Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || *name == '\0')
         return 0; // empty / no name in current locale → nil
     Game::Lua::PushString(L, name);
@@ -289,12 +289,12 @@ static int __fastcall Script_C_GetSpellTexture(void *L) {
     if (record == nullptr)
         return 0;
 
-    const int iconID = *reinterpret_cast<const int *>(record + Offsets::OFF_SPELL_RECORD_ICON_ID);
+    const int iconID = Game::Read<int>(record, Offsets::OFF_SPELL_RECORD_ICON_ID);
     auto *iconRec = LookupSubRecord(Offsets::VAR_SPELL_ICON_RECORDS,
                                     Offsets::VAR_SPELL_ICON_COUNT, iconID);
     if (iconRec == nullptr)
         return 0;
-    const char *path = *reinterpret_cast<const char *const *>(iconRec + Offsets::OFF_SPELLICON_PATH);
+    const char *path = Game::Read<const char *>(iconRec, Offsets::OFF_SPELLICON_PATH);
     if (path == nullptr || *path == '\0')
         return 0;
     Game::Lua::PushString(L, path);
@@ -315,7 +315,7 @@ static bool BuildSpellLink(int spellID, char *out, size_t outLen) {
     if (record == nullptr)
         return false;
     const int locale = ReadGlobal<int>(Offsets::VAR_LOCALE_INDEX);
-    const char *name = *reinterpret_cast<const char *const *>(record + Offsets::OFF_SPELL_NAMES + locale * 4);
+    const char *name = Game::Read<const char *>(record, Offsets::OFF_SPELL_NAMES + locale * 4);
     if (name == nullptr || *name == '\0')
         return false;
     const int n = std::snprintf(out, outLen, "|cff71d5ff|Hspell:%d:0|h[%s]|h|r",
@@ -392,8 +392,8 @@ static int PushIsPassive(void *L, int spellID) {
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     if (record == nullptr)
         return 0;
-    const uint32_t attr = *reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
+    const uint32_t attr = Game::Read<uint32_t>(
+        record, Offsets::OFF_SPELL_RECORD_ATTRIBUTES);
     Game::Lua::PushBool(L, (attr & Offsets::SPELL_ATTR_PASSIVE) != 0);
     return 1;
 }
@@ -438,11 +438,11 @@ static int __fastcall Script_C_IsSpellPassive(void *L) {
 static bool PlayerKnowsSpell(int spellID) {
     if (spellID < 1)
         return false;
-    const int spellCount = *reinterpret_cast<const int *>(
+    const int spellCount = Game::Read<int>(
         static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
     if (spellID > spellCount)
         return false;
-    auto *bitmap = *reinterpret_cast<const uint32_t *const *>(
+    auto *bitmap = Game::Read<const uint32_t *>(
         static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
     if (bitmap == nullptr)
         return false;
@@ -522,10 +522,10 @@ template <typename Pred>
 static bool AnyEffectTarget(const uint8_t *record, Pred pred) {
     if (record == nullptr)
         return false;
-    auto *targetsA = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
-    auto *targetsB = reinterpret_cast<const uint32_t *>(
-        record + Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B);
+    auto *targetsA = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_A);
+    auto *targetsB = Game::Ptr<const uint32_t>(
+        record, Offsets::OFF_SPELL_RECORD_EFFECT_IMPLICIT_TARGET_B);
     for (int i = 0; i < 3; ++i) {
         if (pred(targetsA[i]) || pred(targetsB[i]))
             return true;
@@ -661,8 +661,8 @@ static int __fastcall Script_C_SpellBook_GetSpellBookItemInfo(void *L) {
 
     const uint8_t *record = Spell::Lookup::RecordForID(spellID);
     const uint32_t attr =
-        record ? *reinterpret_cast<const uint32_t *>(
-                     record + Offsets::OFF_SPELL_RECORD_ATTRIBUTES)
+        record ? Game::Read<uint32_t>(
+                     record, Offsets::OFF_SPELL_RECORD_ATTRIBUTES)
                : 0u;
 
     Game::Lua::NewTable(L);

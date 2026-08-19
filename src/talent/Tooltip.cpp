@@ -27,10 +27,9 @@ namespace Talent::Tooltip {
 // classes' talents aren't findable here. Same access pattern as
 // `Talent::Info::Script_GetTalentIDByIndex` (#42), inverted.
 static bool FindTalentByID(uint32_t talentID, int *outTab, int *outIdx) {
-    const int tabCount = *reinterpret_cast<const int *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_COUNT));
-    auto *tabs = *reinterpret_cast<const uint8_t *const *const *>(
-        static_cast<uintptr_t>(Offsets::VAR_TALENT_TAB_INFO_ARRAY));
+    const int tabCount = Game::Read<int>(Offsets::VAR_TALENT_TAB_COUNT);
+    auto *tabs = Game::Read<const uint8_t *const *>(
+        Offsets::VAR_TALENT_TAB_INFO_ARRAY);
     if (tabs == nullptr)
         return false;
 
@@ -38,10 +37,10 @@ static bool FindTalentByID(uint32_t talentID, int *outTab, int *outIdx) {
         const uint8_t *tabInfo = tabs[t - 1];
         if (tabInfo == nullptr)
             continue;
-        const int numTalents = *reinterpret_cast<const int *>(
-            tabInfo + Offsets::OFF_TABINFO_NUM_TALENTS);
-        auto *talents = *reinterpret_cast<const uint8_t *const *>(
-            tabInfo + Offsets::OFF_TABINFO_TALENT_ARRAY);
+        const int numTalents = Game::Read<int>(
+            tabInfo, Offsets::OFF_TABINFO_NUM_TALENTS);
+        auto *talents = Game::Read<const uint8_t *>(
+            tabInfo, Offsets::OFF_TABINFO_TALENT_ARRAY);
         if (talents == nullptr)
             continue;
 
@@ -70,7 +69,7 @@ static uint32_t LookupTalentRank1Spell(uint32_t talentID) {
         talentID);
     if (rec == nullptr)
         return 0;
-    return *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_TALENT_SPELL_RANK);
+    return Game::Read<uint32_t>(rec, Offsets::OFF_TALENT_SPELL_RANK);
 }
 
 // `GameTooltip:SetTalentByID(talentID)` — modern method that renders a
