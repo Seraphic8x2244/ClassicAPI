@@ -167,6 +167,7 @@ build instructions.
   - [`frame:SetShown(shown)`](#framesetshownshown)
   - [`fontstring:GetStringHeight()`](#fontstringgetstringheight)
   - [`fontstring:GetUnboundedStringWidth()`](#fontstringgetunboundedstringwidth)
+  - [`fontstring:GetWrappedWidth()`](#fontstringgetwrappedwidth)
   - [`fontstring:GetNumLines()`](#fontstringgetnumlines)
   - [`fontstring:GetLineHeight()`](#fontstringgetlineheight)
   - [`fontstring:SetFormattedText(format [, ...])`](#fontstringsetformattedtextformat--)
@@ -4074,9 +4075,34 @@ there `GetStringWidth` reports the displayed width and this method
 reports the full string. The 1.12 width getter never applies
 truncation, so on this client the two always agree; the method exists
 so modern code that calls it works. The width of the text AS RENDERED
-(the widest wrapped line) is `GetWrappedWidth`, which 1.12 does not
-have. Inline `|T…|t` icon widths are included, the same way
-`GetStringWidth` includes them. Empty or unset text returns `0`.
+(the widest wrapped line) is `GetWrappedWidth`, below. Inline `|T…|t`
+icon widths are included, the same way `GetStringWidth` includes them.
+Empty or unset text returns `0`.
+
+### `fontstring:GetWrappedWidth()`
+
+Returns the width of the text as it renders, in UI pixels: the width
+of the widest wrapped line. This is the method to use for the visible
+size of wrapping text — `GetStringWidth` and `GetUnboundedStringWidth`
+both measure the string on one line and ignore wrapping. Later clients
+added the method. Text that does not wrap returns the same value as
+`GetStringWidth`. The line breaks and the per-line measures come from
+the engine's own wrap math (the same computation the GameTooltip uses
+to auto-size), and both count inline `|T…|t` icons. Empty or unset
+text returns `0`.
+
+The wrapped width can carry a ≤1px difference from a direct measure of
+the same line text — the engine's own per-glyph measure conventions
+(ink versus advance on the last glyph, the kerning-variant flag) — the
+same class of noise `GetStringWidth` itself carries.
+
+```lua
+local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+f:SetWidth(100)
+f:SetText("a long line that wraps a few times")
+-- f:GetStringWidth()   -> ~165 (one line, ignores wrap)
+-- f:GetWrappedWidth()  -> ~94  (the widest rendered line)
+```
 
 ### `fontstring:GetNumLines()`
 

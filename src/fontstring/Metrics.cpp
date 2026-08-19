@@ -24,6 +24,9 @@
 //                               strlen): the string's width with no wrap cap.
 //                               Icon-aware for free — the call routes through
 //                               text/InlineTexture.cpp's co-hook.
+//   GetWrappedWidth()         — the RENDERED width: the widest wrapped line
+//                               (the tooltip auto-size's own recipe — break
+//                               array + per-segment substring measures).
 //   GetNumLines()             — the node's built line count (render truth,
 //                               OFF_TEXT_NODE_BUILT_LINES) once painted; for
 //                               an unbuilt node, the engine's own break-array
@@ -76,6 +79,28 @@ double InternalToPixel(float v) {
     if (mul == 0.0f)
         return 0.0;
     return static_cast<double>(v) * div * Offsets::UI_COORD_SCALE_UNIT / mul;
+}
+
+// The fs's wrap budget in the units FUN_FONTSTRING_BREAK_ARRAY expects
+// (width-getter units — it multiplies by fs+0x7C itself before gxu, verified
+// decompile), or 0 when the rect is unresolved. rectWidth ÷ scale, calibrated
+// EMPIRICALLY against the render with a three-point probe (a 100px box at
+// scale ~0.91, text whose candidate lines measure 78.1 / 94.6 / 101.6px):
+//   raw rectW      → effective budget ~91px  → broke one word EARLY,
+//   rectW/scale²   → effective budget ~110px → broke one word LATE,
+//   rectW/scale    → effective budget 100px  → breaks exactly where the
+//                    render does (94.6 ≤ 100 < 101.6).
+// All three observations fit budget_px = pxOf(param) × scale, pinning the
+// single ÷scale. (A pure paper derivation from the rebuild's node budget
+// predicted /scale² — one hop of that chain models the live behaviour wrong;
+// the probe is the arbiter.)
+float WrapBudget(void *fs) {
+    const float *rc = Game::Ptr<const float>(fs, Offsets::OFF_REGION_RECT);
+    float width = (rc[3] > rc[1]) ? (rc[3] - rc[1]) : (rc[1] - rc[3]);
+    const float s = Game::Read<float>(fs, Offsets::OFF_LAYOUT_SCALE);
+    if (width > 0.0f && s > 0.0f)
+        width /= s;
+    return width;
 }
 
 // Shared self-resolve for every method here.
@@ -135,11 +160,11 @@ int __fastcall Script_GetNumLines(void *L) {
             }
         }
     }
-    // Unbuilt: the engine's own break-array computer, fed the fs's current
-    // rect width (its wrap budget). An unresolved rect (0 width) means no
-    // wrap constraint exists yet — one line, like a fresh single-anchor fs.
-    const float *rc = Game::Ptr<const float>(fs, Offsets::OFF_REGION_RECT);
-    const float width = (rc[3] > rc[1]) ? (rc[3] - rc[1]) : (rc[1] - rc[3]);
+    // Unbuilt: the engine's own break-array computer, fed the fs's wrap
+    // budget (see WrapBudget's scale note). An unresolved rect (0 width)
+    // means no wrap constraint exists yet — one line, like a fresh
+    // single-anchor fs.
+    const float width = WrapBudget(fs);
     if (width <= 0.0f) {
         Game::Lua::PushNumber(L, 1.0);
         return 1;
@@ -152,6 +177,65 @@ int __fastcall Script_GetNumLines(void *L) {
     if (lines == 0u)
         lines = 1u;
     Game::Lua::PushNumber(L, static_cast<double>(lines));
+    return 1;
+}
+
+int __fastcall Script_GetWrappedWidth(void *L) {
+    void *fs = ResolveSelf(L, "Usage: fontstring:GetWrappedWidth()");
+    if (fs == nullptr)
+        return 0;
+    const char *text = Game::Read<const char *>(fs, Offsets::OFF_FONTSTRING_TEXT);
+    if (text == nullptr || *text == '\0') {
+        Game::Lua::PushNumber(L, 0.0);
+        return 1;
+    }
+    auto measure =
+        reinterpret_cast<MeasureSubstring_t>(Offsets::FUN_FONTSTRING_MEASURE_SUBSTRING);
+    // The fs's wrap budget (see WrapBudget's scale note). Without one
+    // (unresolved rect) nothing wraps, and the rendered width IS the
+    // one-line width.
+    const float budget = WrapBudget(fs);
+    if (budget <= 0.0f) {
+        Game::Lua::PushNumber(L, InternalToPixel(measure(fs, nullptr, text, 0)));
+        return 1;
+    }
+    // The tooltip auto-size's own recipe (FUN_00530640): break positions from
+    // the break-array computer, then the widest per-segment measure. Both
+    // callees are icon-aware through their co-hooks, and a segment-final icon
+    // reports its ink edge — so this is the rendered width, wrap and icons
+    // included.
+    int breaks[64];
+    uint32_t segs = reinterpret_cast<BreakArray_t>(Offsets::FUN_FONTSTRING_BREAK_ARRAY)(
+        fs, nullptr, text, budget, breaks, 64);
+    if (segs > 64u)
+        segs = 64u;
+    if (segs <= 1u) {
+        Game::Lua::PushNumber(L, InternalToPixel(measure(fs, nullptr, text, 0)));
+        return 1;
+    }
+    int len = 0;
+    while (len < 0x4000 && text[len] != '\0')
+        ++len;
+    float widest = 0.0f;
+    for (uint32_t i = 0; i < segs; ++i) {
+        const int start = breaks[i];
+        int end = (i + 1 < segs) ? breaks[i + 1] : len;
+        if (start < 0 || start >= end || end > len)
+            continue;
+        // A segment runs to the NEXT segment's start, which includes the
+        // whitespace the wrap consumed — the render never draws it, and a
+        // trailing space also flips the last real letter from ink to
+        // full-advance treatment (+~1.5px, measured). Trim to what renders.
+        while (end > start && (text[end - 1] == ' ' || text[end - 1] == '\n' ||
+                               text[end - 1] == '\r' || text[end - 1] == '\t'))
+            --end;
+        if (start >= end)
+            continue;
+        const float w = measure(fs, nullptr, text + start, end - start);
+        if (w > widest)
+            widest = w;
+    }
+    Game::Lua::PushNumber(L, InternalToPixel(widest));
     return 1;
 }
 
@@ -210,6 +294,7 @@ int __fastcall Script_SetFormattedText(void *L) {
 const Game::Lua::FrameMethodEntry g_methods[] = {
     {"GetStringHeight", &Script_GetStringHeight},
     {"GetUnboundedStringWidth", &Script_GetUnboundedStringWidth},
+    {"GetWrappedWidth", &Script_GetWrappedWidth},
     {"GetNumLines", &Script_GetNumLines},
     {"GetLineHeight", &Script_GetLineHeight},
     {"SetFormattedText", &Script_SetFormattedText},
