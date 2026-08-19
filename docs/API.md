@@ -4049,10 +4049,7 @@ This is the companion to vanilla's `GetStringWidth`. Blizzard first
 shipped it in 2.3.0. It returns the height of the rendered text, in
 UI pixels. The result includes word wrap: wrapped text measures
 `lines × fontHeight + (lines − 1) × spacing` (the `SetSpacing`
-value). The height comes from the same wrap math that the renderer
-uses. Empty or unset text returns `0`. The vanilla engine already
-computes this height internally, for tooltip auto-sizing and chat
-line stacking. This method only adds the missing Lua binding.
+value). Empty or unset text returns `0`.
 
 ```lua
 local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -4062,10 +4059,8 @@ frame:SetHeight(f:GetStringHeight() + 16)  -- size the box to the text
 ```
 
 Related: the stock `fontstring:GetStringWidth()` now **includes inline
-`|T…|t` icon widths**. It reports the same advance that the renderer
-reserves for each icon, so the measured width matches the rendered
-width. Editbox text is not adjusted: an editbox shows raw markup, and
-its caret math must measure that same raw text.
+`|T…|t` icon widths**, so the measured width matches the rendered width.
+Editbox text is not adjusted — an editbox shows and measures raw markup.
 
 ### `fontstring:GetUnboundedStringWidth()`
 
@@ -4074,12 +4069,11 @@ or size limit applied. Note: `GetStringWidth` ALSO ignores word wrap —
 that is a classic API trap on every client. The two methods differ
 only on modern clients, and only for text truncated with an ellipsis:
 there `GetStringWidth` reports the displayed width and this method
-reports the full string. The 1.12 width getter never applies
-truncation, so on this client the two always agree; the method exists
-so modern code that calls it works. The width of the text AS RENDERED
-(the widest wrapped line) is `GetWrappedWidth`, below. Inline `|T…|t`
-icon widths are included, the same way `GetStringWidth` includes them.
-Empty or unset text returns `0`.
+reports the full string. On this client the two always agree; the
+method exists so modern code that calls it works. The width of the
+text AS RENDERED (the widest wrapped line) is `GetWrappedWidth`, below.
+Inline `|T…|t` icon widths are included. Empty or unset text returns
+`0`.
 
 ### `fontstring:GetWrappedWidth()`
 
@@ -4088,15 +4082,12 @@ of the widest wrapped line. This is the method to use for the visible
 size of wrapping text — `GetStringWidth` and `GetUnboundedStringWidth`
 both measure the string on one line and ignore wrapping. Later clients
 added the method. Text that does not wrap returns the same value as
-`GetStringWidth`. The line breaks and the per-line measures come from
-the engine's own wrap math (the same computation the GameTooltip uses
-to auto-size), and both count inline `|T…|t` icons. Empty or unset
+`GetStringWidth`. Inline `|T…|t` icons are counted. Empty or unset
 text returns `0`.
 
 The wrapped width can carry a ≤1px difference from a direct measure of
-the same line text — the engine's own per-glyph measure conventions
-(ink versus advance on the last glyph, the kerning-variant flag) — the
-same class of noise `GetStringWidth` itself carries.
+the same line text — the same rounding noise `GetStringWidth` itself
+carries.
 
 ```lua
 local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -4109,11 +4100,8 @@ f:SetText("a long line that wraps a few times")
 ### `fontstring:GetNumLines()`
 
 Returns the number of wrapped lines the text renders as. Later
-clients added the method. When the text has rendered at least once,
-the count comes from the render itself. When it has not (for example
-a hidden fontstring), the count comes from the engine's own wrap
-math with the fontstring's current width. Empty or unset text
-returns `0`.
+clients added the method. It works whether or not the text has
+rendered yet. Empty or unset text returns `0`.
 
 ### `fontstring:GetLineHeight()`
 
@@ -4131,11 +4119,9 @@ width and a height, and the text must overflow that box. Vanilla
 fontstrings always wrap at spaces. So a box that is only one line
 tall truncates, but a taller box wraps the text and fits it.
 
-The method reads what the fontstring last drew. It compares the
-line the engine laid out against the full text. So the result
-reflects the text on screen, and the fontstring must have drawn at
-least once. `GetText` still returns the full text, not the cut-off
-line.
+The result reflects what is on screen, so the fontstring must have
+drawn at least once. `GetText` still returns the full text, not the
+cut-off line.
 
 ```lua
 local f = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -4149,9 +4135,7 @@ f:SetText("a name too long to fit")
 
 Caps the fontstring to `maxLines` wrapped lines. Text past the cap
 is cut off with an ellipsis (`...`). Pass `0` (or nothing) for no
-cap. Later clients added the method for fontstrings. In 1.12 the
-engine already stores this cap per fontstring — this only adds the
-Lua binding.
+cap. Later clients added the method for fontstrings.
 
 This is the way to make a truncating label in 1.12. Vanilla
 fontstrings always wrap at spaces, and there is no `SetWordWrap`. So
