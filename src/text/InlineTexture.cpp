@@ -1667,6 +1667,10 @@ void FlushLayout(void *layout) {
             }
             const float ox = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_X);
             const float oy = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_Y);
+            // Same pixel-snap mode the emitter honours (bit-7 clear) — gates
+            // the drawn-rect snap in the placement loop below.
+            const bool snapNode =
+                (Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_FLAGS) & 0x80u) == 0;
             // The fs rect, read HERE in the same flush as the icon coords — a
             // coherent snapshot. Placements are stored FS-RELATIVE: an
             // apply-time rect read raced the chat relayout (SetText invalidates
@@ -1706,14 +1710,37 @@ void FlushLayout(void *layout) {
                 // that — the retail look.
                 const float cy = r.y + r.fontH * g_centerFrac + oy + g_vBias - r.offsetY;
                 if (K.x > 1.0f && K.y > 1.0f && fs != nullptr && fsRectValid) {
-                    const float rx = cx + g_regionCalX;
-                    const float ry = cy + g_regionCalY;
+                    float rx = cx + g_regionCalX;
+                    float y0 = cy + g_regionCalY - r.h * 0.5f;
+                    float w = r.w, h = r.h;
+                    if (snapNode) {
+                        // Land the drawn rect on WHOLE render-target pixels,
+                        // like the engine's own glyphs (rounded origin +
+                        // truncated advances). Pen px = render px, the fsLeft/
+                        // fsBottom terms cancel exactly through the anchor
+                        // round-trip (the engine adds the same rect corner
+                        // back at resolve), and the pool's width convergence
+                        // preserves the linear factor — so an integral pen
+                        // rect lands integral on screen: 1:1-sized icons
+                        // sample texel centres (crisp) instead of blending
+                        // four neighbours (soft). Size snaps independently of
+                        // position so a :16 icon is EXACTLY 16px, never 15/17
+                        // from the two edges rounding apart.
+                        rx = std::floor(rx + 0.5f);
+                        y0 = std::floor(y0 + 0.5f);
+                        w = std::floor(w + 0.5f);
+                        h = std::floor(h + 0.5f);
+                        if (w < 1.0f)
+                            w = 1.0f;
+                        if (h < 1.0f)
+                            h = 1.0f;
+                    }
                     Text::InlineTexturePool::Placement p;
                     p.path = r.path;
                     p.x0 = rx / K.x - fsLeft;
-                    p.y0 = (ry - r.h * 0.5f) / K.y - fsBottom;
-                    p.x1 = (rx + r.w) / K.x - fsLeft;
-                    p.y1 = (ry + r.h * 0.5f) / K.y - fsBottom;
+                    p.y0 = y0 / K.y - fsBottom;
+                    p.x1 = (rx + w) / K.x - fsLeft;
+                    p.y1 = (y0 + h) / K.y - fsBottom;
                     p.color = r.color;
                     p.u0 = r.u0;
                     p.v0 = r.v0;
