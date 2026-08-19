@@ -30,6 +30,38 @@ The DLL hooks the engine's own text pipeline — no companion addon:
 - **Rendering** — the paint-pass co-hook `FUN_005c8fe0` walks the icon records
   and queues each to `Text::InlineTexturePool`, which places the region on the
   next frame tick (never mid-render).
+- **Placement coordinates** — text pen space IS render-target pixels. The
+  engine stores node positions NORMALIZED (fs-local anchor ÷
+  `[0x832A44]`/`[0x832A48]` per axis, `FUN_0041ade0`), and the origin finalize
+  `FUN_005cdf70` multiplies by the integer raster dimensions
+  `[0xC2B9A4]`/`[0xC2B9A0]` (rounded, with the justify shift and vertical
+  align folded in). So the flush converts pen → fs-relative anchor with
+  `K = raster ÷ anchorExtent`, **per axis**, from those four live globals — no
+  calibration, no cache, correct at every resolution and UI scale (`968335d`).
+  Two earlier forms both failed: an empirical K (`origin ÷ rect edge`) that
+  chat could never self-derive (its rect edge sits near screen x = 0 and
+  failed the divide guard) and so rode a global cache seeded by whichever
+  fontstring derived first — right only at the layout it was calibrated on;
+  then a closed form built from the SetPoint px factor, which used the wrong
+  global pair. Full derivation chain at `VAR_TEXT_RASTER_X/Y` in `Offsets.h`.
+- **Fade / parent alpha** — icons fade with their line (the pool mirrors the
+  fs's folded colour alpha per frame, `3ca3b7e`), and segmented GLYPHS do too:
+  a bit-3 (standalone FontString) node's baked per-glyph colours never re-bake
+  on an alpha change (the engine's colour-change invalidate `FUN_005ccb40`
+  skips bit-3 nodes), so the flush mirrors the node's live alpha byte
+  (node+0x2c — SetTextColor alpha × frame-chain alpha, kept folded by the
+  engine) into every baked colour, change-detected per page (`bd14a93`). An
+  earlier `0xFF` alpha force at emit was a misdiagnosis of a bubble that built
+  while faded out; it froze icon-line text fully opaque while everything
+  around it faded.
+- **Outlined fonts** — outline ink extends past the glyph advances; the
+  engine itself grows line height by exactly 4.0 / 2.0 pen px for thick / thin
+  outline (`face+0x180` bits 3 / 0, `.rdata` constants). `OutlineInkPen` reads
+  the same flags and constants, and half the ink leads each icon, half trails
+  — threaded through the shared advance helper so the emitter advance, the
+  justify pre-shift, and the wrap-stepper probes all agree. Without it, coins
+  clipped into outlined digits the moment the exact K removed the old
+  miscalibration's accidental slack (`968335d`).
 - **Measure** — three cold FontString-level co-hooks make measure match the
   drawn result: width (`FUN_00772890`), height (`FUN_007729B0`), and wrap
   (`FUN_005C7260`). `GetStringWidth`, `fontstring:GetStringHeight`, wrap
@@ -160,10 +192,12 @@ We do NOT reimplement the emitter's intricate glyph vertex math. Instead, in the
 3. Record an `IconRecord` at the pen (node-local `x`,`y`) into `g_nodeIcons[line]`
    and advance the pen by the icon width. No draw runs during the build — icons
    are recorded and **flushed** in the `FUN_005c8fe0` paint co-hook, which
-   computes each icon's screen rect (line origin `[line+0x70]/[+0x74]` maps
-   node-local → screen, the same translate the glyph copy `FUN_005c8710`
-   applies) and queues it to `Text::InlineTexturePool` as a placement RELATIVE
-   TO THE OWNING FONTSTRING. The pool applies placements on the next frame tick.
+   computes each icon's pen-space position (line origin `[line+0x70]/[+0x74]`
+   maps node-local → pen, the same translate the glyph copy `FUN_005c8710`
+   applies), converts pen → anchor with the per-axis K (see **Placement
+   coordinates** in Current design), and queues it to `Text::InlineTexturePool`
+   as a placement RELATIVE TO THE OWNING FONTSTRING. The pool applies
+   placements on the next frame tick.
 4. Restore `penXYZ[0]` on exit (the original never writes it; the draw builder
    does NOT reset it between left-justified lines, so leaving it mutated
    cascade-shifts every following line).
@@ -185,6 +219,14 @@ per segment would then wipe all but the last run. Handled by doing the clear
 ONCE per build (a `len==0` original call with bit 3 still set), then clearing
 bit 3 so the per-segment calls APPEND, restoring flags on exit. Bit 5 (shadow)
 isn't set for these nodes, so the only added work is a harmless colour append.
+
+Clearing bit 3 has one more consequence: it switches the engine from the
+UNIFORM colour path (node+0x2c, consulted live at every paint) to baked
+PER-GLYPH colours the paint uses verbatim. The build-time alpha in colorState
+is already correct (the engine folds SetTextColor alpha × frame-chain alpha
+into node+0x2c on every alpha change), but the baked copies never refresh —
+the flush's alpha mirror keeps them tracking later fades. See **Fade / parent
+alpha** in Current design.
 
 ### Multi-line / multi-icon accumulation
 
@@ -254,9 +296,15 @@ then adds `SumIconAdvances(text) / K` when two gates pass:
 
 `K = [0x832A4C] × 1024 / [0x832A44]` (≈1468) is the anchor→pixel push factor
 — the same conversion `Script_GetStringWidth` applies in reverse when it
-pushes. The per-icon advance comes from `IconAdvancePen`, the **same helper**
+pushes. (This is NOT the placement K from Current design: here the icon sum is
+built from a fontH that was converted with the same factor, so the units
+cancel exactly — the factor's absolute value never matters. The placement path
+has no such cancellation and needs the true raster÷anchorExtent conversion.)
+The per-icon advance comes from `IconAdvancePen`, the **same helper**
 the emitter reserves with (width + 1.5×pad + positive offsetX) — so the
-measured width matches the rendered width by construction.
+measured width matches the rendered width by construction. One documented
+gap: this fs-level path can't cheaply resolve the gxu face, so it passes
+outline ink 0 — outlined icon-bearing text measures 2–4px short per icon.
 
 Unit trap (hit on first flight): escape sizes are UI PIXELS. Do NOT divide
 the icon sum by `fs+0x7C` — that field is the layout UI *scale* (~0.68–1.0).
