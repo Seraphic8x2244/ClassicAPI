@@ -385,6 +385,10 @@ build instructions.
   - [`C_MerchantFrame.IsMerchantItemRefundable(slot)`](#c_merchantframeismerchantitemrefundableslot)
   - [`C_MerchantFrame.IsSellAllJunkEnabled()`](#c_merchantframeissellalljunkenabled)
 
+- [Model](#model)
+  - [`model:SetDisplayInfo(creatureDisplayID)`](#modelsetdisplayinfocreaturedisplayid)
+  - [`model:SetCreature(creatureID)`](#modelsetcreaturecreatureid)
+
 - [ChatBubbles](#chatbubbles)
   - [`C_ChatBubbles.GetAllChatBubbles([includeForbidden])`](#c_chatbubblesgetallchatbubblesincludeforbidden)
 
@@ -9401,6 +9405,79 @@ discovered, the pieces a map-reveal addon draws over the fogged base map.
 No retail equivalent (retail ships only the explored getter; its inverse,
 `C_Map.GetMapOverlays`, returns *everything*). Same table shape and
 `areaID` semantics as the explored getter.
+
+## Model
+
+### `model:SetDisplayInfo(creatureDisplayID)`
+
+Points a Model frame at a creature by its display ID. This is the modern
+alternative to `Model:SetModel(path)`, which needs a raw model file path.
+
+The engine resolves the display ID to a model file through two DBC tables:
+`CreatureDisplayInfo`, then `CreatureModelData`. It loads the model the same
+way `SetModel` does, then applies the creature's skin textures. So the model
+shows the correct look for that display, not an untextured base.
+
+A Model frame provides no light of its own. Call `SetLight` after
+`SetDisplayInfo`, or the model renders as a black silhouette. Call
+`SetCamera(0)` to frame it.
+
+An unknown or missing display ID falls back to the engine's placeholder
+model.
+
+A character-based display (an NPC on the shared `Character\<Race>\<Sex>`
+base model) is dressed the same way a spawned NPC is: baked body texture,
+hair, face, facial hair, and equipment, including the attached helm and
+shoulder models. The dressing runs when the model file finishes loading,
+a moment after the call. Weapons do not show: the server sends NPC
+weapons only for spawned units, and no client table carries them.
+
+This is the single-creature form, the same one MoP shipped. Later retail
+clients added an optional second argument `mountDisplayID` that shows the
+creature on a mount. That form is not supported here: a mount needs a
+second, attached model, and vanilla's Model frame holds one model.
+
+```lua
+local m = CreateFrame("Model", "PreviewModel", UIParent)
+m:SetSize(200, 260)
+m:SetPoint("CENTER")
+m:SetDisplayInfo(330)   -- a human NPC
+m:SetCamera(0)
+m:SetLight(1, 0, 0, -1, -1, 1, 1, 1, 1)  -- else it is a black silhouette
+```
+
+### `model:SetCreature(creatureID)`
+
+Points a Model frame at a creature by its **entry ID** — the creature's
+database ID, not a display ID. This is the older companion to `SetDisplayInfo`:
+WoW added `SetCreature` in WotLK and `SetDisplayInfo` later, in Cataclysm.
+
+The engine looks the entry ID up in the client creature cache, reads the display
+ID, then loads the model exactly like `SetDisplayInfo`. The same light and camera
+notes apply.
+
+**Limitation.** The lookup only works for a creature the client has cached. A
+creature caches after you see it, target it, or mouse over it, or from
+`creaturecache.wdb` at login. Vanilla has no client-side entry-to-display table,
+so an uncached creature ID is a no-op — the frame keeps its previous model.
+
+For an uncached creature, request its data first, then set it when the data
+arrives:
+
+```lua
+local creatureID = 448  -- the creature's entry (database) ID
+C_CreatureInfo.RequestLoadCreatureByID(creatureID)
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("CREATURE_DATA_LOAD_RESULT")
+f:SetScript("OnEvent", function()
+    if arg1 == creatureID and arg2 then   -- (creatureID, success)
+        model:SetCreature(creatureID)
+        model:SetCamera(0)
+        model:SetLight(1, 0, 0, -1, -1, 1, 1, 1, 1)
+    end
+end)
+```
 
 ## ChatBubbles
 

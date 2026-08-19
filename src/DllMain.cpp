@@ -16,6 +16,7 @@
 #include "MinHook.h"
 #include "Offsets.h"
 #include "event/Custom.h"
+#include "model/DisplayInfo.h"
 #include "nameplate/Walk.h"
 #include "player/NameCache.h"
 #include "text/InlineTexture.h"
@@ -59,6 +60,10 @@ static bool __fastcall FrameScript_Initialize_h() {
     // Drop per-region corner transforms (SetRotation / SetVertexOffset) — the
     // reload destroys every addon texture and the region pool reuses their pointers.
     Texture::Transform::PrepareForReload();
+
+    // Drop pending character-dress jobs and their engine compositors — the
+    // reload destroys every Model frame the jobs point at.
+    Model::DisplayInfo::PrepareForReload();
 
     // Persist the name cache before the engine starts tearing down.
     // This hook fires on both `/reload` and `/logout` (the engine

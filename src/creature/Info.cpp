@@ -53,6 +53,7 @@
 #include "Game.h"
 #include "Offsets.h"
 #include "cache/QueryLoad.h"
+#include "creature/Info.h"
 #include "dbc/Lookup.h"
 #include "dbc/Names.h"
 #include "event/Custom.h"
@@ -366,5 +367,16 @@ void RegisterLuaFunctions() {
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 
 } // namespace
+
+// Public accessor for Model::DisplayInfo's SetCreature — the same peek
+// GetCreatureInfoByID uses, reduced to the display-ID field. 0 = uncached.
+uint32_t DisplayID(uint32_t creatureID) {
+    if (creatureID == 0)
+        return 0;
+    const uint8_t *rec = PeekCreature(creatureID);
+    if (rec == nullptr)
+        return 0;
+    return *reinterpret_cast<const uint32_t *>(rec + Offsets::OFF_CREATURE_DISPLAYID);
+}
 
 } // namespace Creature::Info

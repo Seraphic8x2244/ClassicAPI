@@ -1724,6 +1724,63 @@ enum Offsets {
     // slot `replaceableType`. Worker behind `Model:ReplaceIconTexture` (which
     // passes type 14); creature skins use MONSTER_1/2/3 = 11/12/13.
     FUN_MODEL_SET_REPLACEABLE_TEXTURE = 0x0076CFE0,
+    // The loaded model instance a CSimpleModelFFX keeps at +0x318. It is the
+    // SAME CModel class CGUnits keep at unit+0xD8 — verified via
+    // FUN_007110d0 (the geoset-range setter), whose submesh walk and +0x98
+    // visibility-array writes match the instance layout probed in-game.
+    OFF_SIMPLEMODELFFX_MODEL_INSTANCE = 0x318,
+
+    // --- Character-model compositor ("CharComponent", `Model::DisplayInfo`) --
+    // The engine object that dresses a character-based model: resolves the
+    // hair / facial-hair geosets (CharHairGeosets, CharacterFacialHairStyles —
+    // beards, earrings, teeth), loads the baked NPC body texture or composites
+    // the player one, and applies equipment geosets (sleeves / robe→trousers /
+    // boots / tabard / cape, FUN_00477520). Units keep one at unit+0xD30,
+    // driven by CGUnit_C::UpdateCharacterCustomization (FUN_005fb200) — the
+    // single caller-of-record this whole API was derived from — behind the
+    // poll gate FUN_00607da0 (dress only once FUN_MODEL_INSTANCE_LOADED says
+    // the model is in). The portrait renderer (Script_SetPortraitTexture →
+    // FUN_00524f60) waits on FUN_CHARCOMP_PUMP before rendering, which is why
+    // portraits always show the finished appearance.
+    FUN_CHARCOMP_CREATE = 0x00475FB0,  // () -> builder from the engine pool at 0x00B42720; 0 on exhaustion
+    FUN_CHARCOMP_DESTROY = 0x00476000, // (builder /*ecx*/) — releases refs (FUN_00476ac0), returns node to pool
+    // __thiscall(builder, CharCompInfo*) -> bool. Copies 0x5B dwords
+    // (0x16C bytes) to builder+0x18, validates race against ChrRaces, resolves
+    // skin/hair/facial sections + geosets. Caller must AddRef the model first
+    // (FUN_005fb200 does); the builder owns that ref from then on.
+    FUN_CHARCOMP_SET_INFO = 0x00476B90,
+    // __thiscall(builder, slot 0..9, itemDisplayInfoID) — feed one NPC
+    // equipment piece (validated against ItemDisplayInfo.dbc, no-op for 0 /
+    // out-of-range). Units pass CreatureDisplayInfoExtra +0x20..+0x44.
+    FUN_CHARCOMP_SET_ITEM = 0x00478AA0,
+    // __thiscall(builder, int *unused /*engine passes 0*/) -> bool done.
+    // The per-frame pump: composites pending texture regions; the baked-NPC
+    // path short-circuits to the geoset apply (FUN_00477520) and returns 1 on
+    // the first call. Keep calling until it returns 1.
+    FUN_CHARCOMP_PUMP = 0x00477860,
+    // Model-instance API used around the compositor:
+    FUN_MODEL_INSTANCE_ADDREF = 0x00710390, // (model /*ecx*/)
+    // __thiscall(model, tryLoad, recurseChildren) -> bool loaded. The engine's
+    // dress gate (FUN_00607da0) passes (0, 0) — a passive check.
+    FUN_MODEL_INSTANCE_LOADED = 0x007103D0,
+    // Attached-child list on a model instance (helm/shoulder item models the
+    // compositor attaches via FUN_00712f70). Head + sibling-next verified from
+    // FUN_MODEL_INSTANCE_LOADED's recurseChildren walk.
+    OFF_MODEL_INSTANCE_CHILD_HEAD = 0x1DC,
+    OFF_MODEL_INSTANCE_CHILD_NEXT = 0x1E4,
+    // __thiscall(model, callback, userData) — stores the instance's pre-render
+    // callback pair (instance+0x3BC/+0x3C0). CSimpleModelFFX::SetModelInstance
+    // (FUN_0076cd30) registers FUN_SIMPLEMODELFFX_LIGHT_FOG_CB with the frame
+    // as userData on ITS instance only; attached children have an empty slot
+    // and render UNLIT (pure black — verified in-game: a light tint colored
+    // the body but not the equipment). `Model::DisplayInfo` fills each child's
+    // slot with the same pair so equipment lights like the body.
+    FUN_MODEL_INSTANCE_SET_RENDER_CB = 0x007134B0,
+    // __fastcall-shaped engine callback (never called by us directly): applies
+    // the owning frame's fog (+0x3A4/+0x3A8) and light struct (+0x324, written
+    // by Script_SetLight via FUN_0076cf30) to the render context each time the
+    // instance is drawn.
+    FUN_SIMPLEMODELFFX_LIGHT_FOG_CB = 0x0076D680,
 
     // Engine Script_* method implementations `Frame::Modern` delegates to
     // (each `int __fastcall(void *L)`, reading self at stack index 1).
@@ -2909,6 +2966,47 @@ enum Offsets {
     VAR_CREATUREMODELDATA_RECORDS = 0x00C0DE68,
     VAR_CREATUREMODELDATA_COUNT = 0x00C0DE6C,
     OFF_CREATUREMODELDATA_MODEL_PATH = 0x08,
+
+    // CreatureDisplayInfo.extendedDisplayInfoID (col 3) — nonzero for a
+    // CHARACTER-based display (shared Character\Race\Sex base model). It indexes
+    // CreatureDisplayInfoExtra.dbc, whose LAST field (col 18 in the 19-col
+    // vanilla layout, +0x48) is the pre-composited body-skin filename. That
+    // texture lives under Textures\BakedNpcTextures\ and applies to the M2
+    // body-skin replaceable types (1/8) — NOT the monster slots, which a
+    // character model has no texture units for (hence "renders white" without
+    // this). The baked skin already carries the equipped body armor. Verified by
+    // parsing the extracted DBC; C:\Git\Inklab resolves the same chain.
+    OFF_CREATUREDISPLAYINFO_EXTENDED_ID = 0x0C,
+    VAR_CREATUREDISPLAYINFOEXTRA_RECORDS = 0x00C0DEA4,
+    VAR_CREATUREDISPLAYINFOEXTRA_COUNT = 0x00C0DEA8,
+    OFF_CREATUREDISPLAYINFOEXTRA_BAKE_NAME = 0x48,  // col 18 (last), string
+    OFF_CREATUREDISPLAYINFOEXTRA_RACE = 0x04,       // col 1 (ChrRaces id)
+    OFF_CREATUREDISPLAYINFOEXTRA_SEX = 0x08,        // col 2 (0=male, 1=female)
+    OFF_CREATUREDISPLAYINFOEXTRA_HAIR_COLOR = 0x18, // col 6 (CharSections color)
+    // Cols 3/4/5/7 + the NPC equipment block — field order verified from
+    // CGUnit_C::UpdateCharacterCustomization (FUN_005fb200), which reads
+    // +0x04..+0x1C into the compositor info struct and walks +0x20..+0x44
+    // as 10 ItemDisplayInfo ids for FUN_CHARCOMP_SET_ITEM.
+    OFF_CREATUREDISPLAYINFOEXTRA_SKIN = 0x0C,        // col 3
+    OFF_CREATUREDISPLAYINFOEXTRA_FACE = 0x10,        // col 4
+    OFF_CREATUREDISPLAYINFOEXTRA_HAIR_STYLE = 0x14,  // col 5
+    OFF_CREATUREDISPLAYINFOEXTRA_FACIAL_HAIR = 0x1C, // col 7
+    OFF_CREATUREDISPLAYINFOEXTRA_EQUIP = 0x20,       // cols 8..17: u32[10] ItemDisplayInfo ids
+
+    // CharSections.dbc — per-race/sex character texture layers. Scanned by
+    // Model:SetDisplayInfo to resolve a character display's HAIR texture (applied
+    // to the M2 hair replaceable type 6, else the hair geoset renders white).
+    // Standard pointer-array DBC; match rows on race/sex/baseSection (3 = Hair) +
+    // color, then read the first texture column. Verified against the extracted
+    // DBC: Human Female (race 1, sex 1) hairColor 0 -> "Character\Human\Hair00_00.blp".
+    VAR_CHARSECTIONS_RECORDS = 0x00C0DF6C,
+    VAR_CHARSECTIONS_COUNT = 0x00C0DF70,
+    OFF_CHARSECTIONS_RACE = 0x04,          // col 1
+    OFF_CHARSECTIONS_SEX = 0x08,           // col 2
+    OFF_CHARSECTIONS_BASE_SECTION = 0x0C,  // col 3 (3 = Hair)
+    OFF_CHARSECTIONS_COLOR = 0x14,         // col 5
+    OFF_CHARSECTIONS_TEXTURE = 0x18,       // col 6 (texture[0] path)
+    CHARSECTIONS_BASE_SECTION_HAIR = 3,
 
     // Race → faction group, mirroring the player branch of
     // `Script_UnitFactionGroup` (`0x00516630`) — backs
