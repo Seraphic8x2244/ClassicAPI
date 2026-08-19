@@ -1707,6 +1707,24 @@ enum Offsets {
     VAR_TEXTURE_METHOD_REGISTRY = 0x00CF5434,
     VAR_FONTSTRING_METHOD_REGISTRY = 0x00CF5400,
 
+    // Model frame — backs `Model:SetDisplayInfo(creatureDisplayID)`
+    // (`Model::DisplayInfo`). Registry ctx per docs/raw_methods.txt (table
+    // 0x00878948, 23 methods: SetModel/SetSequence/ReplaceIconTexture/…).
+    VAR_MODEL_METHOD_REGISTRY = 0x00CF0C8C,
+    // Model frame-script type id, lazily assigned by the engine on the first
+    // Model method call (`Script_SetModel` FUN_0076d950 prologue:
+    // `if (id == 0) id = ++counter`). Mirror the lazy-assign so a Model
+    // type-check works even before any stock Model method has run; the IsA
+    // check itself is the CFrameScriptObject vmethod at vtable+0x10, shared by
+    // every frame type.
+    VAR_MODEL_LUA_TYPE_ID = 0x00CF0C5C,
+    VAR_FRAMESCRIPT_TYPE_ID_COUNTER = 0x00CEEF6C,
+    // FUN_0076cfe0(model /*ecx*/, int replaceableType, const char *path) —
+    // loads `path` as a texture and binds it to the model's replaceable-texture
+    // slot `replaceableType`. Worker behind `Model:ReplaceIconTexture` (which
+    // passes type 14); creature skins use MONSTER_1/2/3 = 11/12/13.
+    FUN_MODEL_SET_REPLACEABLE_TEXTURE = 0x0076CFE0,
+
     // Engine Script_* method implementations `Frame::Modern` delegates to
     // (each `int __fastcall(void *L)`, reading self at stack index 1).
     // Addresses from the docs/raw_methods.txt catalogue. Show/Hide are
@@ -2872,6 +2890,25 @@ enum Offsets {
     VAR_CREATURETYPE_RECORDS = 0x00C0DE2C,
     VAR_CREATURETYPE_COUNT = 0x00C0DE30,
     OFF_CREATURETYPE_NAMES = 0x04,
+
+    // CreatureDisplayInfo.dbc / CreatureModelData.dbc — the
+    // creatureDisplayID → model-file chain behind `Model:SetDisplayInfo`.
+    // Both standard pointer-array DBCs (records[id], sparse). Column offsets
+    // verified two independent ways: parsing the extracted 1.12 DBCs
+    // (C:\WoW\Octo\DBFilesClient) AND the engine's own unit-display resolver
+    // FUN_0060afb0, which reads displayID from `[descriptor+0x1F4]` →
+    // CreatureDisplayInfo[id] +0x04 ModelID → CreatureModelData[ModelID].
+    //   CreatureDisplayInfo: +0x04 ModelID (col 1 → CreatureModelData id);
+    //     +0x18/+0x1C/+0x20 TextureVariation[3] (cols 6/7/8 — creature skin,
+    //     bare filenames applied as replaceable-texture MONSTER_1/2/3).
+    //   CreatureModelData: +0x08 ModelPath (col 2, e.g. "Creature\Rat\Rat.mdx").
+    VAR_CREATUREDISPLAYINFO_RECORDS = 0x00C0DE90,
+    VAR_CREATUREDISPLAYINFO_COUNT = 0x00C0DE94,
+    OFF_CREATUREDISPLAYINFO_MODEL_ID = 0x04,
+    OFF_CREATUREDISPLAYINFO_TEXTURE_VARIATION = 0x18, // char*[3] @ +0x18/+0x1C/+0x20
+    VAR_CREATUREMODELDATA_RECORDS = 0x00C0DE68,
+    VAR_CREATUREMODELDATA_COUNT = 0x00C0DE6C,
+    OFF_CREATUREMODELDATA_MODEL_PATH = 0x08,
 
     // Race → faction group, mirroring the player branch of
     // `Script_UnitFactionGroup` (`0x00516630`) — backs
