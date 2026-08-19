@@ -52,11 +52,14 @@
 //                               re-invalidates the layout like SetText does.
 //                               1.12 has no SetWordWrap, so SetMaxLines(1) is
 //                               how you get a single-line, ellipsized label.
-//   SetFormattedText(fmt,...) — string.format + SetText convenience; the
-//                               format runs through Lua's own string.format
-//                               under pcall, the set through the engine's
-//                               FUN_FONTSTRING_SET_TEXT (keeping the text
-//                               sanitizer/pipe handling identical to SetText).
+//   SetFormattedText(fmt,...) — string.format + SetText convenience. The format
+//                               runs through the engine's OWN str_format C
+//                               function (FUN_LUA_STR_FORMAT) under pcall — NOT
+//                               _G.string.format, so an addon replacing
+//                               string.format can't hijack it (matches retail).
+//                               The set goes through FUN_FONTSTRING_SET_TEXT,
+//                               keeping the sanitizer/pipe handling identical to
+//                               SetText.
 //
 // Push conversion mirrors Script_GetStringWidth (0x0079E510): resolve self,
 // call the internal getter, convert anchor units → UI pixels, push.
@@ -366,24 +369,8 @@ int __fastcall Script_SetFormattedText(void *L) {
     }
     const int top = Game::Lua::GetTop(L);
     Game::Lua::CheckStack(L, top + 4);
-    // _G["string"]["format"] — the live library function, so any addon
-    // replacement of string.format is honoured, matching a Lua-side
-    // SetText(format(...)).
-    Game::Lua::PushString(L, "string");
-    Game::Lua::GetTable(L, Game::Lua::GLOBALS_INDEX);
-    if (Game::Lua::Type(L, -1) != Game::Lua::TYPE_TABLE) {
-        Game::Lua::SetTop(L, top);
-        Game::Lua::Error(L, "SetFormattedText: string library unavailable");
-        return 0;
-    }
-    Game::Lua::PushString(L, "format");
-    Game::Lua::GetTable(L, -2);
-    Game::Lua::Remove(L, -2);
-    if (Game::Lua::Type(L, -1) != Game::Lua::TYPE_FUNCTION) {
-        Game::Lua::SetTop(L, top);
-        Game::Lua::Error(L, "SetFormattedText: string.format unavailable");
-        return 0;
-    }
+    Game::Lua::PushCClosure(
+        L, reinterpret_cast<Game::Lua::CFunction>(Offsets::FUN_LUA_STR_FORMAT), 0);
     for (int i = 2; i <= top; ++i)
         Game::Lua::PushValue(L, i);
     if (Game::Lua::PCall(L, top - 1, 1, 0) != 0) {

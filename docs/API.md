@@ -4173,10 +4173,9 @@ f:SetText("a really long guild or player name that will not fit")
 ### `fontstring:SetFormattedText(format [, ...])`
 
 Sets the text to `string.format(format, ...)`. Later clients added
-the method as a convenience over `SetText(format(...))`. The format
-runs through the live `string.format`, so a bad format string raises
-the same Lua error it would in script. The set goes through the same
-engine path as `SetText`, so escape handling is identical.
+the method as a convenience over `SetText(format(...))`. A bad format
+string raises a normal Lua error. The set goes through the same engine
+path as `SetText`, so escape handling is identical.
 
 ```lua
 f:SetFormattedText("%d/%d (%.1f%%)", cur, max, cur / max * 100)

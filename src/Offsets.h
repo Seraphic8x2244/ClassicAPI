@@ -4823,6 +4823,15 @@ enum Offsets {
     // `BaseLib::StringLib` registers `string.gmatch` as a direct alias of
     // this function pointer — no wrapper.
     FUN_LUA_STR_GFIND = 0x007FCFA0,
+    // `str_format` — the Lua 5.0 `string.format` C function (`int
+    // __fastcall(void *L)`), strlib entry at `0x00822dc0`. Verified by decode:
+    // reads the format at arg 1, handles `%%`, `%d/i/c`, `%e/E/f/g/G`,
+    // `%o/u/x/X`, `%s`, `%q`, with the "invalid option to 'format'" / "invalid
+    // format (width or precision too long)" errors. FontString:SetFormattedText
+    // pushes THIS directly and pcalls it, rather than resolving `_G.string.format`
+    // — so an addon replacing `string.format` cannot hijack or break it (matches
+    // retail, whose SetFormattedText formats in C).
+    FUN_LUA_STR_FORMAT = 0x007FD3D0,
     // `math_fmod` — the Lua 5.0 `math.mod` C function (mathlib entry at
     // `0x00822cb0`): `luaL_checknumber(1/2)` → `fmod(x, y)` → `lua_pushnumber`.
     // 5.1 renamed the Lua-facing name to `math.fmod` with the identical C
