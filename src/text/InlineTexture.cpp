@@ -188,6 +188,7 @@ struct IconRecord {
     float w;
     float h;
     float offsetX, offsetY; // pen-relative pixel shift
+    float outlineInk;       // OutlineInkPen of the line's face — half leads the icon
     float u0, v0, u1, v1;   // texture crop
     uint32_t color;         // vertex tint (0xAARRGGBB; white = untinted)
 };
@@ -207,13 +208,6 @@ std::unordered_map<void *, std::vector<IconRecord>> g_nodeIcons;
 // LooksReadable at use (chat/bubble fontstrings are pooled and long-lived);
 // the map clears on /reload.
 std::unordered_map<void *, void *> g_nodeOwner;
-
-// Cached pen-units-per-anchor-unit scale (K). Derived per flush from any icon
-// node whose fontstring rect is resolved: the node origin is the fontstring's
-// justification anchor point mapped by K (verified empirically: two probe
-// fontstrings gave origin = rectJustifyRef × K with K ≈ 1470, both axes, no
-// offset). 0 until first derivation → region placement waits for it.
-float g_penPerAnchor = 0.0f;
 
 // Region calibration, PEN units added to the region's position. x needs no
 // constant — the +3 once calibrated here turned out to be the missing lead pad,
@@ -328,36 +322,42 @@ static const Game::HookAutoRegister _rebuildHook{Offsets::FUN_FONTSTRING_REBUILD
                                                  reinterpret_cast<void *>(&RebuildString_h),
                                                  reinterpret_cast<void **>(&g_rebuildOriginal)};
 
-// Derives K for THIS node from its own fontstring: K = originX / justifyRefX
-// (node+0x54: 0 = left, 1 = centre, 2 = right — the draw builder's encoding).
-// K is PER-FONTSTRING, not global: pen space is scaled by the fs's effective
-// scale chain, so a pfUI money display at a custom frame scale has a different
-// K than chat (the deterministic 0.53× half-size icons were exactly this —
-// a global chat-derived K applied to a differently-scaled fs). The node's own
-// derivation is preferred; the global cache is a fallback for nodes whose
-// justify ref sits too close to 0 to divide by (guarded), updated only within
-// ±10% (a mid-layout stale-rect read must not poison it).
-float DeriveK(const uint8_t *n, const uint8_t *f, float originX) {
-    if (LooksReadable(f)) {
-        const float left = Game::Read<float>(f, Offsets::OFF_REGION_RECT + 4);
-        const float right = Game::Read<float>(f, Offsets::OFF_REGION_RECT + 12);
-        const float insetX = Game::Read<float>(f, Offsets::OFF_FONTSTRING_INSET_X);
-        if (left < right && std::fabs(insetX) < 1e-6f) {
-            const int justify = Game::Read<int>(n, Offsets::OFF_TEXT_NODE_JUSTIFY);
-            const float ref =
-                (justify == 1) ? (left + right) * 0.5f : ((justify == 2) ? right : left);
-            if (std::fabs(ref) > 0.02f && originX > 1.0f) {
-                const float k = originX / ref;
-                if (k > 1.0f) {
-                    if (g_penPerAnchor <= 1.0f ||
-                        (k > g_penPerAnchor * 0.9f && k < g_penPerAnchor * 1.1f))
-                        g_penPerAnchor = k;
-                    return k; // this node's own K — always right for its fs
-                }
-            }
-        }
-    }
-    return g_penPerAnchor;
+// Pen-units-per-anchor-unit scale (K), per axis — the ENGINE'S OWN conversion,
+// read live from the same four globals the text pipeline uses. Verified by
+// decompiling the whole chain this session:
+//   FUN_0041ade0: block/node positions are stored NORMALIZED — fs-local anchor
+//     x ÷ [VAR_UI_COORD_SCALE_MUL] (= screen width in anchor units), y ÷
+//     [VAR_UI_ANCHOR_SCREEN_H];
+//   FUN_005cdf70 (origin finalize): node origin (+0x70/+0x74) =
+//     round(normalized × [VAR_TEXT_RASTER_X/Y]) — render-target PIXELS, with
+//     the justify shift and vertical align folded in.
+// So K = raster ÷ anchorExtent per axis. Cross-checked against a live probe
+// on a right-justified fs: rasterX/anchorW = 3025 matched the measured
+// origin÷rect-right quotient to four digits.
+//
+// History: two earlier forms both failed. The empirical derivation
+// (K = nodeOriginX / rectJustifyRefX) couldn't self-derive for chat (rect
+// edge near x = 0 fails the divide-guard) and rode a global cache seeded by
+// whichever fs derived first — right at the layout it was calibrated on,
+// wrong elsewhere. A closed form from the SetPoint px factor
+// ((div·1024/mul) × fsScale) divided by the wrong global pair and multiplied
+// by a scale that doesn't belong (node positions are fed fs-LOCAL anchor
+// units, so the fs chain never enters). Returns 0 while the globals aren't
+// live yet (boot) — the caller's K > 1 gates treat that as "not ready".
+struct PenScale {
+    float x = 0.0f, y = 0.0f;
+};
+PenScale PenPerAnchor() {
+    const float aw = Game::Read<float>(Offsets::VAR_UI_COORD_SCALE_MUL);
+    const float ah = Game::Read<float>(Offsets::VAR_UI_ANCHOR_SCREEN_H);
+    const int rx = Game::Read<int>(Offsets::VAR_TEXT_RASTER_X);
+    const int ry = Game::Read<int>(Offsets::VAR_TEXT_RASTER_Y);
+    PenScale k;
+    if (aw > 0.0f && rx > 0)
+        k.x = static_cast<float>(rx) / aw;
+    if (ah > 0.0f && ry > 0)
+        k.y = static_cast<float>(ry) / ah;
+    return k;
 }
 
 // True if `t` points into [buf, buf+strlen(buf)] — a TIGHT, exact extent (bounded
@@ -574,18 +574,37 @@ int InlineSpanLen(const uint8_t *text) {
 // centre/right-justify pre-shift, and the string-width co-hook — the three MUST
 // agree or measured and rendered width drift. `fontHPen` resolves the retail `:0`
 // auto-size (icon dims default to the line's font height); pen units in, out.
-float IconAdvancePen(const IconDesc &d, float fontHPen) {
+// The engine's outline-ink allowance for a gxu font face, in pen px (total,
+// both sides). Outlined faces draw INK past the glyph advance metrics; the
+// emitter itself grows the line height by exactly these constants
+// (FUN_005CCBE0 prologue: face+0x180 bit 3 → 4.0, bit 0 → 2.0). An inline icon
+// placed at the raw pen would sit inside that ink (the coin-into-outlined-
+// digits clip), so the advance and the drawn lead each absorb half.
+float OutlineInkPen(const void *fontFace) {
+    if (fontFace == nullptr)
+        return 0.0f;
+    const uint32_t flags = Game::Read<uint32_t>(fontFace, Offsets::OFF_FONTFACE_FLAGS);
+    if ((flags & 8u) != 0)
+        return Game::Read<float>(Offsets::FLOAT_OUTLINE_EXTRA_THICK);
+    if ((flags & 1u) != 0)
+        return Game::Read<float>(Offsets::FLOAT_OUTLINE_EXTRA_THIN);
+    return 0.0f;
+}
+
+// `outlineInk` is OutlineInkPen for the line's face — half of it leads, half
+// trails, keeping the icon clear of outlined neighbours' ink on both sides.
+float IconAdvancePen(const IconDesc &d, float fontHPen, float outlineInk) {
     const float baseH = (d.height > 0.0f) ? d.height : fontHPen;
     const float baseW = (d.width > 0.0f) ? d.width : baseH;
     const float w = baseW * g_sizeScale;
     const float offX = d.offsetX * g_sizeScale;
-    return w + 1.5f * (fontHPen * g_iconPadFrac) + (offX > 0.0f ? offX : 0.0f);
+    return w + 1.5f * (fontHPen * g_iconPadFrac) + outlineInk + (offX > 0.0f ? offX : 0.0f);
 }
 
 // Sum of IconAdvancePen over every well-formed `|T…|t` (or sanitizer-doubled
 // `||T…||t`) span in [text, text+len). Malformed/unterminated spans contribute
 // nothing — mirroring the emitter, which renders them as plain text.
-float SumIconAdvances(const uint8_t *text, int len, float fontHPen) {
+float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlineInk) {
     float sum = 0.0f;
     int i = 0;
     while (i < len) {
@@ -606,7 +625,7 @@ float SumIconAdvances(const uint8_t *text, int len, float fontHPen) {
         IconDesc d;
         if (ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
                       ce - (static_cast<size_t>(i) + ml), d))
-            sum += IconAdvancePen(d, fontHPen);
+            sum += IconAdvancePen(d, fontHPen, outlineInk);
         i = static_cast<int>(ce) + cl;
     }
     return sum;
@@ -758,7 +777,11 @@ float __fastcall StringWidth_h(void *fs) {
     const float fontHPx =
         reinterpret_cast<FsFontHeight_t>(Offsets::FUN_FONTSTRING_FONT_HEIGHT)(fs, nullptr, 1) *
         anchorToPx;
-    return base + SumIconAdvances(text, len, fontHPx) / anchorToPx;
+    // outlineInk 0: the fs-level measure path doesn't resolve the gxu face (it
+    // lives behind the fs+0xE0 handle), so outlined faces measure 2–4px short
+    // per icon here. Measure-only and minor; the render-side pads (emitter +
+    // wrap stepper) are ink-exact.
+    return base + SumIconAdvances(text, len, fontHPx, 0.0f) / anchorToPx;
 }
 
 static const Game::HookAutoRegister _stringWidthHook{
@@ -1006,7 +1029,8 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                         lineLen = pBreak;
                     else if (pNext > text && pNext - text < len)
                         lineLen = static_cast<int>(pNext - text);
-                    const float sumPx = SumIconAdvances(text, lineLen, fontHPx);
+                    const float sumPx =
+                        SumIconAdvances(text, lineLen, fontHPx, OutlineInkPen(font));
                     const float iconUnits = sumPx * toUnits;
                     float slack = probeW - pWidth;
                     if (slack < 0.0f)
@@ -1239,11 +1263,15 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
     // (right) so the whole text+icons block is justified as a unit. Left-justify
     // (chat, justify 0) needs no shift. node+0x54: 1 = centre, 2 = right (verified
     // in the draw builder FUN_005cdc20's justify branch).
+    // Outline faces draw ink past the glyph advances; the icon pads absorb it
+    // (see OutlineInkPen). Computed once per line from the node's face.
+    const float outlineInk = OutlineInkPen(fontFace);
+
     const int justify = Game::Read<int>(node, Offsets::OFF_TEXT_NODE_JUSTIFY);
     if (justify == 1 || justify == 2) {
         // Shared helper so the pre-shift matches the real advances exactly
         // (including the positive-offsetX term an earlier inline copy omitted).
-        const float iconW = SumIconAdvances(text, len, fontH);
+        const float iconW = SumIconAdvances(text, len, fontH, outlineInk);
         penX -= (justify == 1) ? iconW * 0.5f : iconW;
     }
 
@@ -1376,6 +1404,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
             r.h = h;
             r.offsetX = d.offsetX * g_sizeScale;
             r.offsetY = d.offsetY * g_sizeScale;
+            r.outlineInk = outlineInk;
             r.u0 = d.u0;
             r.v0 = d.v0;
             r.u1 = d.u1;
@@ -1389,7 +1418,7 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
             // right — a half trail balances that. The lead pad is applied to the
             // draw position in FlushLayout. Shared with the justify pre-shift and
             // the string-width co-hook — never inline this math.
-            penX += IconAdvancePen(d, fontH);
+            penX += IconAdvancePen(d, fontH, outlineInk);
         }
         penXYZ[0] = penX;
         i = static_cast<int>(close) + closeLen; // skip past the closing marker
@@ -1546,7 +1575,7 @@ void FlushLayout(void *layout) {
             // rect parked the icon off the line — then the dedup (unchanged
             // absolute want) froze it there. Relative offsets are also
             // position-invariant, so scrolling no longer re-places anything.
-            const float K = DeriveK(n, reinterpret_cast<uint8_t *>(fs), ox);
+            const PenScale K = PenPerAnchor();
             float fsLeft = 0.0f, fsBottom = 0.0f;
             bool fsRectValid = false;
             if (fs != nullptr) {
@@ -1563,7 +1592,8 @@ void FlushLayout(void *layout) {
                 // a string-final icon (money-string copper) looked jammed
                 // against its digits and grew per-coin offset hacks. The pad is
                 // fontH-relative (NOT r.w) — must match IconAdvancePen exactly.
-                const float cx = r.x + ox + r.offsetX + r.fontH * g_iconPadFrac;
+                const float cx =
+                    r.x + ox + r.offsetX + r.fontH * g_iconPadFrac + r.outlineInk * 0.5f;
                 // Centre on the line: penY sits near the text top, so add a
                 // fraction of the font height (plus the fine-tune bias). offsetY
                 // shifts up (WoW convention), so subtract it.
@@ -1576,15 +1606,15 @@ void FlushLayout(void *layout) {
                 // above and half below the text. A centred icon fills exactly
                 // that — the retail look.
                 const float cy = r.y + r.fontH * g_centerFrac + oy + g_vBias - r.offsetY;
-                if (K > 1.0f && fs != nullptr && fsRectValid) {
+                if (K.x > 1.0f && K.y > 1.0f && fs != nullptr && fsRectValid) {
                     const float rx = cx + g_regionCalX;
                     const float ry = cy + g_regionCalY;
                     Text::InlineTexturePool::Placement p;
                     p.path = r.path;
-                    p.x0 = rx / K - fsLeft;
-                    p.y0 = (ry - r.h * 0.5f) / K - fsBottom;
-                    p.x1 = (rx + r.w) / K - fsLeft;
-                    p.y1 = (ry + r.h * 0.5f) / K - fsBottom;
+                    p.x0 = rx / K.x - fsLeft;
+                    p.y0 = (ry - r.h * 0.5f) / K.y - fsBottom;
+                    p.x1 = (rx + r.w) / K.x - fsLeft;
+                    p.y1 = (ry + r.h * 0.5f) / K.y - fsBottom;
                     p.color = r.color;
                     p.u0 = r.u0;
                     p.v0 = r.v0;
@@ -1595,13 +1625,13 @@ void FlushLayout(void *layout) {
             }
             // The queue gate must match the per-icon build gate EXACTLY —
             // including K. If any input wasn't ready this paint (unresolved fs
-            // rect, K not yet derived), SKIP the queue and retry next paint: an
-            // empty queue here would HIDE the line's icons and the dedup would
-            // freeze it hidden forever (identical empty re-queues never dirty).
-            // That was the scroll-landing bug's second head: lines painted
-            // before the session's first K derivation queued {} and stayed
+            // rect, raster globals not yet written), SKIP the queue and retry
+            // next paint: an empty queue here would HIDE the line's icons and
+            // the dedup would freeze it hidden forever (identical empty
+            // re-queues never dirty). That was the scroll-landing bug's second
+            // head: lines painted before K was available queued {} and stayed
             // iconless until their text changed.
-            if (fs != nullptr && fsRectValid && K > 1.0f)
+            if (fs != nullptr && fsRectValid && K.x > 1.0f && K.y > 1.0f)
                 Text::InlineTexturePool::QueuePlacements(fs, std::move(places));
         } else if (fs != nullptr) {
             Text::InlineTexturePool::QueuePlacements(fs, {});

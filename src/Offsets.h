@@ -323,6 +323,45 @@ enum Offsets {
     VAR_UI_COORD_SCALE_MUL = 0x00832A44,   // float numerator
     VAR_UI_COORD_SCALE_DIV = 0x00832A4C,   // float denominator base
     UI_COORD_SCALE_UNIT = 1024,            // DAT_007ffd68
+    // Semantically, [0x832A44] is the SCREEN WIDTH IN ANCHOR UNITS (the
+    // full-screen x extent of the internal layout space) — that's why it's
+    // the px→internal numerator above — and [0x832A48] is its Y sibling
+    // (screen HEIGHT in anchor units). Verified via the gxu text position
+    // converter FUN_0041ade0: block/node positions are stored NORMALIZED,
+    // x = anchor/[0x832A44], y = anchor/[0x832A48] (the y global was
+    // previously unmapped — the x/y pair sits at +0x00/+0x04, the SetPoint
+    // denominator base at +0x08).
+    VAR_UI_ANCHOR_SCREEN_H = 0x00832A48,
+    // gxu text-raster dimensions — INT dwords holding the live render-target
+    // size in PIXELS ({0,0,640,480} fallback), written by FUN_005c2b50 from
+    // the render-target rect (FUN_0058a240) whenever it changes; every font
+    // page re-rasterizes on change (the FUN_005ca6f0 walk). These are the
+    // normalized→pen multipliers: the origin finalize FUN_005cdf70 computes
+    // node origin (+0x70/+0x74) = round(normalizedPos × [raster]) after
+    // folding the justify shift (right: +widthLimit, centre: +half) and
+    // vertical align; the emitter's font-height helper FUN_005C6FA0 is
+    // round(fontSize × [VAR_TEXT_RASTER_Y]) the same way (x sibling
+    // FUN_005C7010 uses _X). So TEXT PEN UNITS ARE RENDER-TARGET PIXELS, and
+    // pen-per-anchor = [VAR_TEXT_RASTER_*] / [VAR_UI_ANCHOR_SCREEN_*] per
+    // axis — the exact conversion Text::InlineTexture's flush uses to place
+    // icon regions (verified against a live probe: rasterX/anchorW matched
+    // the measured origin÷rect-edge quotient to four digits).
+    VAR_TEXT_RASTER_Y = 0x00C2B9A0,
+    VAR_TEXT_RASTER_X = 0x00C2B9A4,
+    // gxu font-face flags word. Bit 0 (0x1) = thin outline, bit 3 (0x8) =
+    // thick outline: the emitter's prologue (FUN_005CCBE0) reads
+    // *(fontFace+0x180) and grows the line height by [FLOAT_OUTLINE_EXTRA_*]
+    // pen px for outlined faces, because outline INK extends past the glyph
+    // metrics; the rebuild/color-sync shadow paths test the same bits. The
+    // inline-texture lead/trail pads read the same flags so an icon clears an
+    // outlined neighbour's ink (the coin-into-digits clip).
+    OFF_FONTFACE_FLAGS = 0x180,
+    // The engine's outline ink allowance, .rdata float constants (4.0 / 2.0
+    // pen px total, i.e. ~2 / ~1 px per side) — the exact values the emitter
+    // adds to line height for bit 3 / bit 0 outlined faces. Read live so we
+    // stay bit-identical with the engine's own compensation.
+    FLOAT_OUTLINE_EXTRA_THICK = 0x0080306C,
+    FLOAT_OUTLINE_EXTRA_THIN = 0x00801628,
 
     // CSimpleTexture (`Texture` widget) creation + operate primitives, used by
     // Text::InlineTexturePool to render inline |T icons as engine-owned,
