@@ -166,6 +166,10 @@ build instructions.
   - [`GetMouseFoci()`](#getmousefoci)
   - [`frame:SetShown(shown)`](#framesetshownshown)
   - [`fontstring:GetStringHeight()`](#fontstringgetstringheight)
+  - [`fontstring:GetUnboundedStringWidth()`](#fontstringgetunboundedstringwidth)
+  - [`fontstring:GetNumLines()`](#fontstringgetnumlines)
+  - [`fontstring:GetLineHeight()`](#fontstringgetlineheight)
+  - [`fontstring:SetFormattedText(format [, ...])`](#fontstringsetformattedtextformat--)
   - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
   - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
@@ -4059,6 +4063,42 @@ Related: the stock `fontstring:GetStringWidth()` now **includes inline
 reserves for each icon, so the measured width matches the rendered
 width. Editbox text is not adjusted: an editbox shows raw markup, and
 its caret math must measure that same raw text.
+
+### `fontstring:GetUnboundedStringWidth()`
+
+Returns the full width of the text in UI pixels, as if no wrap width
+applied. `GetStringWidth` measures the text inside its wrap box;
+this method measures the whole string on one line. Later clients
+added the method. Inline `|T…|t` icon widths are included, the same
+way `GetStringWidth` includes them. Empty or unset text returns `0`.
+
+### `fontstring:GetNumLines()`
+
+Returns the number of wrapped lines the text renders as. Later
+clients added the method. When the text has rendered at least once,
+the count comes from the render itself. When it has not (for example
+a hidden fontstring), the count comes from the engine's own wrap
+math with the fontstring's current width. Empty or unset text
+returns `0`.
+
+### `fontstring:GetLineHeight()`
+
+Returns the height of one text line in UI pixels — the font height,
+without the `SetSpacing` value. Later clients added the method. Use
+it with `GetNumLines` and `GetSpacing` to reconstruct
+`GetStringHeight` per line.
+
+### `fontstring:SetFormattedText(format [, ...])`
+
+Sets the text to `string.format(format, ...)`. Later clients added
+the method as a convenience over `SetText(format(...))`. The format
+runs through the live `string.format`, so a bad format string raises
+the same Lua error it would in script. The set goes through the same
+engine path as `SetText`, so escape handling is identical.
+
+```lua
+f:SetFormattedText("%d/%d (%.1f%%)", cur, max, cur / max * 100)
+```
 
 ### `texture:SetRotation(angle [, cx, cy])`
 

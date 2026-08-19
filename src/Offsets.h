@@ -375,6 +375,19 @@ enum Offsets {
     // 2 pen px).
     FLOAT_OUTLINE_EXTRA_THICK = 0x0080306C,
     FLOAT_OUTLINE_EXTRA_THIN = 0x00801628,
+    // The node's BUILT line count — incremented once per emitted wrapped line
+    // by the draw builder (FUN_005CDC20, including the \n break case) and the
+    // builder's own early-out gate (`if (node+0x9C != 0) return`); zeroed by
+    // the node invalidate (FUN_TEXT_NODE_INVALIDATE). The render truth for
+    // FontString:GetNumLines once the node has painted.
+    OFF_TEXT_NODE_BUILT_LINES = 0x9C,
+    // Wrap break-array computer: `__thiscall(fs, const char *text, float
+    // wrapWidth /*fs-internal units*/, int *outBreaks, int cap)` → segment
+    // count (byte offsets into text, [0]=0). Routes through FUN_005C2430 →
+    // the wrap stepper, so it is icon-aware via the stepper co-hook. Verified
+    // from the GameTooltip auto-size (FUN_00530640), which fills a 20-entry
+    // array and measures each segment via FUN_FONTSTRING_MEASURE_SUBSTRING.
+    FUN_FONTSTRING_BREAK_ARRAY = 0x00772B60,
     // Substring width measure: `__thiscall(fs, const char *text, int len)` →
     // ST0 (len 0 = strlen). Same measure-core call + `out / fs+0x7C` shape as
     // GetStringWidthInternal, but for an ARBITRARY string in the fs's font —
