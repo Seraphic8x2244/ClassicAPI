@@ -1225,24 +1225,6 @@ void __fastcall WrapStepper_h(void *font, uint8_t *text, float fontH, float wrap
                     float slack = probeW - pWidth;
                     if (slack < 0.0f)
                         slack = 0.0f;
-                    // AUTO-WIDTH bail: the whole text fits its budget with at
-                    // most ~a glyph of slack — the signature of a
-                    // single-anchor, no-width fontstring whose wrap budget is
-                    // its own text-only measure plus a ~1-glyph engine margin
-                    // (measured 1.07×fontH on pfUI's addon-list labels; the
-                    // half-glyph first cut missed it). There is no real frame
-                    // edge to protect there: the box is synthetic, the icons
-                    // draw past it harmlessly, and any shrink FABRICATES a
-                    // wrap on a line the engine would never have wrapped.
-                    // Real-width content stays covered: an overflowing line
-                    // breaks (lineLen < len), and a fitting line in a real
-                    // frame carries frame-sized slack (the Marks harness line
-                    // measures ~3.5×fontH) — only a text that lands within
-                    // 1.5 glyphs of exactly filling its frame gives up its
-                    // shrink, and its overflow is bounded by its icon sum
-                    // (the pre-hook status quo).
-                    if (pass == 0 && lineLen == len && slack <= glyphU * 1.5f)
-                        break; // s == 0, best unset → final shrink = 0
                     // Half-glyph feasibility tolerance. An AUTO-WIDTH
                     // fontstring's wrap width IS the icon-inclusive string
                     // width (the GetStringWidth hook feeds the effective-width
