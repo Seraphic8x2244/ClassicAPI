@@ -127,9 +127,20 @@ static void __fastcall FrameRegisterEvent_h(void *frame, void *edx,
 // the latched EnsureInitialized():
 //   * VanillaFixes' `Load` export, called on the game's main thread after
 //     injection (the sanctioned VF extension point), or
-//   * a fallback worker thread we spawn from DllMain, for any other injector
-//     that never calls `Load`.
-// Whichever arrives first installs; the other observes the cached result.
+//   * a fallback worker thread we spawn from DllMain, ONLY when VanillaFixes
+//     is not the loader (no VfPatcher.dll in the process), for injectors that
+//     never call `Load`.
+//
+// The worker MUST stand down under VanillaFixes. VF creates the process
+// suspended and injects every dlls.txt DLL sequentially via remote threads;
+// a worker spawned from our DllMain starts the moment our own LoadLibrary
+// releases the loader lock — i.e. while VF is still injecting the NEXT
+// dlls.txt DLL. Its ~90-prologue install (plus the MH_ApplyQueued
+// thread-freeze) then races that DLL's DllMain patching the same engine
+// functions, which made SuperWoWhook.dll fail to load whenever ClassicAPI
+// preceded it in dlls.txt. `Load` has no such race: VfPatcher calls it on the
+// game's main thread after the process resumes, when every DllMain in the
+// injection chain has already completed, serialized in dlls.txt order.
 // ---------------------------------------------------------------------------
 
 static volatile LONG g_initClaimed = 0;    // 0 until a thread takes the installer role
@@ -218,14 +229,22 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
         DisableThreadLibraryCalls(hModule);
 
         // Install nothing here (loader lock — see the block comment above).
-        // Spawn a worker that installs off the lock; the new thread cannot
-        // run its body until DllMain returns and the loader lock releases,
-        // and we never wait on it. Under VanillaFixes the `Load` export
-        // usually wins the latch first; this worker covers every other
-        // injector. DisableThreadLibraryCalls suppressed its THREAD_ATTACH.
-        HANDLE worker = CreateThread(nullptr, 0, InitWorker, nullptr, 0, nullptr);
-        if (worker != nullptr)
-            CloseHandle(worker);
+        //
+        // Under VanillaFixes, `Load` is the ONLY install trigger. VfPatcher.dll
+        // is injected before any dlls.txt DLL, so its presence identifies VF as
+        // the loader; and the `Load` mechanism shipped in the same VF release
+        // (v1.4) as dlls.txt support itself, so any VF that loaded us will call
+        // it. Spawning the worker here would race the DllMains of the dlls.txt
+        // DLLs VF injects after us (see the block comment above).
+        if (GetModuleHandleW(L"VfPatcher.dll") == nullptr) {
+            // Any other injector: no `Load` caller exists, so install from a
+            // worker off the lock. The new thread cannot run its body until
+            // DllMain returns and the loader lock releases, and we never wait
+            // on it. DisableThreadLibraryCalls suppressed its THREAD_ATTACH.
+            HANDLE worker = CreateThread(nullptr, 0, InitWorker, nullptr, 0, nullptr);
+            if (worker != nullptr)
+                CloseHandle(worker);
+        }
     } else if (reason == DLL_PROCESS_DETACH) {
         // Clean /quit path — only tear down if we actually initialized.
         // Flush before MH_Uninitialize — the cache's file I/O uses Win32
