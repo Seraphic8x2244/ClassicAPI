@@ -15,12 +15,15 @@ if C_AddOns.DoesAddOnExist('pfUI') then
         -- written for on their pfActionBar buttons, which breaks them. While
         -- the actionbar module builds those buttons, temporarily wrap
         -- CreateFrame to shadow HookScript with a falsy field so those forks
-        -- fall back to their vanilla SetScript path. The maintained "brues"
-        -- fork handles HookScript itself, so it's detected via the TOC
-        -- X-Website tag and left alone. The wrapper is removed as soon as the
-        -- actionbar module finishes loading so it affects nothing else.
+        -- fall back to their vanilla SetScript path. The wrapper is removed as
+        -- soon as the actionbar module finishes loading so it affects nothing
+        -- else. A pfUI is trusted to handle HookScript itself if EITHER signal
+        -- is present: the maintained "brues" X-Website tag OR the
+        -- `pfUI.handlesHookScript` capability flag. Without the website the
+        -- flag is required; if neither is present we apply the shim.
         local website = GetAddOnMetadata("pfUI", "X-Website")
-        if not website or not strfind(website, 'brues') then
+        local hasBruesWebsite = website and strfind(website, 'brues')
+        if not hasBruesWebsite and not pfUI.handlesHookScript then
             local _createFrame = CreateFrame
             local HookedCreateFrame = function(frameType, name, parent, template)
                 local frame = _createFrame(frameType, name, parent, template)
