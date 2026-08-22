@@ -219,6 +219,10 @@ static uint32_t g_owned[kMaxOwned];
 static int g_ownedCount = 0;
 static uint32_t g_ownedBuiltMs = 0;
 static bool g_ownedEverBuilt = false;
+// One-shot latch: have we proactively seeded the queue with the player's
+// carried items this enter-world session? Re-armed per in-game init (login
+// or /reload) in RegisterLuaFunctions.
+static bool g_ownedPrefetched = false;
 
 static int FindPending(uint32_t itemID) {
     for (int i = 0; i < g_pendingCount; ++i) {
@@ -446,6 +450,32 @@ static void OnWorldTick() {
 
     const uint32_t now = Time::Clock::NowMs();
 
+    // Proactive local-inventory prefetch (once per enter-world session).
+    // The engine does NOT query bag item stats on enter-world or bag draw:
+    // GetContainerItemInfo and the icon getter both do a null-callback
+    // (pure lookup) _GetRecord, and an uncached bag item resolves
+    // displayInfoID = 0, which the icon path draws as INV_Misc_QuestionMark
+    // ("?"). (Equipped items are exempt — their icon comes from the
+    // server-pushed visible-items table.) So on a cold WDB the player's
+    // carried items stay "?" until something else queries them — a hover, a
+    // loot, or an addon's GetItemInfo. Seed the queue with every carried
+    // item so they issue on the owned priority lane ahead of any addon's
+    // background flood, giving complete carried-item coverage regardless of
+    // addon behavior. Bounded (<= kMaxOwned) and issued under the same owned
+    // budget as everything else, so it adds no burst (issue #25). Deferred
+    // to post-settle like every other query, so it can't orphan an entry
+    // before the engine's network/opcode dispatch is ready. Gate on a live
+    // inventory manager so a too-early settle retries next tick instead of
+    // latching on an empty walk.
+    if (g_settled && !g_ownedPrefetched &&
+        Unit::Identity::PlayerInventoryManager() != nullptr) {
+        RebuildOwned();
+        g_ownedBuiltMs = now;
+        for (int i = 0; i < g_ownedCount; ++i)
+            Track(g_owned[i], /*implicit=*/true);
+        g_ownedPrefetched = true;
+    }
+
     // Refresh the carried-item set while there is queued work, at most
     // once per kOwnedRefreshMs — the set changes slowly and the walk is
     // pointer-chasing, not free.
@@ -567,6 +597,12 @@ static int __fastcall Script_RequestLoadItemData(void *L) {
 }
 
 static void RegisterLuaFunctions() {
+    // Re-arm the proactive carried-item prefetch for this enter-world
+    // session. Fires on login and /reload (this callback runs per in-game
+    // Lua init). g_settled is deliberately NOT reset — it is a one-way
+    // process latch (see WarmCache); on a /reload the cache is warm, so the
+    // re-run resolves as cache hits and does nothing.
+    g_ownedPrefetched = false;
     Game::Lua::RegisterTableFunction("C_Item", "IsItemDataCachedByID",
                                      &Script_IsItemDataCachedByID);
     Game::Lua::RegisterTableFunction("C_Item", "IsItemDataCached", &Script_IsItemDataCached);
