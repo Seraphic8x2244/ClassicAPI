@@ -282,6 +282,43 @@ void ApplyPlacement(IconRegion &r, void *fs, const Placement &p, uint32_t fsColo
     Show(r.tex);
 }
 
+// Apply the queued `want` for one fs to its regions: create/reparent/configure
+// each, hide surplus from a previously-larger set, and clear the dirty flag.
+// Reads the fs's live parent at call time. Shared by MaintainImpl's dirty
+// branch and the synchronous ApplyNow path (pre-render). Caller supplies the
+// folded fs colour (FsColorKey) so both paths fold the same fade.
+void ApplyDirtyBranch(void *fs, FsPlacements &np, uint32_t fsColor) {
+    np.dirty = false;
+    void *parent = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fs) +
+                                              Offsets::OFF_REGION_PARENT);
+    if (!LooksReadable(parent))
+        return;
+    const int want = static_cast<int>(np.want.size());
+    for (int i = 0; i < want; ++i) {
+        if (i >= static_cast<int>(np.regions.size())) {
+            void *tex = CreateRegion(parent);
+            if (tex == nullptr)
+                break;
+            np.regions.push_back(IconRegion{tex, parent, std::string()});
+        }
+        IconRegion &r = np.regions[static_cast<size_t>(i)];
+        if (r.parent != parent) {
+            reinterpret_cast<SetParentAndLayer_t>(Offsets::FUN_REGION_SET_PARENT_AND_LAYER)(
+                r.tex, parent, Offsets::DRAWLAYER_ARTWORK, 0);
+            r.parent = parent;
+        }
+        ApplyPlacement(r, fs, np.want[static_cast<size_t>(i)], fsColor);
+    }
+    // Hide surplus pooled regions from a previous, larger icon set.
+    for (int i = want; i < np.shown; ++i)
+        if (i < static_cast<int>(np.regions.size()))
+            Hide(np.regions[static_cast<size_t>(i)].tex);
+    np.shown = (want < static_cast<int>(np.regions.size()))
+                   ? want
+                   : static_cast<int>(np.regions.size());
+    np.appliedColor = fsColor;
+}
+
 // Per-frame tick (FrameTick — glue AND world): apply queued placements
 // (deferred out of the text paint — regions must never be mutated mid-paint).
 // Wrapped by Maintain() below; kept destructor-holding C++ objects out of the
@@ -359,37 +396,7 @@ void MaintainImpl() {
         const uint32_t fsColor = FsColorKey(fs);
 
         if (np.dirty) {
-            np.dirty = false;
-            void *parent = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(fs) +
-                                                      Offsets::OFF_REGION_PARENT);
-            if (!LooksReadable(parent)) {
-                ++it;
-                continue;
-            }
-            const int want = static_cast<int>(np.want.size());
-            for (int i = 0; i < want; ++i) {
-                if (i >= static_cast<int>(np.regions.size())) {
-                    void *tex = CreateRegion(parent);
-                    if (tex == nullptr)
-                        break;
-                    np.regions.push_back(IconRegion{tex, parent, std::string()});
-                }
-                IconRegion &r = np.regions[static_cast<size_t>(i)];
-                if (r.parent != parent) {
-                    reinterpret_cast<SetParentAndLayer_t>(Offsets::FUN_REGION_SET_PARENT_AND_LAYER)(
-                        r.tex, parent, Offsets::DRAWLAYER_ARTWORK, 0);
-                    r.parent = parent;
-                }
-                ApplyPlacement(r, fs, np.want[static_cast<size_t>(i)], fsColor);
-            }
-            // Hide surplus pooled regions from a previous, larger icon set.
-            for (int i = want; i < np.shown; ++i)
-                if (i < static_cast<int>(np.regions.size()))
-                    Hide(np.regions[static_cast<size_t>(i)].tex);
-            np.shown = (want < static_cast<int>(np.regions.size()))
-                           ? want
-                           : static_cast<int>(np.regions.size());
-            np.appliedColor = fsColor;
+            ApplyDirtyBranch(fs, np, fsColor);
         } else if (np.shown > 0 && fsColor != np.appliedColor) {
             // FADE MIRROR: the ScrollingMessageFrame fader animates the line
             // fontstring's color alpha every frame, and the glue AddonList
@@ -462,6 +469,44 @@ void Maintain() {
     }
 }
 
+// Synchronous apply for ONE fs (the pre-render early path). Applies only when
+// the fs is a live, actually-shown fontstring and its entry is still dirty
+// (i.e. QueuePlacements did NOT dedup the re-queue). Otherwise it leaves the
+// entry for the normal tick path — best-effort, so a not-yet-shown or
+// deduped line simply falls back to the one-frame-lagged behaviour.
+void ApplyNowImpl(void *fs) {
+    auto it = g_fsIcons.find(fs);
+    if (it == g_fsIcons.end())
+        return;
+    FsPlacements &np = it->second;
+    if (!np.dirty)
+        return; // deduped re-queue: already applied, nothing to do
+    if (!IsLiveFontString(fs))
+        return;
+    // Match Maintain's own visibility gate (actually-shown latch). The SMF's
+    // per-line Show realizes this synchronously before we run, so a visible
+    // line passes; a line not yet shown is left dirty for the tick path.
+    const bool fsShown =
+        *reinterpret_cast<const uint32_t *>(reinterpret_cast<const uint8_t *>(fs) +
+                                            Offsets::OFF_REGION_ACTUALLY_SHOWN) != 0;
+    if (!fsShown)
+        return;
+    ApplyDirtyBranch(fs, np, FsColorKey(fs));
+}
+
+// SEH split mirroring Maintain/MaintainImpl — the __try body holds no C++
+// objects needing unwinding (see MaintainImpl). A fault latches the same
+// maintenance kill switch as the tick path.
+void SafeApplyNow(void *fs) {
+    if (g_maintainDisabled)
+        return;
+    __try {
+        ApplyNowImpl(fs);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_maintainDisabled = true;
+    }
+}
+
 // FrameTick, not WorldTick: icon regions are UI objects that also exist on the
 // glue screen (addon-list titles with |T emotes), and FrameTick fires wherever
 // the UI renders — glue and world. (An earlier FrameTick attempt was blamed
@@ -496,6 +541,15 @@ void QueuePlacements(void *fs, std::vector<Placement> &&icons) {
         return; // identical re-queue (the per-paint steady state) — no work
     np.want = std::move(icons);
     np.dirty = true;
+}
+
+void ApplyNow(void *fs, std::vector<Placement> &&icons) {
+    // Queue first (learns the fs vtable, sets want+dirty+touch, dedups an
+    // unchanged re-queue), then apply synchronously for this fs. Deduped
+    // re-queues leave the entry not-dirty, so SafeApplyNow no-ops — a
+    // per-paint steady state costs one compare, same as QueuePlacements.
+    QueuePlacements(fs, std::move(icons));
+    SafeApplyNow(fs);
 }
 
 void PrepareForReload() {

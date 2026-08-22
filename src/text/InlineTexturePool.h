@@ -58,6 +58,15 @@ inline bool operator==(const Placement &a, const Placement &b) {
 // hidden fontstring's regions are hidden automatically each tick.
 void QueuePlacements(void *fs, std::vector<Placement> &&icons);
 
+// Like QueuePlacements, but ALSO applies the placements to their regions
+// immediately (synchronously) instead of waiting for the next FrameTick. Only
+// safe to call PRE-RENDER (no frame mid-draw) — Text::InlineTexture calls it
+// from the SMF-refresh hook so a chat line's icons are placed before the frame
+// draws, killing the one-frame lag. Deduped against the current want, so a
+// no-change re-apply is a cheap no-op. Faults are caught (latches the same
+// maintenance kill switch as the tick path).
+void ApplyNow(void *fs, std::vector<Placement> &&icons);
+
 // Called from FrameScript_Initialize_h BEFORE the /reload teardown: the reload
 // destroys every icon region (they die with their parent frames), so drop the
 // pointers without touching them — regions rebuild lazily as icons re-draw.

@@ -30,6 +30,21 @@ The DLL hooks the engine's own text pipeline — no companion addon:
 - **Rendering** — the paint-pass co-hook `FUN_005c8fe0` walks the icon records
   and queues each to `Text::InlineTexturePool`, which places the region on the
   next frame tick (never mid-render).
+- **Chat has no one-frame lag** — a ScrollingMessageFrame re-`SetText`s every
+  visible line on each new message, and the engine builds each line lazily at
+  paint, so a line's icons would land one frame after its glyphs (glyphs draw
+  synchronously; the icon regions are separate objects whose placement is only
+  known once the line builds mid-paint, after the frame's texture pass already
+  drew). A co-hook on the SMF display refresh (`FUN_00788750`, which runs
+  pre-render from the frame's own methods) forces each icon-bearing line to
+  resolve+build and applies its icon placement synchronously — before the frame
+  draws — so icons move in lockstep with their text. It reuses the engine's own
+  `Realize(0)` → `RebuildString` → ensure-built path and the same placement math
+  the paint flush uses (`ComputePlacementsForNode`), so the later flush dedups to
+  a no-op. Additive and best-effort: any line whose rect isn't resolvable in time
+  falls back to the paint + tick pipeline (correct, one-frame lagged). A pure
+  scroll or drag never lagged — the icons are anchored to the line and the engine
+  moves them for free; only content changes on a reused line needed this.
 - **Placement coordinates** — text pen space IS render-target pixels. The
   engine stores node positions NORMALIZED (fs-local anchor ÷
   `[0x832A44]`/`[0x832A48]` per axis, `FUN_0041ade0`), and the origin finalize
@@ -85,9 +100,11 @@ Every fs-level measure path now counts icons: width (`FUN_00772890`), height
 refute that: the GameTooltip auto-size measures each WRAPPED SEGMENT of a
 wrap-enabled line through it, so icon-bearing wrapped tooltip lines
 undersized their tooltip until it was hooked too). The Lua control surface is
-one kill switch, `_classicapi_InlineTexEnable` (the SEH latch trips it on a
-flush fault); the bring-up tune / stat / probe functions were removed
-(`5e5677b`, `6800a9a`).
+two toggles: `_classicapi_InlineTexEnable` (the whole-feature kill switch; the
+SEH latch trips it on a flush fault) and `_classicapi_InlineTexEarly` (the
+SMF-refresh early apply above — on by default, toggle off to A/B the chat lag
+against the baseline paint+tick pipeline, which keeps running either way). The
+bring-up tune / stat / probe functions were removed (`5e5677b`, `6800a9a`).
 
 ## REMOVED (bring-up record) — the raw-GxU-quad rendering primitive
 

@@ -1629,6 +1629,78 @@ static const Game::HookAutoRegister _emitterHook{Offsets::FUN_TEXT_EMITTER,
 using Paint_t = void(__fastcall *)(void *layout);
 Paint_t g_paintOriginal = nullptr;
 
+// Builds the region placements for `node`'s recorded icons, expressed RELATIVE
+// to the owning fontstring `fs`'s rect min corner (the pool anchors them there,
+// so the engine moves them with the line). Fills `out` and returns true ONLY
+// when everything the placement needs is ready this instant — K live (raster
+// globals written) and the fs rect resolved. Returns false otherwise, and the
+// caller must NOT queue an empty set (that would hide the icons and the dedup
+// would freeze them hidden — the scroll-landing bug's second head). Shared by
+// the paint flush and the SMF-refresh early apply so both produce
+// bit-identical placements (the pool's dedup depends on that). The per-icon
+// geometry mirrors exactly what the emitter reserves — see IconAdvancePen.
+bool ComputePlacementsForNode(void *node, void *fs,
+                              std::vector<Text::InlineTexturePool::Placement> &out) {
+    if (!LooksReadable(node) || !LooksReadable(fs))
+        return false;
+    auto itIcons = g_nodeIcons.find(node);
+    if (itIcons == g_nodeIcons.end() || itIcons->second.empty())
+        return false;
+    const PenScale K = PenPerAnchor();
+    if (!(K.x > 1.0f) || !(K.y > 1.0f))
+        return false;
+    auto *n = reinterpret_cast<uint8_t *>(node);
+    const float ox = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_X);
+    const float oy = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_Y);
+    // Same pixel-snap mode the emitter honours (bit-7 clear) — gates the
+    // drawn-rect snap in the placement loop below.
+    const bool snapNode = (Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_FLAGS) & 0x80u) == 0;
+    const float *rc = Game::Ptr<const float>(fs, Offsets::OFF_REGION_RECT);
+    const float fsBottom = (rc[0] < rc[2]) ? rc[0] : rc[2];
+    const float fsLeft = (rc[1] < rc[3]) ? rc[1] : rc[3];
+    if (rc[1] == rc[3])
+        return false; // unresolved rect reads 0-width
+    for (const IconRecord &r : itIcons->second) {
+        // Screen left = pen + the FULL lead pad (the emitter reserves
+        // w + 1.5×pad in the advance: lead 1×, trail 0.5×). Pad is
+        // fontH-relative — must match IconAdvancePen exactly.
+        const float cx = r.x + ox + r.offsetX + r.fontH * g_iconPadFrac + r.outlineInk * 0.5f;
+        // Centre on the line: penY sits near the text top. offsetY shifts up
+        // (WoW convention), so subtract it. Tall icons centre in the grown line
+        // (the string-height co-hook added the overflow).
+        const float cy = r.y + r.fontH * g_centerFrac + oy + g_vBias - r.offsetY;
+        float rx = cx + g_regionCalX;
+        float y0 = cy + g_regionCalY - r.h * 0.5f;
+        float w = r.w, h = r.h;
+        if (snapNode) {
+            // Land the drawn rect on WHOLE render-target pixels, like the
+            // engine's own glyphs (crisp texel sampling). Size snaps
+            // independently of position so a :16 icon is EXACTLY 16px.
+            rx = std::floor(rx + 0.5f);
+            y0 = std::floor(y0 + 0.5f);
+            w = std::floor(w + 0.5f);
+            h = std::floor(h + 0.5f);
+            if (w < 1.0f)
+                w = 1.0f;
+            if (h < 1.0f)
+                h = 1.0f;
+        }
+        Text::InlineTexturePool::Placement p;
+        p.path = r.path;
+        p.x0 = rx / K.x - fsLeft;
+        p.y0 = y0 / K.y - fsBottom;
+        p.x1 = (rx + w) / K.x - fsLeft;
+        p.y1 = (y0 + h) / K.y - fsBottom;
+        p.color = r.color;
+        p.u0 = r.u0;
+        p.v0 = r.v0;
+        p.u1 = r.u1;
+        p.v1 = r.v1;
+        out.push_back(std::move(p));
+    }
+    return true;
+}
+
 // Walks the layout's live render nodes and, for each recorded icon, computes
 // its screen geometry (node-local pen coords translated by the node's screen
 // origin +0x70/+0x74 — the SAME transform the paint pass applies to glyph
@@ -1768,99 +1840,17 @@ void FlushLayout(void *layout) {
                     }
                 }
             }
-            const float ox = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_X);
-            const float oy = Game::Read<float>(n, Offsets::OFF_TEXT_NODE_ORIGIN_Y);
-            // Same pixel-snap mode the emitter honours (bit-7 clear) — gates
-            // the drawn-rect snap in the placement loop below.
-            const bool snapNode =
-                (Game::Read<uint32_t>(n, Offsets::OFF_TEXT_NODE_FLAGS) & 0x80u) == 0;
-            // The fs rect, read HERE in the same flush as the icon coords — a
-            // coherent snapshot. Placements are stored FS-RELATIVE: an
-            // apply-time rect read raced the chat relayout (SetText invalidates
-            // the rect briefly), and a placement applied against a mid-relayout
-            // rect parked the icon off the line — then the dedup (unchanged
-            // absolute want) froze it there. Relative offsets are also
-            // position-invariant, so scrolling no longer re-places anything.
-            const PenScale K = PenPerAnchor();
-            float fsLeft = 0.0f, fsBottom = 0.0f;
-            bool fsRectValid = false;
-            if (fs != nullptr) {
-                const float *rc = Game::Ptr<const float>(fs, Offsets::OFF_REGION_RECT);
-                fsBottom = (rc[0] < rc[2]) ? rc[0] : rc[2];
-                fsLeft = (rc[1] < rc[3]) ? rc[1] : rc[3];
-                fsRectValid = rc[1] != rc[3]; // unresolved rect reads 0-width
-            }
+            // Geometry + readiness gate factored into ComputePlacementsForNode
+            // (shared with the SMF-refresh early apply so both produce
+            // bit-identical placements — the pool dedup depends on it). It
+            // returns false when K or the fs rect isn't ready; SKIP the queue
+            // then and retry next paint. An empty queue here would HIDE the
+            // line's icons and the dedup would freeze it hidden forever
+            // (identical empty re-queues never dirty) — the scroll-landing
+            // bug's second head, where lines painted before K was available
+            // queued {} and stayed iconless until their text changed.
             std::vector<Text::InlineTexturePool::Placement> places;
-            for (const IconRecord &r : it->second) {
-                // Screen left = pen + the FULL lead pad. The emitter reserves
-                // w + 1.5×pad in the advance (lead 1×, trail 0.5×) — drawing at
-                // the raw pen put all of that gap AFTER the icon, which is why
-                // a string-final icon (money-string copper) looked jammed
-                // against its digits and grew per-coin offset hacks. The pad is
-                // fontH-relative (NOT r.w) — must match IconAdvancePen exactly.
-                const float cx =
-                    r.x + ox + r.offsetX + r.fontH * g_iconPadFrac + r.outlineInk * 0.5f;
-                // Centre on the line: penY sits near the text top, so add a
-                // fraction of the font height (plus the fine-tune bias). offsetY
-                // shifts up (WoW convention), so subtract it.
-                //
-                // TALL icons (h > fontH) centre too: the string-height co-hook
-                // grew the line by the overflow, and the text centres itself
-                // inside the grown rect (verified in-game — a bottom-aligned
-                // icon clipped the neighbouring line while retail shows tall
-                // emotes centred with no clip), so the extra space appears half
-                // above and half below the text. A centred icon fills exactly
-                // that — the retail look.
-                const float cy = r.y + r.fontH * g_centerFrac + oy + g_vBias - r.offsetY;
-                if (K.x > 1.0f && K.y > 1.0f && fs != nullptr && fsRectValid) {
-                    float rx = cx + g_regionCalX;
-                    float y0 = cy + g_regionCalY - r.h * 0.5f;
-                    float w = r.w, h = r.h;
-                    if (snapNode) {
-                        // Land the drawn rect on WHOLE render-target pixels,
-                        // like the engine's own glyphs (rounded origin +
-                        // truncated advances). Pen px = render px, the fsLeft/
-                        // fsBottom terms cancel exactly through the anchor
-                        // round-trip (the engine adds the same rect corner
-                        // back at resolve), and the pool's width convergence
-                        // preserves the linear factor — so an integral pen
-                        // rect lands integral on screen: 1:1-sized icons
-                        // sample texel centres (crisp) instead of blending
-                        // four neighbours (soft). Size snaps independently of
-                        // position so a :16 icon is EXACTLY 16px, never 15/17
-                        // from the two edges rounding apart.
-                        rx = std::floor(rx + 0.5f);
-                        y0 = std::floor(y0 + 0.5f);
-                        w = std::floor(w + 0.5f);
-                        h = std::floor(h + 0.5f);
-                        if (w < 1.0f)
-                            w = 1.0f;
-                        if (h < 1.0f)
-                            h = 1.0f;
-                    }
-                    Text::InlineTexturePool::Placement p;
-                    p.path = r.path;
-                    p.x0 = rx / K.x - fsLeft;
-                    p.y0 = y0 / K.y - fsBottom;
-                    p.x1 = (rx + w) / K.x - fsLeft;
-                    p.y1 = (y0 + h) / K.y - fsBottom;
-                    p.color = r.color;
-                    p.u0 = r.u0;
-                    p.v0 = r.v0;
-                    p.u1 = r.u1;
-                    p.v1 = r.v1;
-                    places.push_back(std::move(p));
-                }
-            }
-            // The queue gate must match the per-icon build gate EXACTLY —
-            // including K. If any input wasn't ready this paint (unresolved fs
-            // rect, raster globals not yet written), SKIP the queue and retry
-            // next paint: an empty queue here would HIDE the line's icons and
-            // the dedup would freeze it hidden forever (identical empty
-            // re-queues never dirty). That was the scroll-landing bug's second
-            // head: lines painted before K was available queued {} and stayed
-            // iconless until their text changed.
-            if (fs != nullptr && fsRectValid && K.x > 1.0f && K.y > 1.0f)
+            if (ComputePlacementsForNode(node, fs, places))
                 Text::InlineTexturePool::QueuePlacements(fs, std::move(places));
         } else if (fs != nullptr) {
             Text::InlineTexturePool::QueuePlacements(fs, {});
@@ -1890,6 +1880,121 @@ static const Game::HookAutoRegister _paintHook{Offsets::FUN_TEXT_PAINT,
                                                reinterpret_cast<void *>(&Paint_h),
                                                reinterpret_cast<void **>(&g_paintOriginal)};
 
+// --- SMF-refresh early apply (kills the one-frame chat-icon lag) -------------
+//
+// The lag: a ScrollingMessageFrame re-SetTexts every visible line slot on each
+// new message (FUN_00788750), but the engine builds each line lazily at PAINT.
+// So a line's icons are recorded — and its regions placed — one frame AFTER its
+// glyphs draw, because a frame's textures (our icon regions) draw before its
+// fontstring glyphs and the placement isn't computed until the glyph build runs
+// mid-paint. This co-hook closes it: after the refresh sets up the lines (still
+// PRE-RENDER — the refresh runs from the SMF's Lua/event-driven methods, never
+// mid-render), force each icon-bearing line to resolve+build and apply its icon
+// placement synchronously, so the icons draw with their glyphs the same frame.
+//
+// Additive and best-effort: any line we can't resolve/build in time (rect still
+// pending) falls back to the existing paint-flush + FrameTick pipeline (correct,
+// one-frame lagged). Gated by its own toggle (default on) so it can be A/B'd and
+// disabled independently of the whole feature; the SEH latch trips it on a fault.
+bool g_earlyApply = true;
+
+using SmfRefresh_t = void(__fastcall *)(void *smf, void *edx, int newestIdx);
+SmfRefresh_t g_smfRefreshOriginal = nullptr;
+
+using EnsureBuilt_t = int(__fastcall *)(void *node);
+using RealizeAnchor_t = void(__thiscall *)(void *anchor, int flag);
+using RebuildStringFs_t = void(__fastcall *)(void *fs);
+
+// Force `fs` to resolve its rect and lay out its text node NOW (pre-render),
+// mirroring what the engine's pending-layout pass + paint would do later.
+// Returns the live text node, or nullptr if it couldn't be built yet (rect
+// still unresolved — caller falls back to the lagged pipeline). Uses only the
+// engine's own supported force paths (the same Realize/RebuildString/ensure-
+// built the Show and paint paths call).
+void *ForceBuildFontString(void *fs) {
+    // 1. Synchronous rect resolve (Realize flag 0 — the call Show itself uses;
+    //    it unlinks the anchor from the pending-layout list and resolves now).
+    //    The caller walks lines bottom-up, so this line's relativeTo (the line
+    //    below it / the frame) is already resolved when we get here.
+    reinterpret_cast<RealizeAnchor_t>(Offsets::FUN_REGION_LAYOUT_REALIZE)(
+        reinterpret_cast<uint8_t *>(fs) + Offsets::OFF_REGION_ANCHOR, 0);
+    // 2. Rebuild the text block — creates the fresh node (but only if the rect
+    //    is now resolved). Internally gated on the fs dirty bit, so a clean
+    //    line is a no-op and we avoid depending on reading that bit ourselves.
+    reinterpret_cast<RebuildStringFs_t>(Offsets::FUN_FONTSTRING_REBUILD_STRING)(fs);
+    void *block = Game::Read<void *>(fs, Offsets::OFF_FONTSTRING_TEXT_BLOCK);
+    if (!LooksReadable(block))
+        return nullptr; // rect still unresolved — no node created
+    void *node = Game::Read<void *>(block, Offsets::OFF_TEXTBLOCK_NODE);
+    if (!LooksReadable(node))
+        return nullptr;
+    // 3. Lay the node out now: runs the glyph emitter (our Emitter_h records the
+    //    icons) and finalizes the node origin. Idempotent — paint's own ensure-
+    //    built re-runs later and the flush dedups the identical placement.
+    reinterpret_cast<EnsureBuilt_t>(Offsets::FUN_TEXT_ENSURE_BUILT)(node);
+    return node;
+}
+
+// Walk the SMF's visible line array and early-apply each icon-bearing line.
+// The C++-object-holding body is kept out of the SEH frame (see
+// SafeSmfEarlyApply) — MSVC won't allow __try where objects need unwinding.
+void SmfEarlyApplyImpl(void *smf) {
+    if (!LooksReadable(smf))
+        return;
+    const int count = Game::Read<int>(smf, Offsets::OFF_SMF_LINE_COUNT);
+    if (count <= 0 || count > 1024)
+        return;
+    auto *arrayBase = Game::Read<uint8_t *>(smf, Offsets::OFF_SMF_LINE_ARRAY);
+    if (!LooksReadable(arrayBase))
+        return;
+    for (int i = 0; i < count; ++i) {
+        uint8_t *entry = arrayBase + i * Offsets::SMF_LINE_STRIDE;
+        if (!LooksReadable(entry))
+            break;
+        void *fs = Game::Read<void *>(entry, Offsets::OFF_SMF_LINE_FONTSTRING);
+        if (!LooksReadable(fs))
+            continue;
+        // Only shown lines (the desired-shown latch the SMF just set) that carry
+        // inline markup — a plain chat line costs nothing but the text scan.
+        if (Game::Read<uint32_t>(fs, Offsets::OFF_REGION_DESIRED_SHOWN) == 0)
+            continue;
+        const uint8_t *text = Game::Read<const uint8_t *>(fs, Offsets::OFF_FONTSTRING_TEXT);
+        if (!LooksReadable(text))
+            continue;
+        int len = 0;
+        while (len < 0x4000 && text[len] != '\0')
+            ++len;
+        if (!HasInlineTexture(text, len))
+            continue;
+        void *node = ForceBuildFontString(fs);
+        if (node == nullptr || NodeEditable(node))
+            continue; // couldn't build in time, or editable (raw markup)
+        std::vector<Text::InlineTexturePool::Placement> places;
+        if (ComputePlacementsForNode(node, fs, places))
+            Text::InlineTexturePool::ApplyNow(fs, std::move(places));
+    }
+}
+
+// SEH latch mirroring SafeFlush — a fault disables the early path for the
+// session (the baseline paint+tick pipeline still runs) instead of crashing.
+void SafeSmfEarlyApply(void *smf) {
+    __try {
+        SmfEarlyApplyImpl(smf);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_earlyApply = false;
+    }
+}
+
+void __fastcall SmfRefresh_h(void *smf, void *edx, int newestIdx) {
+    g_smfRefreshOriginal(smf, edx, newestIdx);
+    if (g_inlineEnabled && g_earlyApply)
+        SafeSmfEarlyApply(smf);
+}
+
+static const Game::HookAutoRegister _smfRefreshHook{
+    Offsets::FUN_SMF_DISPLAY_REFRESH, reinterpret_cast<void *>(&SmfRefresh_h),
+    reinterpret_cast<void **>(&g_smfRefreshOriginal)};
+
 // --- Lua control surface ---------------------------------------------------
 
 // _classicapi_InlineTexEnable([on]) -> enabled. The feature kill switch (also
@@ -1903,8 +2008,22 @@ int __fastcall Script_InlineTexEnable(void *L) {
     return 1;
 }
 
+// _classicapi_InlineTexEarly([on]) -> enabled. Toggles the SMF-refresh
+// pre-render early apply (the chat-icon-lag fix) independently of the whole
+// feature — for A/B'ing the lag against the baseline paint+tick pipeline, which
+// keeps running either way. Also what the SMF SEH latch trips on a fault.
+int __fastcall Script_InlineTexEarly(void *L) {
+    if (Game::Lua::GetTop(L) == 0)
+        g_earlyApply = true;
+    else
+        g_earlyApply = Game::Lua::ToBoolean(L, 1) != 0;
+    Game::Lua::PushBool(L, g_earlyApply);
+    return 1;
+}
+
 void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("_classicapi_InlineTexEnable", &Script_InlineTexEnable);
+    Game::Lua::RegisterGlobalFunction("_classicapi_InlineTexEarly", &Script_InlineTexEarly);
 }
 
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};

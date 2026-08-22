@@ -557,6 +557,34 @@ enum Offsets {
     // stale-owner bugs (ghost icons, orphaned records) structurally impossible
     // instead of heuristically guarded.
     FUN_TEXT_NODE_FREE = 0x005CD950,
+    // Ensure a text node is laid out: `__fastcall(node)` -> FUN_005cd3f0 + the
+    // draw builder FUN_005CDC20 (runs the glyph emitter and finalizes the node
+    // origin +0x70/+0x74), then clears node+0xc0. Same "ensure built" the paint
+    // pass (FUN_005c8fe0) calls per node; safe to call directly (the builder
+    // re-lays the node — a clean node just re-emits the same glyphs). Verified
+    // callers: the paint pass and FUN_005cd4d0 (the width/resize helper).
+    // Text::InlineTexture drives it PRE-RENDER from the SMF-refresh early-apply
+    // so a chat line's icons are recorded before the frame draws.
+    FUN_TEXT_ENSURE_BUILT = 0x005CD6A0,
+
+    // CScrollingMessageFrame display refresh — `__thiscall(smf, int newestIdx)`.
+    // Rebuilds the visible line set bottom-up: per slot it SetTexts the line
+    // fontstring (FUN_00788af0 -> SetText FUN_00771d80 + enqueue-resolve
+    // FUN_007680e0 flag 1), (re)anchors newly-allocated lines, shows/hides by
+    // message. Every new message shifts the newest index, so EVERY visible slot
+    // is re-SetText'd -> its inline icons must be recomputed; the engine builds
+    // the line lazily at paint, so icons land one frame after the glyphs (the
+    // one-frame lag). Text::InlineTexture co-hooks this and, post-refresh,
+    // forces each icon-bearing line to resolve+build and applies its icon
+    // placement synchronously — pre-render (the refresh runs from the SMF's
+    // Lua/event-driven methods, never mid-render), so icons draw with their
+    // glyphs the same frame. Line-entry layout verified from the decompile:
+    // count@+0x3A0, stride-0x10 entry array@+0x3A4, entry+8 = the line fs.
+    FUN_SMF_DISPLAY_REFRESH = 0x00788750,
+    OFF_SMF_LINE_COUNT = 0x3A0,     // int: allocated visible-line count
+    OFF_SMF_LINE_ARRAY = 0x3A4,     // base of the stride-0x10 line-entry array
+    SMF_LINE_STRIDE = 0x10,         // per-line-entry stride
+    OFF_SMF_LINE_FONTSTRING = 0x8,  // entry+8 = the line's CSimpleFontString
     // THE pen↔anchor unit bridge. RebuildString (0x7724A0) multiplies every
     // text-unit quantity by region+0x7C when crossing into node creation:
     // nodePos = inset×s + rect corner, nodeFontH = fontPx×s, spacing = +0xF4×s,
