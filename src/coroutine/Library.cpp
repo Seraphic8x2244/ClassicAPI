@@ -211,12 +211,42 @@ static int __fastcall Script_Coroutine_Wrap(void *L) {
     return 1;
 }
 
+// `coroutine.running()` — Lua 5.1 addition: the running coroutine, or
+// nil when called from the main thread. The 5.0 C API has no
+// `lua_pushthread` (also a 5.1 addition), so the thread TValue is
+// written to the stack raw: this build's TValue is 16 bytes with
+// {tt @ +0, value @ +8} (see LuaSyntax::StringMethods for the layout
+// derivation), tag 8 = thread, and the value is the running `lua_State`
+// itself — exactly what `lua_newthread` stores and what LUA_TO_POINTER
+// reads back at tvalue[2]. No stack-overflow check needed: every C
+// function is guaranteed LUA_MINSTACK free slots and this pushes one.
+// The running thread is trivially GC-alive, so no anchoring either.
+// Main-thread detection: module callbacks run on the state's main
+// thread, so the L captured at registration IS the main thread;
+// coroutine bodies run on their own lua_State.
+static void *g_mainL = nullptr;
+static constexpr uintptr_t OFF_L_TOP = 0x8; // L->top (push helpers' [ecx+8])
+
+static int __fastcall Script_Coroutine_Running(void *L) {
+    if (L == g_mainL) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    uint8_t *top = Game::Read<uint8_t *>(L, OFF_L_TOP);
+    *reinterpret_cast<int *>(top) = Game::Lua::TYPE_THREAD;
+    *reinterpret_cast<void **>(top + 8) = L;
+    Game::Ref<uint8_t *>(L, OFF_L_TOP) = top + 16;
+    return 1;
+}
+
 static void RegisterLuaFunctions() {
+    g_mainL = Game::Lua::State(); // the state's main thread (see Running)
     Game::Lua::RegisterTableFunction("coroutine", "create", &Script_Coroutine_Create);
     Game::Lua::RegisterTableFunction("coroutine", "resume", &Script_Coroutine_Resume);
     Game::Lua::RegisterTableFunction("coroutine", "yield", &Script_Coroutine_Yield);
     Game::Lua::RegisterTableFunction("coroutine", "status", &Script_Coroutine_Status);
     Game::Lua::RegisterTableFunction("coroutine", "wrap", &Script_Coroutine_Wrap);
+    Game::Lua::RegisterTableFunction("coroutine", "running", &Script_Coroutine_Running);
 }
 
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};

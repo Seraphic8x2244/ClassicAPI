@@ -347,10 +347,14 @@ build instructions.
   - [String methods (`s:upper()`, `s:format(...)`)](#string-methods-supper-sformat)
   - [`getfenv` / `setfenv` environment protection](#getfenv--setfenv-environment-protection)
   - [`select(index, ...)`](#selectindex-)
+  - [`unpack(list [, i [, j]])`](#unpacklist--i--j)
+  - [`collectgarbage(opt [, arg])`](#collectgarbageopt--arg)
   - [`table.wipe(t)`](#tablewipet)
   - [`table.count(tbl)`](#tablecounttbl)
+  - [`table.maxn(t)`](#tablemaxnt)
   - [`Mixin(object, ...)` / `CreateFromMixins(...)`](#mixinobject--createfrommixins)
   - [`string.match` / `string.gmatch`](#stringmatch--stringgmatch)
+  - [`string.gsub` table replacement](#stringgsub-table-replacement)
   - [`strsplit(sep, str [, pieces])`](#strsplitsep-str--pieces)
   - [`strjoin(delimiter, ...)`](#strjoindelimiter-)
   - [`strtrim(str [, chars])`](#strtrimstr--chars)
@@ -364,6 +368,7 @@ build instructions.
   - [`coroutine.yield(...)`](#coroutineyield)
   - [`coroutine.status(co)`](#coroutinestatusco)
   - [`coroutine.wrap(fn)`](#coroutinewrapfn)
+  - [`coroutine.running()`](#coroutinerunning)
   - [Async pattern (RunAsync + C_Timer.After)](#async-pattern-runasync--c_timerafter)
 
 - [Macros](#macros)
@@ -8657,6 +8662,40 @@ Ported from Lua 5.1's `luaB_select` (lbaselib.c). The numeric form pushes
 nothing — the varargs are already on the stack, so it just returns the
 count of the slice from `n+1` onward.
 
+### `unpack(list [, i [, j]])`
+
+The Lua 5.1 range form. Vanilla's 5.0 `unpack(list)` takes no range
+arguments and ignored extras **silently** — `unpack(t, 2)` returned the
+whole table: wrong values, no error. ClassicAPI replaces `unpack` with
+the 5.1 version (a port of `luaB_unpack`):
+
+```lua
+unpack({10, 20, 30})        -- 10, 20, 30
+unpack({10, 20, 30}, 2)     -- 20, 30
+unpack({10, 20, 30}, 2, 2)  -- 20
+```
+
+`i` defaults to `1` and `j` to the table length — the `table.getn`
+length, so a vararg `arg` table's `n` field is honored and embedded nils
+keep their slots. Errors on a non-table first argument, exactly like 5.1.
+
+### `collectgarbage(opt [, arg])`
+
+Accepts Lua 5.1's string options. Vanilla's 5.0 collector takes only an
+optional numeric threshold and errored on every string option
+(`bad argument #1 (number expected, got string)`).
+
+- `"count"` — returns the KB of Lua memory in use (the `gcinfo()` value).
+- `"collect"` — runs a full garbage-collection cycle. Returns `0`.
+- `"step"` — accepted no-op returning `true`. The 5.0 collector cannot
+  step incrementally; `true` means "cycle finished", so
+  `repeat until collectgarbage("step")` loops exit immediately.
+- `"stop"` / `"restart"` / `"setpause"` / `"setstepmul"` — accepted
+  no-ops returning `0`. The 5.0 collector has no toggle or tuning;
+  callers lose the optimization, nothing breaks.
+- A number (or no argument) keeps vanilla's threshold behavior
+  unchanged.
+
 ### `table.wipe(t)`
 
 Removes every key from `t`, leaving it empty but preserving its
@@ -8700,6 +8739,20 @@ table.count({ [-3] = "x" })           -- 1, 0, 0
 
 Pure iteration over the table (`lua_next`), so no dependency on Lua's internal
 storage layout. Errors on non-table input.
+
+### `table.maxn(t)`
+
+Returns the largest positive numeric key of `t`, or `0` when it has none
+(Lua 5.1, `luaB_maxn`). Unlike `table.getn` it scans every key, so it
+sees past nil holes in sparse arrays:
+
+```lua
+table.maxn({ 10, 20, 30 })          -- 3
+table.maxn({ [1] = "x", [9] = "y" }) -- 9  (getn would say 1)
+table.maxn({ a = 1 })               -- 0
+```
+
+Errors on non-table input.
 
 ### `Mixin(object, ...)` / `CreateFromMixins(...)`
 
@@ -8750,6 +8803,28 @@ for word in string.gmatch("a,bb,ccc", "[^,]+") do print(word) end -- a / bb / cc
 
 Both call forms work: `string.match(s, p)` and `s:match(p)`. See
 [String methods](#string-methods-supper-sformat).
+
+### `string.gsub` table replacement
+
+Lua 5.1 allows a **table** as `gsub`'s replacement: every match looks up
+the first capture (the whole match when the pattern declares no
+captures) as a key and substitutes the value. A `nil` or `false` value
+keeps the original match. Vanilla's 5.0 `gsub` accepts only a string or
+function replacement and errors on a table
+(`string or function expected`).
+
+```lua
+("$name the $class"):gsub("%$(%w+)", { name = "Bob", class = "Druid" })
+-- "Bob the Druid", 2
+
+("$name and $unknown"):gsub("%$(%w+)", { name = "Bob" })
+-- "Bob and $unknown", 2   (a missing key keeps the match, as in 5.1)
+```
+
+Both `string.gsub` and the bare `gsub` global have the upgrade; string
+and function replacements behave exactly as before. One residual: when
+the pattern itself contains a `%1`..`%9` back-reference, a missing table
+key removes the match instead of keeping it.
 
 ### `strsplit(sep, str [, pieces])`
 
@@ -8870,9 +8945,9 @@ Restores Lua 5.0's stripped `coroutine.*` library. The C-level
 coroutine machinery (`lua_resume`, `lua_yield`, `lua_newthread`,
 and the `thread` type at tag 8) is linked into the engine, but
 the script-facing library was never registered as a global table.
-ClassicAPI rewires the standard five entries on `coroutine`,
-matching Lua 5.0 semantics with two WoW-specific quirks called
-out below.
+ClassicAPI rewires the standard five entries on `coroutine`, plus
+Lua 5.1's `coroutine.running`, matching Lua 5.0 semantics with two
+WoW-specific quirks called out below.
 
 #### `coroutine.create(fn)`
 
@@ -8968,6 +9043,19 @@ local function range(from, to)
 end
 
 for n in range(1, 5) do print(n) end
+```
+
+#### `coroutine.running()`
+
+Returns the coroutine that is currently running, or `nil` when called
+from the main thread (Lua 5.1's contract — the 5.2 second return,
+`ismain`, is not provided).
+
+```lua
+coroutine.running()   -- nil (main thread)
+coroutine.wrap(function()
+    print(coroutine.status(coroutine.running()))   -- "running"
+end)()
 ```
 
 #### Async pattern (`RunAsync` + `C_Timer.After`)

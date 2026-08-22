@@ -4820,6 +4820,15 @@ enum Offsets {
     // `rawset(nil)` clear leaves it stale and subsequent `table.insert`
     // appends past the wiped slots.
     LUAL_SETN = 0x6F4EA0,
+    // `luaL_getn(L, tableIndex)` — Lua 5.0 auxlib table-length getter,
+    // `int __fastcall(L /*ecx*/, idx /*edx*/)`, plain RET (no stack
+    // args), length in eax. Verified by disassembly: a negative idx is
+    // normalized via lua_gettop; tries the `t.n` field (rawget "n"),
+    // then the registry LUA_SIZES path, then falls back to a linear
+    // rawgeti scan for the first nil. Counterpart of LUAL_SETN above
+    // (named there since the table.insert trace). Used by the 5.1
+    // `unpack(list, i, j)` upgrade for the default range end.
+    LUAL_GETN = 0x6F5050,
     // `luaV_gettable(L, t, key, loop)` — the VM's generic index resolver.
     // __fastcall(L /*ecx*/, t /*edx*/, key /*stack*/, loop /*stack*/),
     // RET 8. Returns the result TValue* in eax (Ghidra types it void; the
@@ -4913,6 +4922,19 @@ enum Offsets {
     // `BaseLib::StringLib` registers `string.gmatch` as a direct alias of
     // this function pointer — no wrapper.
     FUN_LUA_STR_GFIND = 0x007FCFA0,
+    // `str_gsub` — the Lua 5.0 `string.gsub` C function (strlib entry
+    // at `0x00822DE0`, name string "gsub" at `0x00882230` — the last
+    // entry before the registration table's NULL terminator, matching
+    // stock 5.0 order). Verified by decode: args (s, pat, repl, maxN),
+    // `^` anchor pre-strip, and the luaL_argerror(3) "string or
+    // function expected" gate. Its add_value helper (`FUN_007fd2a0`)
+    // matches stock 5.0: a FUNCTION replacement's non-string result is
+    // popped and NOTHING is appended (match → empty) — 5.1 instead
+    // keeps the original match for nil/false. That difference is why
+    // `BaseLib::StringLib`'s 5.1 table-replacement shim wraps the
+    // pattern in an outer capture (arg 1 = whole match) so its adapter
+    // closure can hand the match back for missing keys.
+    FUN_LUA_STR_GSUB = 0x007FD0E0,
     // `str_format` — the Lua 5.0 `string.format` C function (`int
     // __fastcall(void *L)`), strlib entry at `0x00822dc0`. Verified by decode:
     // reads the format at arg 1, handles `%%`, `%d/i/c`, `%e/E/f/g/G`,
