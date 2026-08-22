@@ -252,6 +252,16 @@ size_t SkipNumber(const char *src, size_t len, size_t pos) {
 }
 
 void Tokenize(const char *src, size_t len, std::vector<Token> &out) {
+    // Clear first — RunPasses re-tokenizes into the SAME vector after a pass
+    // rewrites the buffer. Without this, the re-lex APPENDED the new tokens
+    // after the stale ones, and the next pass walked a mixed stream: stale
+    // positions from the old buffer, then new tokens starting back at 0,
+    // whose `t.start` sits BEHIND the splice cursor — the `t.start - p`
+    // size_t underflow then threw std::length_error("string too long")
+    // through the loadbuffer hook into the engine = fatal ERROR #132.
+    // Field-reproduced with WeakAuras' Chomp Internal.lua (hex pass fires,
+    // then the vararg pass walks the doubled stream).
+    out.clear();
     size_t i = 0;
     while (i < len) {
         unsigned char c = static_cast<unsigned char>(src[i]);
@@ -1250,9 +1260,22 @@ int __fastcall LoadBuffer_h(void *L, const char *buff, unsigned size, const char
 
     // Syntax transpile: hex literals first, then vararg, then # / % — one shared
     // tokenization (see RunPasses). `didVararg` / `didOps` drive the preamble.
+    //
+    // GUARDED: a C++ exception from the rewrite machinery (std::length_error
+    // from an underflowed splice length, bad_alloc, anything) must NEVER cross
+    // into the engine — the engine has no handler, so it surfaces as a fatal
+    // ERROR #132 at RaiseException (seen in the field: a WeakAuras Chomp
+    // chunk killed the client from inside this hook). On any exception the
+    // chunk falls through to the ORIGINAL buffer untouched: worst case it
+    // fails to compile exactly as stock 1.12 would — never a crash.
     std::string transpiled;
     bool didVararg = false, didOps = false;
-    const bool changed = RunPasses(buff, size, transpiled, &didVararg, &didOps);
+    bool changed = false;
+    try {
+        changed = RunPasses(buff, size, transpiled, &didVararg, &didOps);
+    } catch (...) {
+        return g_origLoadBuffer(L, buff, size, name);
+    }
     const char *body = changed ? transpiled.data() : buff;
     size_t bodyLen = changed ? transpiled.size() : size;
 
@@ -1349,7 +1372,13 @@ int __fastcall Script_Transpile(void *L) {
     }
     unsigned n = Game::Lua::StrLen(L, 1);
     std::string out;
-    if (RewriteChunk(s, n, out))
+    bool rewrote = false;
+    try {
+        rewrote = RewriteChunk(s, n, out);
+    } catch (...) {
+        rewrote = false; // same guard as LoadBuffer_h — never throw into the VM
+    }
+    if (rewrote)
         Game::Lua::PushLString(L, out.data(), static_cast<unsigned>(out.size()));
     else
         Game::Lua::PushLString(L, s, n);
