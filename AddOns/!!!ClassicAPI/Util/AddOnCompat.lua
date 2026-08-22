@@ -84,3 +84,16 @@ if C_AddOns.DoesAddOnExist("Puppeteer") then
         CAPI_MouseoverClearedCompat(PTEnemyUpdater)
     end)
 end
+
+-- Cartographer_Notes gates a WorldMap release-spirit hook behind an
+-- `if lua51` probe, treating a 5.1-capable Lua as a modern client that has
+-- the WorldMapDeathRelease frame. Our 5.1 syntax backport makes the probe
+-- pass, so Cartographer takes the modern branch and hooks a frame 1.12's
+-- WorldMap never had (WorldMapDeathRelease:SetScript in OnEnable) -> nil
+-- index. Provide an inert, hidden stub so the hook succeeds and does nothing
+-- -- the same outcome vanilla had, where the branch never ran. The embedded
+-- !!!ClassicAPI addon loads first, so the frame exists before Cartographer's
+-- OnEnable.
+if C_AddOns.DoesAddOnExist("Cartographer") and not WorldMapDeathRelease then
+    CreateFrame("Button", "WorldMapDeathRelease", WorldMapButton or UIParent):Hide()
+end
