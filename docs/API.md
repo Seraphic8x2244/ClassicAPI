@@ -352,6 +352,7 @@ build instructions.
   - [`table.wipe(t)`](#tablewipet)
   - [`table.count(tbl)`](#tablecounttbl)
   - [`table.maxn(t)`](#tablemaxnt)
+  - [Stale table lengths (5.1 healing)](#stale-table-lengths-51-healing)
   - [`Mixin(object, ...)` / `CreateFromMixins(...)`](#mixinobject--createfrommixins)
   - [`string.match` / `string.gmatch`](#stringmatch--stringgmatch)
   - [`string.gsub` table replacement](#stringgsub-table-replacement)
@@ -8753,6 +8754,32 @@ table.maxn({ a = 1 })               -- 0
 ```
 
 Errors on non-table input.
+
+### Stale table lengths (5.1 healing)
+
+Lua 5.0 stores a table's `table.insert` / `table.getn` length **out of
+band**. Clearing a table's keys (`for k in pairs(t) do t[k] = nil end`)
+does not reset it — 5.0 code must also call `table.setn(t, 0)`. Lua 5.1
+removed `setn` entirely; lengths are computed from the table itself.
+
+That difference bites libraries that feature-detect Lua 5.1 (the Ace2
+era's standard probe) and then skip `setn` — correct on real 5.1, but on
+this client it used to leave stale lengths: `table.insert` appended past
+the cleared slots and menus built from those tables silently broke
+(Dewdrop menus behind FuBar minimap buttons, for example).
+
+ClassicAPI heals the read. When the stored length points at a nil slot
+and the table has no explicit `n` field, `table.getn` — and everything
+built on it: `table.insert`, `table.remove`, `table.concat`,
+`table.sort`, `table.foreachi`, `unpack` — returns the true border, the
+same answer Lua 5.1 gives. Two things deliberately keep their old
+behavior:
+
+- A table with an explicit numeric `n` field (the vararg `arg` contract)
+  keeps its stored count, so trailing nils survive
+  (`unpack({10, nil, 30, n = 3})` still returns all three slots).
+- `table.setn` still works; the heal only changes the answer when the
+  stored length points past the last populated slot.
 
 ### `Mixin(object, ...)` / `CreateFromMixins(...)`
 
