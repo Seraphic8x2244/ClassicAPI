@@ -40,11 +40,6 @@ namespace Chat::RaidMarkers {
 
 namespace {
 
-// On-screen pixel size of an inline marker. The default chat font is ~14px, so 14
-// keeps a marker about one line tall. Fixed (the substitution is a static string
-// rewrite and can't see the target font); tunable here if it reads too small/large.
-constexpr int kMarkerSizePx = 14;
-
 struct Token {
     const char *name; // lowercase alias, no braces
     int marker;       // raid-target index 1..8
@@ -126,11 +121,16 @@ const char *Substitute(const char *msg, char *buf, size_t bufSize) {
                     // and renders). Anti-spoof Sanitize runs before this, so these
                     // are the only `||T` openers a player can produce.
                     char markup[128];
+                    // `:0:0` = auto-size. The inline emitter resolves height/width
+                    // to the target line's font pixel height at draw time, so a
+                    // marker tracks the chat font size (and grows in speech bubbles)
+                    // exactly like retail's ICON_LIST `…Icon_%d:0`. The rest of the
+                    // payload crops the 256x256 sheet to the cell (l,r,t,b).
                     const int m = std::snprintf(
                         markup, sizeof markup,
-                        "||TInterface\\TargetingFrame\\UI-RaidTargetingIcons:%d:%d:0:0:256:256:"
+                        "||TInterface\\TargetingFrame\\UI-RaidTargetingIcons:0:0:0:0:256:256:"
                         "%d:%d:%d:%d||t",
-                        kMarkerSizePx, kMarkerSizePx, l, r, t, b);
+                        l, r, t, b);
                     // Reserve room for the literal tail after this token
                     // (msg[k+1..]) so the rest of the message always fits.
                     const size_t tail = msgLen - (k + 1);
