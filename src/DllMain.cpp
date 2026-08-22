@@ -22,6 +22,7 @@
 #include "player/NameCache.h"
 #include "text/InlineTexture.h"
 #include "text/InlineTexturePool.h"
+#include "texture/Mask.h"
 #include "texture/Transform.h"
 
 static Game::FrameScript_Initialize_t FrameScript_Initialize_o = nullptr;
@@ -61,6 +62,9 @@ static bool __fastcall FrameScript_Initialize_h() {
     // Drop per-region corner transforms (SetRotation / SetVertexOffset) — the
     // reload destroys every addon texture and the region pool reuses their pointers.
     Texture::Transform::PrepareForReload();
+
+    // Drop per-region texture masks for the same reason (SetMask).
+    Texture::Mask::PrepareForReload();
 
     // Drop pending character-dress jobs and their engine compositors — the
     // reload destroys every Model frame the jobs point at.
@@ -103,6 +107,7 @@ static void __stdcall LoadGlueScriptFunctions_h() {
     Text::InlineTexture::PrepareForReload();
     Text::InlineTexturePool::PrepareForReload();
     Texture::Transform::PrepareForReload();
+    Texture::Mask::PrepareForReload();
 }
 
 // Every Lua-side `frame:RegisterEvent(...)` is a chance to claim a slot

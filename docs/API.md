@@ -178,6 +178,7 @@ build instructions.
   - [`fontstring:SetFormattedText(format [, ...])`](#fontstringsetformattedtextformat--)
   - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
   - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
+  - [`texture:SetMask(path)`](#texturesetmaskpath)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
@@ -4378,6 +4379,45 @@ local t = frame:CreateTexture(nil, "BACKGROUND")
 t:SetAllPoints(frame)
 t:SetColorTexture(0.1, 0.6, 1.0, 0.8)  -- semi-transparent blue fill
 ```
+
+### `texture:SetMask(path)`
+
+Clips a texture to the shape of a mask. Later clients added this for round
+portraits, round minimap buttons, and other shaped art. Vanilla has no general
+masking — only the special-cased minimap.
+
+`path` is a mask texture. The mask's ALPHA channel is the shape: where the mask
+is opaque the texture shows, where the mask is transparent the texture is
+hidden. The mask is sampled across the texture's own texture coordinates, so it
+lines up with the texture. Pass `nil` or `""` to remove the mask; the texture
+returns to its full rectangle.
+
+A mask file must be one the client can load and must hold its shape in the alpha
+channel:
+
+- A BLP, or an UNCOMPRESSED 32-bit TGA. The client cannot decode an
+  RLE-compressed TGA.
+- The shape must be in the alpha channel, with white color. A mask that is fully
+  opaque does nothing; a mask whose shape is only in its color does not clip.
+- Bottom-origin. A top-origin TGA loads upside down.
+
+Two masks ship in the client and need no file of your own: `Textures\MinimapMask`
+(round) and `Interface\CharacterFrame\TempPortraitAlphaMask` (round portrait).
+For any other shape, put your own mask texture in your addon folder and pass its
+path, the same way you ship any custom texture.
+
+```lua
+local t = frame:CreateTexture(nil, "ARTWORK")
+t:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+t:SetMask("Textures\\MinimapMask")               -- clip the icon to a circle
+t:SetMask("Interface\\AddOns\\MyAddon\\round")   -- or your own mask texture
+t:SetMask(nil)                                    -- remove the mask
+```
+
+> One difference from later clients: the mask follows the texture's own
+> coordinates. If you crop the texture with `SetTexCoord`, the mask follows the
+> cropped region rather than the full display area. For a normal, uncropped
+> texture the two are the same.
 
 ### `fontstring:SetRotation(angle [, cx, cy])`
 

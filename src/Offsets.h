@@ -6909,6 +6909,75 @@ enum Offsets {
     // Script_Texture_SetTexture's own call site does.
     VAR_TEXTURE_BLEND_DEFAULT = 0x00878CF0,
 
+    // --- Texture masking (`Texture:SetMask` backport) ---------------------------
+    // Mirrors the engine's own canonical masked-quad draw: the minimap BLIP mask
+    // FUN_004eae10 (a sibling of the disc FUN_004ec440; both fed by the mask that
+    // Minimap:SetMaskTexture at 0x004EE4A0 loads into DAT_00bc7968). FUN_004eae10
+    // is the exact template — bind base on unit 0, mask on unit 1, force each
+    // unit's combiner to MODULATE, submit with SEPARATE uv0/uv1, then unbind
+    // unit 1:
+    //   GxRs(0x17, base);  GxRs(0x1F, 1);      // unit 0: bind + MODULATE preset
+    //   GxRs(0x18, mask);  GxRs(0x20, 1);      // unit 1: bind + MODULATE preset
+    //   FUN_0058a2a0(4, corners, …, uv0, uv1); // explicit second UV stream
+    //   GxRs(0x18, 0);                         // unbind unit 1
+    // Unit 1's MODULATE combiner multiplies the mask's alpha into the base's
+    // alpha, so a white-with-alpha mask clips the base to the mask's shape.
+    //
+    // The recipe was also pinned by an in-game probe (git history's
+    // MaskProbe.cpp) on the live GL backend — findings, load-bearing:
+    //   * The COMBINER PRESET selectors are 0x1F+unit (GXRS_COMBINER0), value 1 =
+    //     MODULATE/MODULATE (the .rdata preset tables at 0x0080a25c/0x0080a274).
+    //     Binding a texture on unit 1 alone happens to give MODULATE by default
+    //     on this GL backend, but FUN_004eae10 sets it EXPLICITLY — we mirror
+    //     that (robust, not default-dependent). Do NOT confuse these with
+    //     0x2F/0x30/0x37/0x38 (texture-TRANSFORM/texgen): the probe wrote those
+    //     and forced a texgen mode with no planes, so unit 1 sampled a single
+    //     texel (the mask's alpha-0 corner) and the base vanished.
+    //   * The SECOND vertex UV stream (uv1) DOES feed unit 1 on GL (FUN_004eae10
+    //     passes a distinct uv1 = this+0x50), so uv1 = uv0 makes unit 1 sample
+    //     the mask at the base's own texcoords — exactly SetMask semantics.
+    //   * The unit MUST be bracketed FUN_GX_TEXUNIT_ENABLE(1) ... FUN_GX_TEXUNIT
+    //     _DISABLE(1); the disable is what stops the mask leaking onto every
+    //     later textured draw (there is no Gx state push/pop around the region
+    //     layer render's binds — units are managed explicitly).
+    GXRS_TEXTURE0 = 0x17,  // texture bind, +unit (via FUN_GX_RS_SET_PTR)
+    GXRS_COMBINER0 = 0x1F, // combiner preset, +unit (via FUN_GX_RS_SET int form)
+    GXRS_COMBINE_MODULATE = 1, // preset value: COLOROP=MODULATE, ALPHAOP=MODULATE
+    // GxRs setters — `__fastcall(selector, value)`. The int form (0x00589E60)
+    // writes combiner presets and the like; the pointer form (0x00589E80) writes
+    // texture binds.
+    FUN_GX_RS_SET = 0x00589E60,
+    FUN_GX_RS_SET_PTR = 0x00589E80,
+    // Per-texture-unit enable/disable — `__fastcall(int unit)`.
+    FUN_GX_TEXUNIT_ENABLE = 0x0058B200,
+    FUN_GX_TEXUNIT_DISABLE = 0x0058B220,
+    // The vertex-stream primitive every textured region draws through
+    // (FUN_0076fb00 calls it per region). Decompiler signature (13 params):
+    // (count, positions, posStride, s3, s3Stride, colors, colorStride, drop8,
+    // drop9, uv0, uv0Stride, uv1, uv1Stride); RET 0x2C. The inner FUN_0058a3d0
+    // builds an interleaved vertex from whichever of {s3, colors, uv0, uv1} are
+    // non-null — so uv1 is a real, buildable second UV slot no engine caller
+    // populates. `positions` for a region draw is the region's corner array
+    // (region + OFF_SIMPLETEXTURE_CORNERS), which is how the mask co-hook
+    // recovers the owning region: region = positions - OFF_SIMPLETEXTURE_CORNERS
+    // (verified: FUN_00772fd0 appends the batch entry with positions =
+    // region+0xD4, and FUN_0076fb00 forwards that pointer here).
+    FUN_GX_PRIM_STREAMS = 0x0058A2A0,
+    // Path → HTEXTURE loader trio (re-adds of the quad-era offsets removed in
+    // 56c2670, with the same derivations — see docs/InlineTextureEscapes.md):
+    // FUN_TEXTURE_LOAD_BY_PATH(path, &desc, flags, 0, 1) __fastcall, desc =
+    // the 5-dword {PTR_TEXLOAD_DESC_VTBL, 8, &self8, (&self8)|1, 0} on-stack
+    // node FUN_00770200 builds; flags via FUN_GX_TEXFLAGS_INIT(&flags, blend,
+    // 0,0, 0,0,0, 1, 0) __thiscall. Never returns null (engine substitutes a
+    // fallback texture). FUN_TEXTURE_GET_RENDERABLE(hTex, 1, 0) __fastcall
+    // returns the bindable CGxTex at [hTex+0x140] and drives the streaming
+    // load — calling it each frame IS the residency reference (what the
+    // minimap's masked draw does for its mask at 0x004ec65c).
+    FUN_TEXTURE_LOAD_BY_PATH = 0x00449D90,
+    PTR_TEXLOAD_DESC_VTBL = 0x007FFA10,
+    FUN_GX_TEXFLAGS_INIT = 0x0058A980,
+    FUN_TEXTURE_GET_RENDERABLE = 0x0044ACF0,
+
     // --- Inline-texture positioning (slice 1: measure/emit integration) --------
     // The 1.12 text pipeline builds a layout as a list of render "nodes" (one
     // per wrapped line); each node owns per-font-page glyph vertex batches and a
