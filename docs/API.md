@@ -344,6 +344,7 @@ build instructions.
 
 - [Lua](#lua)
   - [Lua 5.1 syntax](#lua-51-syntax)
+  - [String methods (`s:upper()`, `s:format(...)`)](#string-methods-supper-sformat)
   - [`getfenv` / `setfenv` environment protection](#getfenv--setfenv-environment-protection)
   - [`select(index, ...)`](#selectindex-)
   - [`table.wipe(t)`](#tablewipet)
@@ -8571,6 +8572,34 @@ needs that addon's opt-in.
   reverts affected chunks to the state that fails to compile, so use it
   only to answer "is the rewrite breaking this addon?".
 
+### String methods (`s:upper()`, `s:format(...)`)
+
+In Lua 5.1, every string value accepts method calls: `s:method(...)`
+resolves through the `string` table. Lua 5.0 has no string methods — on
+stock 1.12, any `s:upper()` fails with `attempt to index a string value`.
+ClassicAPI restores the 5.1 behavior:
+
+```lua
+("asd"):upper()              -- "ASD"
+("%d gold"):format(price)    -- method call on a literal
+msg:match("^!(%w+)")         -- method call on a variable
+link:sub(1, 5)
+```
+
+- Both call forms work and give the same result: `s:upper()` and
+  `string.upper(s)`.
+- Every function in the `string` table is reachable as a method. That
+  includes the ClassicAPI additions ([`match` /
+  `gmatch`](#stringmatch--stringgmatch),
+  [`reverse`](#stringreverses--strrevs)) and any function an addon adds to
+  `string`.
+- Reading an unknown key gives `nil`, the Lua 5.1 result: `("x").nope` is
+  `nil`, and `("x"):nope()` fails with `attempt to call`, not `attempt to
+  index`.
+- Writing to a string (`("x").y = 1`) still fails, the same as Lua 5.1.
+- Works everywhere strings do: in the world, on the login screen, and
+  inside coroutines.
+
 ### `getfenv` / `setfenv` environment protection
 
 A sandbox can protect the environment table it gives to restricted code.
@@ -8715,13 +8744,8 @@ string.match("no digits", "%d+")                                  -- nil
 for word in string.gmatch("a,bb,ccc", "[^,]+") do print(word) end -- a / bb / ccc
 ```
 
-> **Only the `string.foo(s, ...)` call form works — not the `("x"):foo(...)`
-> method sugar.** WoW's Lua VM strips type-metatables for every value except
-> tables and userdata (both `lua_setmetatable` and the VM's own
-> `luaT_gettmbyobj` hard-return "no metamethod" for strings), so string values
-> have no `__index` and there's no client-side way to add one short of hooking
-> a hot VM-core function. This is the long-standing vanilla 1.12 constraint —
-> always write `string.match(s, p)`, never `s:match(p)`.
+Both call forms work: `string.match(s, p)` and `s:match(p)`. See
+[String methods](#string-methods-supper-sformat).
 
 ### `strsplit(sep, str [, pieces])`
 

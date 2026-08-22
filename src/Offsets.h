@@ -4820,6 +4820,37 @@ enum Offsets {
     // `rawset(nil)` clear leaves it stale and subsequent `table.insert`
     // appends past the wiped slots.
     LUAL_SETN = 0x6F4EA0,
+    // `luaV_gettable(L, t, key, loop)` — the VM's generic index resolver.
+    // __fastcall(L /*ecx*/, t /*edx*/, key /*stack*/, loop /*stack*/),
+    // RET 8. Returns the result TValue* in eax (Ghidra types it void; the
+    // table-hit path demonstrably reaches the epilogue with eax =
+    // luaH_get's return — `CALL 0x006fa7a0; CMP [EAX],0; JNZ epilogue` at
+    // 0x006F7D1D..25). Table case: luaH_get (0x006FA7A0); nil result →
+    // the metatable continuation FUN_006F7D60, which reads the TABLE'S
+    // OWN metatable (hvalue+0x08, fast-TM flag byte hvalue+0x06 — 5.0
+    // fasttm) and returns &nilobject (0x00811BC0) when there is none
+    // (miss = nil, never an error). Non-table case → the continuation
+    // below, loop+1. Depth-guarded at 100 ("loop in gettable").
+    FUN_LUA_V_GETTABLE = 0x006F7CF0,
+    // The non-table branch of luaV_gettable — stock Lua 5.0's "index a
+    // non-table value" continuation. Same convention/return as
+    // FUN_LUA_V_GETTABLE (result TValue* in eax, RET 8). Body: __index
+    // tag method via luaT_gettmbyobj (0x006F7BD0 — which HARDCODES
+    // &nilobject for anything but table/userdata; stock 5.0, nothing
+    // stripped); nil → luaG_typeerror "attempt to index" (0x006FC620);
+    // function TM → call it; table TM → recurse FUN_LUA_V_GETTABLE with
+    // `loop` passed through UNCHANGED (0x006F7F23). Exactly 3 call
+    // sites: luaV_gettable's else-branch + luaV_execute's OP_GETTABLE /
+    // OP_SELF non-table fallbacks (0x006F8A14 / 0x006F8C17 in
+    // FUN_006F8720) — so it fires ONLY when code indexes a non-table,
+    // which in stock 5.0 is always about to raise "attempt to index"
+    // (table `__index` dispatch goes through FUN_006F7D60's fasttm and
+    // never lands here). A cold, uncontested hook site. Prologue is
+    // plain PUSH/MOV — MinHook-relocatable. Co-hooked by
+    // LuaSyntax::StringMethods to backport Lua 5.1 string methods
+    // (`("x"):upper()`): strings get the `string` library table as their
+    // __index, exactly 5.1's shared-string-metatable mechanism.
+    FUN_LUA_INDEX_NONTABLE = 0x006F7EE0,
     // `luaL_loadbuffer(L, buff, size, chunkname)` — compiles a source
     // buffer into a Lua function on the stack (does NOT run it). Returns
     // an int status (0 = ok) in eax; Ghidra types it void because the
