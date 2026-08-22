@@ -1341,7 +1341,7 @@ int __fastcall LoadBuffer_h(void *L, const char *buff, unsigned size, const char
 // Diagnostics / toggles.
 // ============================================================================
 
-int __fastcall Script_TranspileLength(void *L) {
+int __fastcall Script_Transpile(void *L) {
     const char *s = Game::Lua::ToString(L, 1);
     if (s == nullptr) {
         Game::Lua::PushNil(L);
@@ -1405,7 +1405,7 @@ void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("__len", &Script_Len);
     Game::Lua::RegisterGlobalFunction("__mod", &Script_Mod);
     Game::Lua::RegisterGlobalFunction("__addonns", &Script_AddonNS);
-    Game::Lua::RegisterGlobalFunction("_classicapi_TranspileLength", &Script_TranspileLength);
+    Game::Lua::RegisterGlobalFunction("_classicapi_Transpile", &Script_Transpile);
     Game::Lua::RegisterGlobalFunction("_classicapi_SetTranspileOption", &Script_SetTranspileOption);
     Game::Lua::RegisterGlobalFunction("_classicapi_GetTranspileOption", &Script_GetTranspileOption);
 }
