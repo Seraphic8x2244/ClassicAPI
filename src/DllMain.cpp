@@ -16,6 +16,7 @@
 #include "MinHook.h"
 #include "Offsets.h"
 #include "event/Custom.h"
+#include "luasyntax/StringMethods.h"
 #include "model/DisplayInfo.h"
 #include "nameplate/Walk.h"
 #include "player/NameCache.h"
@@ -64,6 +65,12 @@ static bool __fastcall FrameScript_Initialize_h() {
     // Drop pending character-dress jobs and their engine compositors — the
     // reload destroys every Model frame the jobs point at.
     Model::DisplayInfo::PrepareForReload();
+
+    // Forget the captured `string` table before the world Lua state resets
+    // (this hook also fires on /logout, where the state's tables die) —
+    // string-method resolution fails closed (stock index error) until
+    // LoadScriptFunctions re-captures.
+    LuaSyntax::StringMethods::PrepareForReload();
 
     // Persist the name cache before the engine starts tearing down.
     // This hook fires on both `/reload` and `/logout` (the engine

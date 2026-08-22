@@ -8599,6 +8599,10 @@ link:sub(1, 5)
 - Writing to a string (`("x").y = 1`) still fails, the same as Lua 5.1.
 - Works everywhere strings do: in the world, on the login screen, and
   inside coroutines.
+- To turn method resolution off for diagnosis, call
+  `_classicapi_SetStringMethods(false)`. Strings then error on index, the
+  stock 1.12 behavior. Use it only to answer "is this backport breaking
+  this addon?".
 
 ### `getfenv` / `setfenv` environment protection
 

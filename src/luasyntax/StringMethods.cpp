@@ -52,10 +52,21 @@
 // (5.1 parity — its metatable pins the open-time table the same way).
 // Captures re-run per /reload (ModuleAutoRegister) and per glue boot
 // (GlueModuleAutoRegister), overwriting the anchor so the previous table is
-// released. Between a state teardown and its re-capture a slot can be
-// stale, but no Lua executes in those windows (engine C init only — and on
-// this 5.0 engine no pre-existing code indexes strings anyway, since doing
-// so always errored).
+// released. Slots are cleared BEFORE their state can die, so a capture can
+// never outlive the table it points at: PrepareForReload (called from
+// FrameScript_Initialize_h, which fires on /reload AND /logout before the
+// world Lua state is reset) clears the game slot, and the in-game
+// registration clears the glue slot (once world scripts are loading, the
+// glue state is gone; the next glue boot re-captures before any glue Lua
+// runs). A cleared slot fails closed — strings error on index exactly as
+// stock 1.12 until the re-capture.
+//
+// Kill switch: `_classicapi_SetStringMethods(false)` (registered on both
+// states) makes the hook forward everything to the original resolver —
+// exact stock behavior — for "is this backport breaking this addon?"
+// diagnosis, mirroring `_classicapi_SetTranspileOption`.
+
+#include "StringMethods.h"
 
 #include "Game.h"
 #include "Offsets.h"
@@ -94,6 +105,11 @@ struct StateSlot {
 StateSlot g_gameSlot;
 StateSlot g_glueSlot;
 
+// Runtime kill switch — `_classicapi_SetStringMethods(false)` reverts to
+// exact stock behavior (the hook forwards everything). Process-wide; both
+// states share it.
+bool g_enabled = true;
+
 // Registry key anchoring the captured table against GC (rawset — the
 // registry has no metatable). One key per state's registry; re-capture
 // overwrites it, releasing the previously anchored table.
@@ -107,7 +123,8 @@ IndexResolve_t g_indexNonTableOriginal = nullptr;
 
 void *__fastcall IndexNonTable_h(void *L, const void *obj, void *key, int loop) {
     // 5.1 backport: a string's `__index` is the `string` library table.
-    if (obj != nullptr && *static_cast<const int *>(obj) == Game::Lua::TYPE_STRING) {
+    if (g_enabled && obj != nullptr &&
+        *static_cast<const int *>(obj) == Game::Lua::TYPE_STRING) {
         const void *G = Game::Read<const void *>(L, OFF_L_GLOBALSTATE);
         const StateSlot *slot = nullptr;
         if (g_gameSlot.G == G)
@@ -147,12 +164,42 @@ void CaptureFor(StateSlot &slot) {
     Game::Lua::SetTop(L, -2); // pop
 }
 
-void RegisterLuaFunctions() { CaptureFor(g_gameSlot); }
-void RegisterGlueFunctions() { CaptureFor(g_glueSlot); }
+// `_classicapi_SetStringMethods(enabled)` — diagnostic kill switch. While
+// false, string index falls through to the original resolver and errors as
+// stock 1.12. Use only to answer "is this backport breaking this addon?".
+int __fastcall Script_SetStringMethods(void *L) {
+    g_enabled = Game::Lua::ToBoolean(L, 1) != 0;
+    return 0;
+}
+
+void RegisterLuaFunctions() {
+    // World scripts are loading ⇒ the glue state is gone (destroyed on the
+    // glue→world handoff). Clear its slot so a future glue global_State
+    // that lands at the same address can never match this stale capture.
+    g_glueSlot.G = nullptr;
+    g_glueSlot.tv.value = nullptr;
+    CaptureFor(g_gameSlot);
+    Game::Lua::RegisterGlobalFunction("_classicapi_SetStringMethods",
+                                      &Script_SetStringMethods);
+}
+void RegisterGlueFunctions() {
+    CaptureFor(g_glueSlot);
+    Game::Lua::RegisterGlueFunction("_classicapi_SetStringMethods",
+                                    &Script_SetStringMethods);
+}
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 const Game::GlueModuleAutoRegister _glueAutoreg{&RegisterGlueFunctions};
 
 } // namespace
+
+void PrepareForReload() {
+    // The world Lua state is about to be reset (/reload) or destroyed
+    // (/logout); its string table may not survive. Fail closed until the
+    // next LoadScriptFunctions re-capture — a cleared slot means strings
+    // error on index exactly as stock, and nothing can read a freed table.
+    g_gameSlot.G = nullptr;
+    g_gameSlot.tv.value = nullptr;
+}
 
 } // namespace LuaSyntax::StringMethods

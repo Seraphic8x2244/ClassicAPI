@@ -28,12 +28,11 @@
 //     it as a direct alias of the engine's `gfind` C function.
 // `strsplit` is a hand-rolled port of 3.3.5's `strsplit` (see below).
 //
-// NOTE: only the `string.foo(s, ...)` call form works — NOT the
-// `("x"):foo(...)` method sugar. WoW's Lua VM strips type-metatables for
-// every value except tables/userdata (both `lua_setmetatable` and the VM's
-// `luaT_gettmbyobj` hard-return "no metamethod" for strings), so strings have
-// no `__index`, and there's no client-side way to add one short of hooking a
-// hot VM-core function. This is the long-standing vanilla constraint.
+// NOTE: both call forms work — `string.foo(s, ...)` AND the `("x"):foo(...)`
+// method sugar. Method calls resolve through this same `string` table via
+// LuaSyntax::StringMethods (the Lua 5.1 string-metatable backport), so
+// everything registered here is automatically reachable as a method, on
+// both states.
 
 #include "Game.h"
 #include "Offsets.h"
