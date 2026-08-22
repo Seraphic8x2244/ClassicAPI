@@ -104,6 +104,13 @@ jobs:
           name: ClassicAPI-${{ github.sha }}
           path: build/Release/ClassicAPI.dll
 
+      # The linker map resolves the logical addresses in a user's crash log
+      # (the ERROR #132 stack trace) to function names. Ship it under a name
+      # that tells users what it's for, so crash reports come with it.
+      - name: Rename linker map for release
+        if: steps.ver.outputs.is_release == 'true'
+        run: Copy-Item build/Release/ClassicAPI.map build/Release/USE_FOR_DEBUGGING_CAPI_CRASHES.map
+
       - name: Release
         if: steps.ver.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
@@ -111,5 +118,5 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           files: |
             build/Release/ClassicAPI.dll
-            build/Release/ClassicAPI.map
+            build/Release/USE_FOR_DEBUGGING_CAPI_CRASHES.map
           generate_release_notes: true
