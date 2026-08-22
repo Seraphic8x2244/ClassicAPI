@@ -176,12 +176,20 @@ struct Pending {
 
 constexpr int kMaxPending = 512;
 constexpr int kMaxWaitTicks = 1200;
-// World ticks after which we assume the engine's startup
+// Wall-clock delay past world-live before we assume the engine's startup
 // network/opcode-dispatch state has settled and eager queries are safe.
-// Also latched the moment the engine's own response handler fires (a
-// response proves dispatch is live) — see `ItemStatsCacheResponse_h`.
+// Anchored to VAR_IN_WORLD (set to 1 by the enter-world initializer
+// FUN_004908C0, cleared on every transition — the same flag
+// bag/UpdateDelayed trusts), NOT a raw frame count: a fixed tick count is
+// FPS-dependent, so it could fire before dispatch was ready on a fast
+// machine (orphan risk — see the block comment above) yet leave bag icons
+// as "?" far longer than intended on a slow login. World-live alone is
+// still PLAYER_ENTERING_WORLD's first frame — inside the orphan window —
+// so we wait this long past it. Also latched the instant the engine's own
+// item-response handler fires (a response proves dispatch is live, so a
+// warm WDB settles with no delay) — see `ItemStatsCacheResponse_h`.
 // One-way latch; see the relog note in `WarmCache`.
-constexpr int kSettleTicks = 60;
+constexpr uint32_t kSettleMs = 1000;
 
 // Minimum spacing between outgoing *background* SMSG_ITEM_QUERY_SINGLE
 // requests. A single /reload can make addons (pfQuest / Questie / Bagnon)
@@ -198,10 +206,10 @@ constexpr uint32_t kMinRequestSpacingMs = 50;
 // login; behind the background floor they showed as "unknown" for a
 // second or two while a bulk addon scan drained ahead of them. These
 // are issued on a separate, more generous budget so they resolve fast.
-// The set is bounded (~120 items) and the engine prefetches inventory in
-// parallel, so a small per-tick cap keeps them near-instant without
-// re-introducing a burst: worst case is kOwnedPerTick + 1 packets per
-// frame (~7), far below the flood that broke connectivity.
+// The set is bounded (~120 items), so a small per-tick cap keeps them
+// near-instant without re-introducing a burst: worst case is
+// kOwnedPerTick + 1 packets per frame (~7), far below the flood that
+// broke connectivity.
 constexpr int kOwnedPerTick = 6;
 constexpr int kMaxOwned = 256;
 constexpr uint32_t kOwnedRefreshMs = 1000; // carried set changes slowly
@@ -209,7 +217,10 @@ constexpr uint32_t kOwnedRefreshMs = 1000; // carried set changes slowly
 static Pending g_pending[kMaxPending];
 static int g_pendingCount = 0;
 static bool g_settled = false;
-static int g_worldTicks = 0;
+// Tick timestamp when we first saw the world go live (VAR_IN_WORLD == 1);
+// 0 = not yet. Anchors the kSettleMs delay. Only meaningful until the
+// one-way g_settled latch flips, so it is never reset.
+static uint32_t g_inWorldSinceMs = 0;
 static uint32_t g_lastRequestMs = 0;
 
 // Snapshot of the itemIDs the player currently carries. Rebuilt by a
@@ -445,10 +456,20 @@ static bool IsOwned(uint32_t itemID) {
 //      giving up after `kMaxWaitTicks` for items whose query was already
 //      sent but never resolved (lost query, server silent).
 static void OnWorldTick() {
-    if (!g_settled && ++g_worldTicks >= kSettleTicks)
-        g_settled = true;
-
     const uint32_t now = Time::Clock::NowMs();
+
+    // Settle the startup gate a fixed wall-clock delay past world-live —
+    // or leave it to ItemStatsCacheResponse_h to latch the instant a real
+    // item response arrives, whichever comes first. See kSettleMs.
+    if (!g_settled) {
+        const bool inWorld = *reinterpret_cast<const volatile uint8_t *>(
+                                 static_cast<uintptr_t>(Offsets::VAR_IN_WORLD)) != 0;
+        if (inWorld && g_inWorldSinceMs == 0)
+            g_inWorldSinceMs = now;
+        if (g_inWorldSinceMs != 0 &&
+            Time::Clock::Elapsed(g_inWorldSinceMs, now) >= kSettleMs)
+            g_settled = true;
+    }
 
     // Proactive local-inventory prefetch (once per enter-world session).
     // The engine does NOT query bag item stats on enter-world or bag draw:
