@@ -1,19 +1,69 @@
 # ClassicAPI
 
-A small DLL for World of Warcraft 1.12.1 (Vanilla / Turtle WoW) that adds a
-collection of Lua API calls Blizzard never exposed in 1.12 but which make
-addon authoring noticeably less painful — primarily for backporting addons
-written against later API versions (3.3.5+) where these calls do exist.
+ClassicAPI is a DLL for World of Warcraft 1.12.1 (Vanilla / Turtle WoW). It
+backports a large part of the modern WoW API — and much of Lua 5.1 — into the
+1.12 client. Addons written for later versions (3.3.5+ or Classic Era) then run
+with little or no change.
 
-The DLL hooks the FrameScript engine after WoW boots and registers its
-extensions through the same in-engine mechanisms WoW uses for its own Lua
-functions. No companion addon is required.
+The DLL hooks the engine after WoW boots and registers everything through the
+same mechanisms WoW uses for its own Lua functions. There is no companion addon
+to install; the DLL is self-contained.
 
-## What's added
+## Highlights
 
-Full per-function reference: **[docs/API.md](docs/API.md)**.
+These are the main reasons to install ClassicAPI. Each one is transparent —
+there is no API to call, and your addons use it automatically. The full
+per-function reference is in **[docs/API.md](docs/API.md)**.
 
-### Calls
+### Lua 5.1 compatibility
+
+The flagship feature: run modern Lua 5.1 addon code on 1.12's Lua 5.0 VM.
+
+| Feature | Effect |
+|---------|--------|
+| Syntax | Compiles the Lua 5.1 length (`#`), modulo (`%`), `...`-expression, `0x` hex-literal, and leveled long bracket (`[=[ ]=]`) syntax that vanilla's Lua 5.0 rejects, by rewriting addon source before it compiles. Each addon file also receives its `(name, table)` through `...` (`local name, tbl = ...`). See [Lua 5.1 syntax](docs/API.md#lua-51-syntax). |
+| String methods | Every string value accepts method calls — `("asd"):upper()`, `("%d gold"):format(n)`, `msg:match("^!(%w+)")` — resolving through the `string` table, the way Lua 5.1 works. Vanilla's Lua 5.0 errors with `attempt to index a string value`. Works on literals and variables, in-world and on the login screen, and inside coroutines. See [String methods](docs/API.md#string-methods-supper-sformat). |
+| Table lengths | `table.getn` / `insert` / `remove` / `concat` / `sort` measure a table's length the way Lua 5.1 does: a table whose keys were all removed counts as empty again, with no `table.setn(t, 0)` call needed. Vararg `arg` tables (explicit `n` field) and `table.setn` callers keep their exact 5.0 behavior. See [Stale table lengths](docs/API.md#stale-table-lengths-51-healing). |
+| Environment protection | `getfenv` / `setfenv` honor a `__environment` metatable field — the Lua 5.1 sandbox form — in addition to vanilla's raw `__fenv`. See [getfenv / setfenv environment protection](docs/API.md#getfenv--setfenv-environment-protection). |
+| Script-handler arguments | Frame-script handlers receive their values as positional arguments — `OnMouseWheel(self, delta)`, `OnClick(self, button)`, `OnEvent(self, event, ...)`, etc. — the way 5.1+ clients do, so modern addon ports work unmodified. The `this` / `arg1` globals stay set. A handler that declares no parameters is unaffected. A handler that declared a parameter and expected nil now receives its real value. On by default. `SetModernScriptArgs(false)` restores exact vanilla dispatch. See [SetModernScriptArgs](docs/API.md#setmodernscriptargsenable--getmodernscriptargs). |
+
+### Modern text rendering
+
+| Feature | Effect |
+|---------|--------|
+| Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips, the way 4.3.4+ clients do. Vanilla 1.12 shows the raw escape as literal text instead. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
+| Tooltip line cap | Lifts `GameTooltip`'s hard 30-line limit to 60 for every `GameTooltipTemplate` frame (`GameTooltip`, `ShoppingTooltip1/2`, `ItemRefTooltip`, AtlasLoot, …). Stat-heavy tooltips and comparison blocks (e.g. pfUI's eqcompare) no longer have their extra lines silently dropped. Done in pure C++ by growing the engine's FontString pool at tooltip-creation time. |
+
+### Modern addon loading
+
+| Feature | Effect |
+|---------|--------|
+| Multi-flavor & conditional TOC | Loads modern multi-flavor addons that ship one folder. Selects a version-specific TOC (`<Name>_ClassicAPI.toc` or `<Name>_Turtle.toc`) and the matching keybinding file (`Bindings_ClassicAPI.xml` / `Bindings_Turtle.xml`), accepts a comma-separated `## Interface:` version list (compatible when it includes the client version `11200`), and honors per-line `[AllowLoadGameType]` / `[AllowLoadTextLocale]` conditions and `[Family]` / `[Game]` / `[TextLocale]` path variables inside a TOC. See [Conditional and multi-flavor TOC loading](docs/API.md#conditional-and-multi-flavor-toc-loading). |
+| SavedVariables loaded first | Honors the modern `## LoadSavedVariablesFirst` TOC directive: a flagged addon's SavedVariables load before its Lua runs, so file-scope code sees restored config (instead of vanilla's `nil`). See [SavedVariables loaded first](docs/API.md#savedvariables-loaded-first). |
+
+## Installation
+
+Download the prebuilt `ClassicAPI.dll` from the
+[latest release](https://github.com/brues-code/ClassicAPI/releases/latest)
+(or [build it yourself](#building)). It's loaded with
+[VanillaFixes](https://github.com/hannesmann/vanillafixes):
+
+1. Install VanillaFixes if it isn't already.
+2. Copy `ClassicAPI.dll` into your game directory.
+3. Add `ClassicAPI.dll` to `dlls.txt`.
+4. Launch the game with `VanillaFixes.exe`.
+
+The bundled `!!!ClassicAPI` addon ships *inside* the DLL — no separate
+addon download or install step needed.
+
+## Full API reference
+
+The complete surface. Every section below is collapsed — click a heading to
+expand it. The full per-function reference, with signatures and return values,
+is in **[docs/API.md](docs/API.md)**.
+
+<details>
+<summary><b>In-game Lua calls</b> — 400+ functions across ~60 namespaces</summary>
 
 | Namespace | Calls |
 |-----------|-------|
@@ -77,7 +127,10 @@ Full per-function reference: **[docs/API.md](docs/API.md)**.
 | [VoiceChat](docs/API.md#voicechat) | `C_VoiceChat.GetTtsVoices`, `C_VoiceChat.GetRemoteTtsVoices`, `C_VoiceChat.SpeakText`, `C_VoiceChat.StopSpeakingText`, `C_TTSSettings.GetSpeechRate`, `C_TTSSettings.GetSpeechVolume`, `C_TTSSettings.GetSpeechVoiceID`, `C_TTSSettings.GetVoiceOptionName`, `C_TTSSettings.SetSpeechRate`, `C_TTSSettings.SetSpeechVolume`, `C_TTSSettings.SetVoiceOption`, `C_TTSSettings.SetVoiceOptionByName`, `C_TTSSettings.SetDefaultSettings`, `C_TTSSettings.RefreshVoices` |
 | [XMLUtil](docs/API.md#xmlutil) | `C_XMLUtil.DoesTemplateExist`, `C_XMLUtil.GetTemplateInfo`, `C_XMLUtil.GetTemplates` |
 
-### GlueXML calls
+</details>
+
+<details>
+<summary><b>GlueXML calls</b> — login / realm-select / character-select screens</summary>
 
 Registered on the **glue** Lua state (the engine that runs the login,
 realm-select, and character-select screens). The persistence entries
@@ -97,7 +150,10 @@ the glue state because GlueXML had no way to reach them otherwise.
 | Script | `RunScript` (compile and run a Lua chunk in the glue state's globals — useful for slash-command-style helpers in GlueXML) |
 | State | `IsLoggedIn` |
 
-### Macros
+</details>
+
+<details>
+<summary><b>Macros</b> — engine-level parsing extensions</summary>
 
 Engine-level extensions to macro parsing and dispatch — no new Lua
 functions, just behavior the stock 1.12 engine didn't have. See the
@@ -109,7 +165,10 @@ functions, just behavior the stock 1.12 engine didn't have. See the
 | `CastSpellByName("<spellID>")` | Same — numeric strings resolve through the engine's name resolver |
 | `CastSpellNoToggle("<name>")` in a macro | Engine's macro parser now recognizes it as a primary-spell line, so the macro slot in an addon like pfUI highlights when its spell is auto-repeating or its self-aura is active |
 
-### Console commands
+</details>
+
+<details>
+<summary><b>Console commands</b> — developer console (<code>-console</code>)</summary>
 
 Registered on the engine's developer console (the `~` console available
 when launching with `-console`), not as Lua functions. See the
@@ -121,7 +180,10 @@ when launching with `-console`), not as Lua functions. See the
 | `ExportInterfaceFiles art` | Extracts Blizzard's UI art (`.blp`/`.tga`) from the MPQs to `BlizzardInterfaceArt\` |
 | `ExportDBCFiles` | Extracts the client's `.dbc` tables from the MPQs to `DBFilesClient\` |
 
-### Events
+</details>
+
+<details>
+<summary><b>Events</b> — new events fired to addons</summary>
 
 | Event | Payload |
 |-------|---------|
@@ -177,7 +239,10 @@ when launching with `-console`), not as Lua functions. See the
 | `VOICE_CHAT_TTS_PLAYBACK_FAILED` | `status, utteranceID, destination` |
 | `VOICE_CHAT_TTS_VOICES_UPDATE` | *(none)* |
 
-### Globals
+</details>
+
+<details>
+<summary><b>Globals & enums</b></summary>
 
 | Group | Constants |
 |-------|-----------|
@@ -193,7 +258,10 @@ when launching with `-console`), not as Lua functions. See the
 | Spellbook bank | `Enum.SpellBookSpellBank.{Player,Pet}` (0–1) |
 | Spellbook item type | `Enum.SpellBookItemType.{None,Spell,FutureSpell,PetAction,Flyout}` (0–4; 1.12 only yields `Spell`/`PetAction`) |
 
-### Unit tokens
+</details>
+
+<details>
+<summary><b>Unit tokens</b> — <code>nameplateN</code>, <code>focus</code>, <code>markN</code></summary>
 
 | Token | Resolves to |
 |-------|-------------|
@@ -201,7 +269,10 @@ when launching with `-console`), not as Lua functions. See the
 | `focus` / `focustarget` | Sticky target set via [`FocusUnit`](docs/API.md#focusunitunit), cleared via [`ClearFocus`](docs/API.md#clearfocus). Same `UnitX` coverage as `nameplateN`. Fires [`PLAYER_FOCUS_CHANGED`](docs/API.md#player_focus_changed-event) on transition. See [Focus](docs/API.md#focus). |
 | `mark1`..`mark8` | Unit currently wearing the Nth raid-target marker (`mark1` = star … `mark8` = skull). Same `UnitX` coverage as `nameplateN`, and fires unit events (`UNIT_HEALTH`, `UNIT_AURA`, …) with `arg1 == "markN"`. `UnitExists("markN")` is `false` when the marker is unset, out of range, or on a non-unit. Suffix chains (`mark1target`) compose. See [Unit tokens (`markN`)](docs/API.md#unit-tokens-markn). |
 
-### Bindings
+</details>
+
+<details>
+<summary><b>Bindings</b> — direct-action and override binding families</summary>
 
 ClassicAPI backports the later-client direct-action and temporary override
 binding families. Permanent bindings use the standard `SPELL`, `ITEM`,
@@ -212,11 +283,10 @@ See the [Bindings API reference](docs/API.md#bindings) for signatures,
 precedence, execution behavior, macro-text usage, and 1.12 compatibility
 notes.
 
-#### Predefined focus bindings
-
-Injected into the engine's **Targeting Functions** group at FrameXML
-Bindings.xml load time, so they appear in the keybind UI alongside
-native targeting bindings instead of orphaned at the bottom.
+**Predefined focus bindings.** Injected into the engine's **Targeting
+Functions** group at FrameXML Bindings.xml load time, so they appear in the
+keybind UI alongside native targeting bindings instead of orphaned at the
+bottom.
 
 | Binding | Action |
 |---------|--------|
@@ -226,36 +296,7 @@ native targeting bindings instead of orphaned at the bottom.
 See [Predefined focus bindings](docs/API.md#predefined-focus-bindings-focustarget--targetfocus)
 for the implementation note.
 
-### Behaviors
-
-Transparent engine tweaks — no API to call, they just fix a vanilla limitation:
-
-| Tweak | Effect |
-|-------|--------|
-| Tooltip line cap | Lifts `GameTooltip`'s hard 30-line limit to 60 for every `GameTooltipTemplate` frame (`GameTooltip`, `ShoppingTooltip1/2`, `ItemRefTooltip`, AtlasLoot, …). Stat-heavy tooltips and comparison blocks (e.g. pfUI's eqcompare) no longer have their extra lines silently dropped. Done in pure C++ by growing the engine's FontString pool at tooltip-creation time. |
-| Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips, the way 4.3.4+ clients do. Vanilla 1.12 shows the raw escape as literal text instead. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
-| Lua 5.1 syntax | Compiles the Lua 5.1 length (`#`), modulo (`%`), `...`-expression, `0x` hex-literal, and leveled long bracket (`[=[ ]=]`) syntax that vanilla's Lua 5.0 rejects, by rewriting addon source before it compiles. Each addon file also receives its `(name, table)` through `...` (`local name, tbl = ...`). See [Lua 5.1 syntax](docs/API.md#lua-51-syntax). |
-| Lua 5.1 string methods | Every string value accepts method calls — `("asd"):upper()`, `("%d gold"):format(n)`, `msg:match("^!(%w+)")` — resolving through the `string` table, the way Lua 5.1 works. Vanilla's Lua 5.0 errors with `attempt to index a string value`. Works on literals and variables, in-world and on the login screen, and inside coroutines. See [String methods](docs/API.md#string-methods-supper-sformat). |
-| Lua 5.1 environment protection | `getfenv` / `setfenv` honor a `__environment` metatable field — the Lua 5.1 sandbox form — in addition to vanilla's raw `__fenv`. See [getfenv / setfenv environment protection](docs/API.md#getfenv--setfenv-environment-protection). |
-| Lua 5.1 table lengths | `table.getn` / `insert` / `remove` / `concat` / `sort` measure a table's length the way Lua 5.1 does: a table whose keys were all removed counts as empty again, with no `table.setn(t, 0)` call needed. Vararg `arg` tables (explicit `n` field) and `table.setn` callers keep their exact 5.0 behavior. See [Stale table lengths](docs/API.md#stale-table-lengths-51-healing). |
-| Multi-flavor & conditional TOC loading | Loads modern multi-flavor addons that ship one folder. Selects a version-specific TOC (`<Name>_ClassicAPI.toc` or `<Name>_Turtle.toc`) and the matching keybinding file (`Bindings_ClassicAPI.xml` / `Bindings_Turtle.xml`), accepts a comma-separated `## Interface:` version list (compatible when it includes the client version `11200`), and honors per-line `[AllowLoadGameType]` / `[AllowLoadTextLocale]` conditions and `[Family]` / `[Game]` / `[TextLocale]` path variables inside a TOC. See [Conditional and multi-flavor TOC loading](docs/API.md#conditional-and-multi-flavor-toc-loading). |
-| SavedVariables loaded first | Honors the modern `## LoadSavedVariablesFirst` TOC directive: a flagged addon's SavedVariables load before its Lua runs, so file-scope code sees restored config (instead of vanilla's `nil`). See [SavedVariables loaded first](docs/API.md#savedvariables-loaded-first). |
-| Modern script-handler arguments | Frame-script handlers receive their values as positional arguments — `OnMouseWheel(self, delta)`, `OnClick(self, button)`, `OnEvent(self, event, ...)`, etc. — the way 5.1+ clients do, so modern addon ports work unmodified. The `this` / `arg1` globals stay set. A handler that declares no parameters is unaffected. A handler that declared a parameter and expected nil now receives its real value. On by default. `SetModernScriptArgs(false)` restores exact vanilla dispatch. See [SetModernScriptArgs](docs/API.md#setmodernscriptargsenable--getmodernscriptargs). |
-
-## Installation
-
-Download the prebuilt `ClassicAPI.dll` from the
-[latest release](https://github.com/brues-code/ClassicAPI/releases/latest)
-(or [build it yourself](#building)). It's loaded with
-[VanillaFixes](https://github.com/hannesmann/vanillafixes):
-
-1. Install VanillaFixes if it isn't already.
-2. Copy `ClassicAPI.dll` into your game directory.
-3. Add `ClassicAPI.dll` to `dlls.txt`.
-4. Launch the game with `VanillaFixes.exe`.
-
-The bundled `!!!ClassicAPI` addon ships *inside* the DLL — no separate
-addon download or install step needed.
+</details>
 
 ## Bundled addon: !!!ClassicAPI
 
