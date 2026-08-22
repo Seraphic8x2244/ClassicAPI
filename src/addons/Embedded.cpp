@@ -47,6 +47,11 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "addons/EngineIO.h"
+#include "addons/FlavorBindings.h"
+#include "addons/FlavorToc.h"
+#include "addons/Toc.h"
+#include "addons/TocRewrite.h"
 #include "bindings/Inject.h"
 
 #include <cstdint>
@@ -111,30 +116,15 @@ const ClassicAPIFiles::File *LookupEmbedded(const char *suffix) {
     return nullptr;
 }
 
-// Storm allocator — same one `FUN_FILE_READ` uses internally. Buffer
-// allocated here is freed cleanly by the caller's standard `SMemFree`
-// (`FUN_STORM_SMEM_FREE`). `__stdcall` per the function's `RET 0x10`
-// (4 args × 4 bytes = 16) epilogue.
-//   __stdcall void *SMemAlloc(size_t size, const char *file, int line, int flags)
-using SMemAlloc_t = void *(__stdcall *)(size_t size, const char *file, int line, int flags);
+// Engine file I/O + Storm allocator — see addons/EngineIO.h for the shapes and
+// the __stdcall / ESP-drift hazard. A buffer we SMemAlloc here is freed cleanly
+// by the caller's standard SMemFree in turn.
+using AddOns::EngineIO::FileReadFn;
+using AddOns::EngineIO::SMemAllocFn;
+using AddOns::EngineIO::SMemFreeFn;
 
-// `FUN_FILE_READ` — same shape derived from the Octo decompile.
-// Calling convention is `__stdcall` (callee cleans 28 bytes via
-// `RET 0x1C`), not `__cdecl` — confirmed via the function epilogue.
-// Getting this wrong silently corrupts the caller's stack frame.
-//   __stdcall int FileRead(int unused, const char *path, void **outBuf,
-//                          size_t *outSize, size_t extraBytes,
-//                          int flag1, int flag2)
-using FileRead_t = int(__stdcall *)(int unused, const char *path, void **outBuf,
-                                    size_t *outSize, size_t extraBytes,
-                                    int flag1, int flag2);
-FileRead_t FileRead_o = nullptr;
-
-// Storm-allocator free. Used to release the disk-TOC buffer after we
-// scrape its version line — same path the engine itself uses when
-// `FileRead_o` succeeded and the caller's done with the result.
-//   __stdcall void SMemFree(void *buf, const char *file, int line, int flags)
-using SMemFree_t = void(__stdcall *)(void *buf, const char *file, int line, int flags);
+// The trampoline to the original FUN_FILE_READ (installed by the co-hook below).
+FileReadFn FileRead_o = nullptr;
 
 // Extracts the value of the `## Version: X` line from a TOC byte
 // buffer. Writes into `out` (size `outSize`) and returns true on
@@ -142,25 +132,19 @@ using SMemFree_t = void(__stdcall *)(void *buf, const char *file, int line, int 
 // sensitive on the key. Returns false if no Version line is found.
 bool ExtractTocVersion(const char *content, size_t size,
                        char *out, size_t outSize) {
-    static const char kKey[] = "## Version:";
-    constexpr size_t kKeyLen = sizeof(kKey) - 1;
-    for (size_t i = 0; i + kKeyLen <= size; ++i) {
-        const bool atLineStart = (i == 0) || content[i - 1] == '\n';
-        if (!atLineStart) continue;
-        if (std::memcmp(content + i, kKey, kKeyLen) != 0) continue;
-        const char *p = content + i + kKeyLen;
-        const char *end = content + size;
-        while (p < end && (*p == ' ' || *p == '\t')) ++p;
-        size_t j = 0;
-        while (p < end && *p != '\r' && *p != '\n' && j + 1 < outSize) {
-            out[j++] = *p++;
-        }
-        while (j > 0 && (out[j - 1] == ' ' || out[j - 1] == '\t')) --j;
-        out[j] = '\0';
-        return j > 0;
+    const char *v = nullptr;
+    size_t n = 0;
+    if (outSize == 0)
+        return false;
+    if (!AddOns::Toc::FindValue(content, size, "## Version:", &v, &n) || n == 0) {
+        out[0] = '\0';
+        return false;
     }
-    if (outSize > 0) out[0] = '\0';
-    return false;
+    if (n >= outSize)
+        n = outSize - 1;
+    std::memcpy(out, v, n);
+    out[n] = '\0';
+    return true;
 }
 
 // Returns -1/0/+1 for `a < b` / `a == b` / `a > b`. "DEV" is the
@@ -229,7 +213,7 @@ bool DiskHasDevMarker() {
     const int ok = FileRead_o(0, fullPath, &buf, &size, 1, 1, 0);
     if (ok == 0 || buf == nullptr)
         return false;
-    auto SMemFree = reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE);
+    auto SMemFree = reinterpret_cast<SMemFreeFn>(Offsets::FUN_STORM_SMEM_FREE);
     SMemFree(buf, __FILE__, __LINE__, 0);
     return true;
 }
@@ -274,7 +258,7 @@ void DecideSource() {
     // Free the disk buffer we just borrowed — we only needed it for
     // the version-line scrape. The actual content for the engine's
     // TOC read comes through the regular hook path below.
-    auto SMemFree = reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE);
+    auto SMemFree = reinterpret_cast<SMemFreeFn>(Offsets::FUN_STORM_SMEM_FREE);
     SMemFree(diskBuf, __FILE__, __LINE__, 0);
 
     // Missing or unparseable disk version → assume it's older than
@@ -301,10 +285,33 @@ int __stdcall FileRead_h(int unused, const char *path, void **outBuf,
 
     const char *suffix = StripAddonPrefix(path);
     if (suffix == nullptr) {
-        // Path isn't under `Interface\AddOns\!!!ClassicAPI\` — straight
-        // pass-through, we don't care.
-        return FileRead_o(unused, path, outBuf, outSize, extraBytes,
-                          flag1, flag2);
+        // Not our embedded addon. If this is a base-TOC read for a multi-flavor
+        // addon that ships only `<Name>_Turtle.toc` / `_ClassicAPI.toc`, serve
+        // that in place of the missing `<Name>.toc` so it registers and loads
+        // (see addons/FlavorToc.h).
+        int result;
+        if (AddOns::FlavorToc::TryHandle(unused, path, outBuf, outSize,
+                                         extraBytes, flag1, flag2, FileRead_o)) {
+            result = 1;
+        } else if (AddOns::FlavorBindings::TryHandle(unused, path, outBuf, outSize,
+                                                     extraBytes, flag1, flag2,
+                                                     FileRead_o)) {
+            // Flavor-specific addon keybindings: serve `Bindings_Turtle.xml` /
+            // `Bindings_ClassicAPI.xml` for a `…\AddOns\<Name>\Bindings.xml`
+            // read (see addons/FlavorBindings.h). The paired exists-check
+            // co-hook lives in that module.
+            result = 1;
+        } else {
+            result = FileRead_o(unused, path, outBuf, outSize, extraBytes,
+                                flag1, flag2);
+        }
+        // Per-line TOC directives: evaluate `[Condition]` and expand
+        // `[Variable]` tokens on this addon TOC's file lines so the load
+        // pass sees clean paths (see addons/TocRewrite.h). No-op unless
+        // `path` is an addon `.toc` that actually contains directives.
+        if (result != 0)
+            AddOns::TocRewrite::Transform(path, outBuf, outSize);
+        return result;
     }
 
     DecideSource();
@@ -331,7 +338,7 @@ int __stdcall FileRead_h(int unused, const char *path, void **outBuf,
                           flag1, flag2);
     }
 
-    auto SMemAlloc = reinterpret_cast<SMemAlloc_t>(
+    auto SMemAlloc = reinterpret_cast<SMemAllocFn>(
         Offsets::FUN_STORM_SMEM_ALLOC);
     const size_t totalSize = entry->size + extraBytes;
     void *buf = SMemAlloc(totalSize, __FILE__, __LINE__, 0);

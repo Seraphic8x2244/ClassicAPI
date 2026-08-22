@@ -4679,6 +4679,17 @@ enum Offsets {
 
     VAR_LOCALE_INDEX = 0x00C0E080,             // 0..8, picks one of the 9 localized strings
 
+    // Locale-name string table — a parallel `const char *[8]` indexed by
+    // VAR_LOCALE_INDEX, holding the exact codes `GetLocale()` returns:
+    // enUS / koKR / frFR / deDE / zhCN / zhTW / esES / xxYY. This is the
+    // source `Script_GetLocale` (FUN_0048d8b0) reads:
+    //   lua_pushstring(L, (&PTR_DAT_008558a4)[DAT_00c0e080]);
+    // Verified by resolving all 8 entries from the binary. Index range is
+    // 0..7 (VAR_LOCALE_INDEX is documented 0..8, but slot 8 overreads into
+    // the string pool — clamp to 0..7 before reading). Used by the TOC
+    // `[TextLocale]` / `[AllowLoadTextLocale]` directives (AddOns::TocRewrite).
+    VAR_LOCALE_NAME_TABLE = 0x008558A4,
+
     LUA_IS_NUMBER = 0x6F34D0,
     LUA_IS_STRING = 0x6F3510,
     LUA_TO_NUMBER = 0x6F3620,
@@ -4734,6 +4745,15 @@ enum Offsets {
     // CObjects — which is exactly why the engine pushes handler/frame
     // through it rather than a plain rawget.
     LUA_RAWGETI = 0x6F3BC0,
+    // `lua_getmetatable(L, objindex)` — pushes the metatable of the value at
+    // objindex and returns 1, or pushes nothing and returns 0 when it has none.
+    // Verified in docs/LuaCAPI.md and by the getfenv/getmetatable base-lib
+    // functions that call it. Used by the `__environment` env-protection hook.
+    LUA_GET_METATABLE = 0x6F3CF0,
+    // `lua_getfenv(L, idx)` — pushes the environment table of the function
+    // (or userdata/thread) at `idx`. The getfenv/setfenv base-lib code calls
+    // it to read a function's environment before the protection check.
+    LUA_GET_FENV = 0x6F3D50,
     LUA_SET_TABLE = 0x6F3E20,
     LUA_RAW_SET = 0x6F3EA0,
     LUA_INSERT = 0x6F31A0,
@@ -4800,6 +4820,45 @@ enum Offsets {
     // `rawset(nil)` clear leaves it stale and subsequent `table.insert`
     // appends past the wiped slots.
     LUAL_SETN = 0x6F4EA0,
+    // `luaL_loadbuffer(L, buff, size, chunkname)` — compiles a source
+    // buffer into a Lua function on the stack (does NOT run it). Returns
+    // an int status (0 = ok) in eax; Ghidra types it void because the
+    // status flows through `lua_load`. __fastcall(L /*ecx*/, buff /*edx*/,
+    // size /*stack*/, chunkname /*stack*/); strips a leading UTF-8 BOM.
+    // This is the UNIVERSAL Lua compile chokepoint — every path that turns
+    // source text into bytecode funnels through it: `luaL_loadstring`
+    // (0x006F57C0, backs the `loadstring` global) and the three FrameScript
+    // execute/load funnels (0x00704AE0 / 0x00704C70 / 0x00703280, backing
+    // `RunScript`, XML `<OnLoad>`/`<OnClick>` handlers, and file-loaded
+    // addon chunks). Verified via xrefs to `lua_load` (0x006F4320) and its
+    // two callers (this = loadbuffer, 0x006F5490 = loadfile). Hooking here
+    // lets a source-level transform see every chunk before the 5.0 parser.
+    FUN_LUAL_LOADBUFFER = 0x006F5690,
+    // Return address of the `call luaL_loadbuffer` inside the compile-AND-run
+    // funnel FUN_00704AE0 (the CALL is at 0x00704B0C; next instruction, and so
+    // the pushed return address, is 0x00704B11). FUN_00704AE0 compiles a buffer
+    // then IMMEDIATELY `lua_pcall`s it (0x00704B42) — it is the funnel every
+    // addon/FrameXML FILE load reaches (FUN_006ede10 -> FUN_00704bc0 -> here)
+    // AND what `RunScript` runs through. LuaSyntax's `luaL_loadbuffer` hook
+    // reads `_ReturnAddress()` and arms the addon-args grant ONLY when the
+    // caller is THIS site — i.e. a chunk that will be run before anything else,
+    // so its preamble consumes the grant immediately. `loadstring` (0x00703280,
+    // returns to 0x007032B5) compiles WITHOUT running and takes a
+    // caller-forgeable chunkname, so it must NOT arm; the call-site check
+    // excludes it even when nested inside a RunScript body.
+    RET_LUA_FILE_COMPILE = 0x00704B11,
+    // Shared environment-protection predicate for `getfenv`/`setfenv`
+    // (`bool __fastcall(L /*ecx*/)`). Pushes the function-at-top's environment
+    // via `lua_getfenv(L, -1)`, then pushes the protection marker
+    // `env["__fenv"]` (a RAW field on the env table) and returns whether it is
+    // non-nil — net stack effect +2 (env, marker). `getfenv` (`0x00702AC0`)
+    // returns the marker in place of the real env when set; `setfenv`
+    // (`0x00702BF8`) raises "cannot change a protected environment" when set.
+    // We co-hook this ONE predicate to read `getmetatable(env).__environment`
+    // (raw) instead — the Lua 5.1 form (verified against 3.3.5's
+    // `FUN_0084F2F0`) — with the raw `__fenv` field kept as a fallback, so both
+    // consumers gain the 5.1 semantics with the 1.12 behavior preserved.
+    FUN_LUA_ENV_PROTECT_PREDICATE = 0x00702BA0,
     // `lua_checkstack(L, n)` — `int __fastcall(L /*ecx*/, n /*edx*/)`.
     // Ensures room for `n` more stack values, growing if needed; returns 0
     // (without growing) when `(top-base)/16 + n` would exceed LUA_MAXCSTACK
@@ -5138,6 +5197,43 @@ enum Offsets {
     // embedded `!!!ClassicAPI` addon — the dedup behavior means our
     // call is a no-op when the user has the addon installed on disk.
     FUN_TOC_PARSER = 0x0051C9B0,
+
+    // Client interface version — `__cdecl() -> uint32` (no args), a bare
+    // `return 0x2BC0` (11200). The addon loadability resolver `FUN_0051e780`
+    // compares an addon's parsed `## Interface:` number (entry+0x1C) against
+    // this; a mismatch is the OUT_OF_DATE reason (code 7) that blocks loading
+    // while the `checkAddonVersion` cvar is on. `AddOns::TocRewrite` calls it
+    // to recognize the client version inside a multi-flavor comma-list.
+    FUN_ADDON_CLIENT_INTERFACE_VERSION = 0x0051D7D0,
+
+    // Per-addon file loader — `__fastcall(char *tocPath, int *bindingsCtx,
+    // int *progress) -> uint32`. `FUN_0051f240` calls it once per addon with
+    // `Interface\AddOns\<Name>\<Name>.toc`; it reads the TOC and runs each
+    // referenced Lua/XML file. Vanilla runs it BEFORE the addon's
+    // SavedVariables are loaded (files execute with SV nil), so
+    // `Addons::SavedVarsFirst` co-hooks it to honor `## LoadSavedVariablesFirst`
+    // by loading the SV first for flagged addons.
+    FUN_ADDON_LOAD_FILES = 0x006EDB90,
+
+    // Read + run a Lua file — `__fastcall(const char *path, void *checksumOut,
+    // void *errCtx) -> uint32`. Reads via `FUN_FILE_READ`, then compiles +
+    // pcalls; returns 0 (and fires errCtx's callback only when errCtx != null)
+    // if the file is missing, so it is safe to call on an absent path. How the
+    // engine loads each SavedVariables `.lua` (and how addon files run).
+    FUN_LUA_LOAD_FILE = 0x00704BC0,
+
+    // File-exists probe — `__stdcall(const char *path, int mode)` (RET 8);
+    // nonzero when the file exists. `mode = 1` on the addon / SavedVariables
+    // paths. Used to mirror the engine's SV path fallback (prefer the
+    // realm-scoped per-character file, else the realm-less one).
+    FUN_FILE_EXISTS = 0x00648A30,
+
+    // `realmName` CVar value reader — no-arg, `-> const char *` (last-connected
+    // realm's display name; lazily registers the cvar). The realm segment of
+    // the per-character SavedVariables path. (The character segment is
+    // FUN_GET_LOGIN_ACCOUNT_NAME, whose label is a misnomer — it returns the
+    // 0x00C27D88 buffer, NULL until a character is logged in.)
+    FUN_GET_REALM_NAME = 0x005AB7D0,
 
     // AddOn registry init — `__fastcall(accountName)`. Documented in
     // CLAUDE.md ("AddOn registry & hot-reload"). Hooked post-call so

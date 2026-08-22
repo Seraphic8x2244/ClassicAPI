@@ -21,6 +21,9 @@ build instructions.
   - [`C_AddOns.GetAddOnSecurity(indexOrName)`](#c_addonsgetaddonsecurityindexorname)
   - [`C_AddOns.DoesAddOnExist(indexOrName)`](#c_addonsdoesaddonexistindexorname)
   - [`C_AddOns.GetAddOnOptionalDependencies(indexOrName)`](#c_addonsgetaddonoptionaldependenciesindexorname)
+  - [`C_AddOns.GetAddOnLocalTable(name)`](#c_addonsgetaddonlocaltablename)
+  - [Conditional and multi-flavor TOC loading](#conditional-and-multi-flavor-toc-loading)
+  - [SavedVariables loaded first](#savedvariables-loaded-first)
 
 - [AuctionHouse](#auctionhouse)
   - [`C_AuctionHouse.PostItem(itemLocation, duration, quantity, numStacks, bid, buyout)`](#c_auctionhousepostitemitemlocation-duration-quantity-numstacks-bid-buyout)
@@ -340,6 +343,8 @@ build instructions.
   - [`C_LossOfControl.GetActiveLossOfControlData(index)`](#c_lossofcontrolgetactivelossofcontroldataindex)
 
 - [Lua](#lua)
+  - [Lua 5.1 syntax](#lua-51-syntax)
+  - [`getfenv` / `setfenv` environment protection](#getfenv--setfenv-environment-protection)
   - [`select(index, ...)`](#selectindex-)
   - [`table.wipe(t)`](#tablewipet)
   - [`table.count(tbl)`](#tablecounttbl)
@@ -925,6 +930,141 @@ without erroring.
 C_AddOns.GetAddOnOptionalDependencies("MyAddon")  -- "Atlas", "pfQuest"
 C_AddOns.GetAddOnOptionalDependencies("Atlas")    -- (nothing — no OptionalDeps)
 ```
+
+### `C_AddOns.GetAddOnLocalTable(name)`
+
+Returns the private table of the addon named `name`. This is the same
+table the addon's own files receive as the second value of `...`:
+
+```lua
+-- inside MyAddon's files
+local addonName, addonTable = ...
+```
+
+Another addon reads that table only when both conditions are true:
+
+1. `MyAddon` is loaded, and
+2. `MyAddon`'s `.toc` file declares `## AllowAddOnTableAccess: 1`.
+
+If either condition is false, the function returns `nil`. An addon
+that does not opt in keeps its table private. The check protects each
+addon's table from access it did not permit.
+
+```lua
+-- MyAddon.toc contains: ## AllowAddOnTableAccess: 1
+local t = C_AddOns.GetAddOnLocalTable("MyAddon")   -- MyAddon's table
+t.sharedValue = 5                                  -- MyAddon sees this too
+
+C_AddOns.GetAddOnLocalTable("DebugTools")   -- nil (no opt-in directive)
+C_AddOns.GetAddOnLocalTable("DoesNotExist") -- nil (not loaded)
+```
+
+Pass the addon name as a string. A numeric index returns `nil` — one
+addon refers to another by name, not by load order.
+
+### Conditional and multi-flavor TOC loading
+
+Modern addons often support several game versions from one folder.
+ClassicAPI backports two TOC mechanisms so these addons load on 1.12.
+This client is the **Vanilla** game type of the **Classic** family.
+
+**Flavor TOC files.** Some addons ship no plain `<Name>.toc`. They ship
+one TOC per version instead. ClassicAPI loads such an addon from a
+version-specific TOC, and prefers it even when a plain `<Name>.toc` also
+exists:
+
+- `<Name>_ClassicAPI.toc` — used on any client, because ClassicAPI is
+  always present.
+- `<Name>_Turtle.toc` — used only on a Turtle client. It wins over the
+  `_ClassicAPI` file.
+
+Both suffixes are ClassicAPI conventions. Name a TOC this way to target
+this client on purpose. ClassicAPI does not use `_Vanilla` or `_Classic`
+files — those target the 1.15 Classic Era client, which runs a modern
+engine this build does not match.
+
+**Flavor Bindings files.** The same selection applies to an addon's
+keybinding file. An addon can ship `Bindings_ClassicAPI.xml` (used on any
+client) or `Bindings_Turtle.xml` (used only on a Turtle client, and it
+wins), in place of or alongside a plain `Bindings.xml`:
+
+- A flavor file wins over a plain `Bindings.xml`.
+- A flavor-only addon (no plain `Bindings.xml`) still loads its bindings.
+
+The `_Vanilla` / `_Classic` names are not used here either, for the same
+reason as the TOC files.
+
+**Multi-flavor `## Interface:` version.** A retail TOC can list several
+interface versions on one line:
+
+```
+## Interface: 120100, 50504, 38002, 20506, 11200
+```
+
+**Per-line directives.** Inside a TOC, gate individual file lines with a
+condition, or expand a path variable:
+
+```
+# Loads on this client (game type is vanilla):
+Vanilla.lua              [AllowLoadGameType vanilla]
+
+# Dropped on this client:
+Mainline.lua             [AllowLoadGameType mainline]
+
+# Loads only under a matching client locale:
+Localization\deDE.lua    [AllowLoadTextLocale deDE]
+
+# Path variables expand before the file loads:
+[Family]\Init.lua                # -> Classic\Init.lua
+[Game]\Init.lua                  # -> Vanilla\Init.lua
+Localization\[TextLocale].lua    # -> Localization\enUS.lua  (your locale)
+```
+
+How each token resolves on this client:
+
+| Directive | Result |
+|---|---|
+| `[AllowLoadGameType ...]` | Loads the line when the list contains `vanilla`. |
+| `[AllowLoadTextLocale ...]` | Loads the line when the list contains your client locale (the `GetLocale()` code). |
+| `[AllowLoad ...]` | Loads on `game`, drops on `glue`. |
+| `[Family]` | `Classic` |
+| `[Game]` | `Vanilla` |
+| `[TextLocale]` | Your client locale code, for example `enUS`. |
+
+A line loads only when every condition on it passes. An unknown condition
+drops the line. A file gated by a rule this client does not know stays
+unloaded.
+
+**Limits.**
+
+- Conditions on `## metadata` lines are not supported. Only file-reference
+  lines are gated. Retail added metadata-line conditions in a much later
+  version.
+- `[AllowLoad glue]` never loads. Addon files load in-game only.
+
+### SavedVariables loaded first
+
+Normally 1.12 runs an addon's files first, then loads its SavedVariables,
+then fires `ADDON_LOADED`. So file-scope code sees its SavedVariables as
+`nil`. A modern addon avoids this with one TOC line:
+
+```
+## SavedVariables: MyAddonDB
+## LoadSavedVariablesFirst: 1
+```
+
+ClassicAPI honors `## LoadSavedVariablesFirst`. For a flagged addon, its
+SavedVariables load **before** its files run, so file-scope code sees them:
+
+```lua
+-- With the directive, in MyAddon's file:
+local db = MyAddonDB       -- the restored table, not nil
+```
+
+This covers both `## SavedVariables` and `## SavedVariablesPerCharacter`.
+File-scope reads and writes both behave as they do on modern clients. A
+SavedVariables file exists only after the first save, so the first-ever
+login still sees `nil` — there is nothing on disk to load yet.
 
 ## AuctionHouse
 
@@ -4474,26 +4614,35 @@ addon ports written as `function(self, delta) … end` work unmodified:
   `OnClick(self, button)`, `OnValueChanged(self, value)`, `OnUpdate(self, elapsed)`.
 - `OnEvent`: `(self, event, arg1..argN)`.
 
-It's purely **additive** — the `this` / `arg1` / `event` globals are still set, so
-vanilla-style handlers keep working; a handler declaring no parameters just ignores
-the extras. `SetModernScriptArgs(enable)` sets the state and returns it;
+The `this` / `arg1` / `event` globals stay set, so a handler that reads them still
+works. A handler that declares no parameters is unaffected — it cannot see the
+positional arguments. `SetModernScriptArgs(enable)` sets the state and returns it.
 `GetModernScriptArgs()` returns the current state.
 
-**Default OFF (opt-in).** It reimplements the tail of the engine's hottest Lua
-path (the runner that fires for every `OnUpdate`, every frame), so it stays off
-unless you ask for it; while off the dispatch path is exactly vanilla. Enable it
-once at load if your addon relies on the modern handler signature.
+**Caveat — a parameter that was always nil now gets a value.** Vanilla passed
+every handler zero arguments, so any parameter a handler declared was always nil.
+When this feature is on, a declared parameter gets its real value. A modern
+`function(self, delta)` handler needs this behavior. But it also changes a vanilla
+handler that declared a parameter and expected it to be nil. One example is a
+function used both as a direct call (with a real argument) and as a script
+handler. If such a handler misbehaves, disable the feature with
+`SetModernScriptArgs(false)`.
+
+**Default ON.** Modern handler signatures are a core Lua 5.1 feature, so ports
+that use them work with no setup. It reimplements the tail of the engine's
+hottest Lua path (the runner that fires for every `OnUpdate`, every frame); if
+you ever need exact-vanilla dispatch, `SetModernScriptArgs(false)` turns it off
+and both runners become a straight passthrough.
 
 ```lua
-SetModernScriptArgs(true)   -- returns true
-
+-- On by default; SetModernScriptArgs(false) would turn it off.
 local f = CreateFrame("Frame")
 f:EnableMouseWheel(true)
 f:SetScript("OnMouseWheel", function(self, delta)
     -- `self` and `delta` are bound; `this` / `arg1` still work too
 end)
 
-GetModernScriptArgs()       -- true
+GetModernScriptArgs()       -- true (default)
 ```
 
 ## FriendList
@@ -8345,6 +8494,104 @@ added and that 1.12's Lua 5.0 is missing — restored by ClassicAPI so
 backported addons find them. Most are single-function additions (several are
 just the 5.0→5.1 renames — `string.gmatch`←`gfind`, `math.fmod`←`math.mod`);
 `coroutine.*` restores the whole stripped coroutine library.
+
+### Lua 5.1 syntax
+
+1.12 runs Lua 5.0. It cannot compile five pieces of Lua 5.1 syntax that
+modern addons use. These are the length operator `#`, the modulo operator
+`%`, `...` used as an expression, `0x` hexadecimal number literals, and
+leveled long brackets (`[=[ ... ]=]`). ClassicAPI rewrites addon source to
+the 5.0 equivalent before it compiles, so all five work:
+
+```lua
+local n = #myTable          -- length operator
+local r = a % b             -- modulo operator
+local args = { ... }        -- ... as an expression, not only in a parameter list
+local mask = 0xFF00         -- hex number literal
+local doc = [=[ has ]] in it ]=]   -- leveled long bracket
+```
+
+The rewrite is transparent. You do not call anything. It runs on every
+chunk the client compiles — addon files, `loadstring`, and XML `<OnLoad>`
+handlers.
+
+What each form does:
+
+- `#x` gives the length of a string, or a border of a table (the value
+  Lua 5.1 `#` returns). It ignores `table.setn`.
+- `a % b` uses the Lua 5.1 result `a - floor(a/b)*b`, which takes the sign
+  of `b`. This differs from `math.mod` (C `fmod`, truncated toward zero):
+  `-1 % 3` is `2`, while `math.mod(-1, 3)` is `-1`.
+- `...` as an expression yields all the varargs. The `...` in a function
+  parameter list stays as the vararg declaration.
+- `0xFF00` becomes its decimal value (`65280`) — the same number Lua 5.1
+  produces. Vanilla's lexer rejects `0x` literals, so without this an addon
+  needs `tonumber("0xFF00", 16)`.
+- `[=[ ... ]=]` (a leveled long bracket, with any number of `=`) holds text
+  a plain `[[ ... ]]` cannot, such as text that contains `]]`. ClassicAPI
+  rewrites a leveled long string to a plain long string, or to a quoted
+  string when its body needs one. It removes a leveled long comment
+  (`--[=[ ... ]=]`).
+
+**Addon file arguments.** A modern addon reads its name and its private
+table from the file arguments:
+
+```lua
+local addonName, addonTable = ...
+```
+
+Vanilla never passed these to an addon file. ClassicAPI supplies them to
+any file under `Interface\AddOns\` that reads `...`. `addonName` is the
+folder name. `addonTable` is one table shared by every file of that addon.
+To read another addon's table, use
+[`C_AddOns.GetAddOnLocalTable`](#c_addonsgetaddonlocaltablename), which
+needs that addon's opt-in.
+
+**Limits.**
+
+- The rewrite reads strings and comments correctly. A `%` in `"%d"` or a
+  `#` in `--[[ # ]]` is left alone.
+- A plain long string that contains `[[` nests and closes by depth, the
+  same as the 5.0 engine. Lua 5.1 does not nest. For text that contains
+  `[[` or `]]`, use a leveled bracket (`[=[ ... ]=]`).
+- ClassicAPI rewrites a leveled long string to a plain `[[ ... ]]` when it
+  can, which keeps the exact value. A body that contains `[[` or `]]`, or
+  ends with `]`, becomes a quoted string instead. A quoted string keeps a
+  leading newline in the value. Lua 5.1 drops that newline.
+- Only integer hex is converted. Hex *floats* (`0x1.8p3`) and literals
+  wider than 64 bits are left as-is. Both are almost nonexistent in addon
+  code.
+- Error line numbers stay correct. The rewrite adds no new lines.
+- The globals `__len` and `__mod` are the rewrite's helper functions.
+  Treat them as internal. Do not call them directly.
+- To turn a rewrite off for diagnosis, call
+  `_classicapi_SetTranspileOption(name, false)`, where `name` is
+  `"Length"`, `"Modulo"`, `"VarargExpansion"`, `"HexLiterals"`, or
+  `"LongBrackets"`. This
+  reverts affected chunks to the state that fails to compile, so use it
+  only to answer "is the rewrite breaking this addon?".
+
+### `getfenv` / `setfenv` environment protection
+
+A sandbox can protect the environment table it gives to restricted code.
+Put a metatable on that table with an `__environment` field:
+
+```lua
+local view = setmetatable({}, { __environment = "protected" })
+setfenv(restrictedFn, view)
+```
+
+From then on, code inside the sandbox sees the protection:
+
+- `getfenv()` returns the `__environment` value, not the real table. The
+  restricted code cannot reach or change the true environment.
+- `setfenv()` on that environment raises `cannot change a protected
+  environment`.
+
+This is the Lua 5.1 form. 1.12 already protected environments, but it read
+a raw `__fenv` field on the table itself. ClassicAPI adds the 5.1
+metatable form and keeps `__fenv` as a fallback. The change is additive:
+an environment with neither marker behaves as before.
 
 ### `select(index, ...)`
 

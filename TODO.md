@@ -3815,3 +3815,42 @@ estimate. Anyone who wants vanilla threat should run an existing threat
 addon. ClassicAPI's only worthwhile contribution in this space is an
 unrelated precise-combat-log event feed — filed as its own thing, not as
 "threat".
+
+## 99. `C_AddOns.GetAddOnLocalTable(name)` — gate on loaded + opt-in TOC flag — DONE
+
+Shipped gated (branch `feat/lua-syntax-transpile`,
+[src/addons/LocalTable.cpp](src/addons/LocalTable.cpp)). Returns the addon's
+private namespace table **only** when BOTH hold, else `nil`:
+1. the addon `name` is **loaded** (`FUN_ADDON_IS_LOADED`, by-name), and
+2. its `.toc` declares `## AllowAddOnTableAccess: <nonzero>` (scanned via
+   `FUN_FILE_READ` on `Interface\AddOns\<name>\<name>.toc`, read as a TOC
+   boolean flag; approach (a) from the notes below — no parser hook).
+
+The two paths stay separate, as required:
+- **Internal** `__addonns` (the `local name, ns = ...` preamble) stays
+  **ungated** — an addon always gets its own namespace. Still in
+  `luasyntax/Transpile.cpp`.
+- **Public** `C_AddOns.GetAddOnLocalTable` carries the gate, in
+  `addons/LocalTable.cpp`.
+
+Both resolve to the SAME table per addon via `LuaSyntax::PushAddonNamespace`
+(the one owner of the registry-backed name→table map, exposed by
+[src/luasyntax/AddonNamespace.h](src/luasyntax/AddonNamespace.h)) — so an addon
+reads back exactly what it (or its files' `...`) stored.
+
+Directive spelling + function name verified present in the 1.15.8 Classic Era
+binary (`AllowAddOnTableAccess:` TOC key, `GetAddOnLocalTable`).
+
+Deliberate scope choices (revisit only if an addon needs otherwise):
+- **Name (string) input only.** A numeric index returns `nil` — cross-addon
+  table access is by name, and the map is name-keyed. Every other `C_AddOns.*`
+  wrapper accepts name-or-index; this one does not.
+- **`nil` on denial, not a Lua error.** Matches the project's modern-API
+  convention (nil over `lua_error`). Retail may raise instead; switch the
+  denial branches to `Game::Lua::Error` if strict parity is wanted.
+- **No per-name cache** on the TOC scan — GetAddOnLocalTable is not a hot path.
+
+Not shipped by default: no addon opts in yet. The embedded `!!!ClassicAPI`
+addon could add `## AllowAddOnTableAccess: 1` to its `.toc` to expose its own
+namespace as a worked example, but that's a product/security decision left to
+the maintainer.
