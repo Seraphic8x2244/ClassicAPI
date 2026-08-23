@@ -2,18 +2,18 @@
 
 ClassicAPI is a DLL for World of Warcraft 1.12.1 (Vanilla / Turtle WoW). It
 backports a large part of the modern WoW API — and much of Lua 5.1 — into the
-1.12 client. Addons written for later versions (3.3.5+ or Classic Era) then run
+1.12 client, so addons written for later versions (3.3.5+ or Classic Era) run
 with little or no change.
 
-The DLL hooks the engine after WoW boots and registers everything through the
-same mechanisms WoW uses for its own Lua functions. There is no companion addon
-to install; the DLL is self-contained.
+It hooks the engine after WoW boots and registers everything the same way WoW
+registers its own Lua functions. Nothing else to install — the DLL is
+self-contained.
 
 ## Highlights
 
-These are the main reasons to install ClassicAPI. Each one is transparent —
-there is no API to call, and your addons use it automatically. The full
-per-function reference is in **[docs/API.md](docs/API.md)**.
+The headline features. Each one takes effect as soon as the DLL loads, so your
+existing addons benefit without any code changes. The complete per-function
+reference is in **[docs/API.md](docs/API.md)**.
 
 ### Lua 5.1 compatibility
 
@@ -58,9 +58,9 @@ addon download or install step needed.
 
 ## Full API reference
 
-The complete surface. Every section below is collapsed — click a heading to
-expand it. The full per-function reference, with signatures and return values,
-is in **[docs/API.md](docs/API.md)**.
+Everything ClassicAPI adds, in full. Each section is collapsed — click a
+heading to expand it. For signatures and return values, see the per-function
+reference in **[docs/API.md](docs/API.md)**.
 
 <details>
 <summary><b>In-game Lua calls</b> — 400+ functions across ~60 namespaces</summary>
