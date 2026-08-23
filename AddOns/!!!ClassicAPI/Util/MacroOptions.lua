@@ -20,7 +20,8 @@
 --   * the match returns the clause value plus the passing group's target
 --     token (nil when the passing group set none).
 --
--- The 33 condition keywords are the 3.3.5 set, matched case-sensitively.
+-- The 33 condition keywords are the 3.3.5 set, matched case-sensitively, plus
+-- one ClassicAPI extension: [known:spellID] / [known:name].
 -- Where a keyword's underlying state does not exist on 1.12 (flying, flyable,
 -- vehicleui, unithasvehicleui) the condition is a constant false; where 1.12
 -- only has a partial answer (spec is always primary, button/actionbar default
@@ -95,6 +96,26 @@ local function IsEquippedTypeMatch(want)
         end
     end
     return false;
+end
+
+-- True when a spell named `want` (case-insensitive) is in the player's
+-- spellbook. This is the name form of [known:...]. There is no name -> id
+-- resolver, so a name can only resolve against castable spellbook entries;
+-- talents / passives / profession recipes that IsPlayerSpell reports for a
+-- spell id are not found by name.
+local function IsSpellNameKnown(want)
+    want = strlower(want);
+    local i = 1;
+    while true do
+        local name = GetSpellName(i, "spell");
+        if not name then
+            return false;
+        end
+        if strlower(name) == want then
+            return true;
+        end
+        i = i + 1;
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -287,6 +308,23 @@ end
 
 CONDITIONS.cursor = function()
     return GetCursorInfo() ~= nil;
+end
+
+-- ClassicAPI extension (not a 3.3.5 conditional). [known:spellID] uses
+-- IsPlayerSpell (broad knowledge -- spellbook, talents, recipes, racials);
+-- [known:name] falls back to a spellbook name scan (see IsSpellNameKnown).
+CONDITIONS.known = function(target, args)
+    if not args then return false; end
+    for i = 1, args.n do
+        local a = args[i];
+        local id = tonumber(a);
+        if id then
+            if IsPlayerSpell(id) then return true; end
+        elseif IsSpellNameKnown(a) then
+            return true;
+        end
+    end
+    return false;
 end
 
 -- No such state on 1.12.

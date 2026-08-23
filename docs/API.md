@@ -4804,6 +4804,7 @@ SecureCmdOptionParse("[nocombat] rest")      -- "rest" out of combat, else nil
 | `equipped:type` | an item of that type, subtype, or slot is equipped (`worn` is the same) |
 | `cursor` | the cursor holds an item, a spell, or money |
 | `spec` / `spec:1` | always true (vanilla has one spec) |
+| `known:spellID` / `known:name` | you know that spell |
 
 **Always false.** `flying`, `flyable`, `vehicleui`, and `unithasvehicleui`
 describe state that 1.12 does not have, so they never match.
@@ -4815,6 +4816,12 @@ not.
 The `[stance:N]` number is the shapeshift bar slot, not the form ID that
 [`GetShapeshiftFormID()`](#getshapeshiftformid) returns. On a druid, bar slot 1
 is Bear and slot 3 is Cat.
+
+`known` is a ClassicAPI extension, not a Blizzard conditional. A numeric
+argument uses [`IsPlayerSpell`](#isplayerspellspellid), so it matches any known
+spell — a spellbook spell, a talent, a profession recipe, or a racial. A name
+argument matches only a spellbook spell, because there is no name-to-ID
+resolver. Use the spell ID for a talent or a recipe.
 
 ### `RegisterStateDriver` / `UnregisterStateDriver`
 
