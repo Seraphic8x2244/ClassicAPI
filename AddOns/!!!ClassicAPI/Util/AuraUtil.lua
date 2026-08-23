@@ -28,6 +28,8 @@
 -- are NOT ported: they depend on isPriorityAura / auraInstanceID / the aura
 -- visualization pipeline / secure-call machinery, none of which exist on 1.12.
 
+local UnitAura = C_UnitAuras.UnitAura
+
 AuraUtil = AuraUtil or {};
 
 -- Returns the AuraData table's fields in the classic `UnitAura` positional order,
@@ -79,7 +81,7 @@ function AuraUtil.ForEachAura(unit, filter, batchSize, func, usePackedAura)
             local name, icon, count, dispelType, duration, expirationTime, source,
                 isStealable, nameplateShowPersonal, spellId, canApplyAura,
                 isBossDebuff, castByPlayer, nameplateShowAll, timeMod =
-                C_UnitAuras.UnitAura(unit, index, filter);
+                UnitAura(unit, index, filter);
             if name == nil then
                 return;
             end
@@ -106,7 +108,7 @@ local function FindAuraRecurse(predicate, unit, filter, index, arg1, arg2, arg3,
     end
     index = index + 1;
     return FindAuraRecurse(predicate, unit, filter, index, arg1, arg2, arg3,
-        C_UnitAuras.UnitAura(unit, index, filter));
+        UnitAura(unit, index, filter));
 end
 
 -- Returns the positional values of the first aura for which `predicate` returns
@@ -115,7 +117,7 @@ end
 -- auras from the positional accessor, so no table is allocated while scanning.
 function AuraUtil.FindAura(predicate, unit, filter, arg1, arg2, arg3)
     return FindAuraRecurse(predicate, unit, filter, 1, arg1, arg2, arg3,
-        C_UnitAuras.UnitAura(unit, 1, filter));
+        UnitAura(unit, 1, filter));
 end
 
 -- Returns the positional values of the first aura whose name matches `auraName`,
