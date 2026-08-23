@@ -6900,6 +6900,31 @@ enum Offsets {
     // (case-insensitive, hashed). See FUN_006ee6f0 in Templates.cpp notes.
     FUN_XML_TEMPLATE_LOOKUP = 0x006EE6F0,
 
+    // `CreateFrame(type [, name, parent, template])` — the global FrameScript
+    // function at table 0x00872E74 slot 3. Standard `int __fastcall(void *L)`
+    // shape. Vanilla accepts only a SINGLE template name; the hook in
+    // `Frame::CreateFrame` splits comma-separated inherits strings so modern
+    // multi-template calls work (e.g. "UIPanelButtonTemplate,
+    // SecureActionButtonTemplate"). It builds the frame with the first
+    // resolved template through the engine, then applies each remaining
+    // template onto the created object with the engine's OWN inherit
+    // primitive: `frameObj->vtable[+8](templateDefNode, status)` for content
+    // (FUN_00769820) and `(frameObj+0x24)->vtable[+8](...)` for the template's
+    // `<Frames>` children (FUN_0076a060) — exactly the two `__thiscall`
+    // recursion calls the builder FUN_006ee280 emits when resolving an
+    // `inherits=`. Finalize/OnLoad (`vtable[+0x24]`) runs once during the
+    // engine build and is NOT re-run.
+    FUN_SCRIPT_CREATEFRAME = 0x007060B0,
+
+    // XML-build "status" object — a printf-style error/warning accumulator the
+    // appliers log through (`status->vtable[+0xc](status, level, fmt, ...)`,
+    // __cdecl varargs). Script_CreateFrame builds one on its stack as the
+    // 5-dword `{PTR_TEXLOAD_DESC_VTBL, 8, &self+8, (&self+8)|1, 0}` (same shape
+    // the texture loader reuses; see PTR_TEXLOAD_DESC_VTBL). Reset/emptied by
+    // `FUN_FRAMESCRIPT_STATUS_RESET` (`__thiscall(this)`), which frees any
+    // accumulated message nodes and re-stamps the vtable.
+    FUN_FRAMESCRIPT_STATUS_RESET = 0x00419E30,
+
     // --- Inline texture escape (`|Tpath:h:w:...|t`) backport -------------------
     // See src/text/InlineTexture.cpp and docs/InlineTextureEscapes.md. The
     // 1.12 text pipeline is a shared `|`-tokenizer feeding per-purpose loops.
