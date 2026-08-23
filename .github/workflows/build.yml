@@ -104,12 +104,23 @@ jobs:
           name: ClassicAPI-${{ github.sha }}
           path: build/Release/ClassicAPI.dll
 
-      # The linker map resolves the logical addresses in a user's crash log
-      # (the ERROR #132 stack trace) to function names. Ship it under a name
-      # that tells users what it's for, so crash reports come with it.
-      - name: Rename linker map for release
+      # Bundle both debug artifacts into one zip so a crash from a shipped DLL
+      # can be triaged exactly. The PDB gives WinDbg/x64dbg/VS a line-level
+      # symbolicated call stack from a crash dump; the map resolves the
+      # `0001:offset` addresses in WoW's ERROR #132 crash log by hand when no
+      # dump is available. Both match THIS exact DLL build.
+      # The filename is deliberately off-putting: it is NOT the addon and has no
+      # value to a normal player. The loud all-caps name keeps them from
+      # grabbing it by mistake; the tag suffix lets a dev match symbols to the
+      # exact build. (pdb/map keep their real names inside so the pdb signature
+      # still lines up with the DLL.)
+      - name: Package debug symbols for release
         if: steps.ver.outputs.is_release == 'true'
-        run: Copy-Item build/Release/ClassicAPI.map build/Release/USE_FOR_DEBUGGING_CAPI_CRASHES.map
+        run: >
+          Compress-Archive
+          -Path build/Release/ClassicAPI.pdb, build/Release/ClassicAPI.map
+          -DestinationPath build/Release/Crash-Symbols-Use-For-Debugging-${{ steps.ver.outputs.tag }}.zip
+          -Force
 
       - name: Release
         if: steps.ver.outputs.is_release == 'true'
@@ -118,5 +129,5 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           files: |
             build/Release/ClassicAPI.dll
-            build/Release/USE_FOR_DEBUGGING_CAPI_CRASHES.map
+            build/Release/Crash-Symbols-Use-For-Debugging-${{ steps.ver.outputs.tag }}.zip
           generate_release_notes: true

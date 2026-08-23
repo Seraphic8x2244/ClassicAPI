@@ -142,15 +142,29 @@ target_include_directories(
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "ClassicAPI")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MT")
-set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /Ob2 /DNDEBUG")
+# /Zi retains full debug info (source file + line numbers, locals, types) in a
+# separate PDB WITHOUT disabling optimization — the DLL stays a fully optimized
+# /O2 release build; the symbols just live in ClassicAPI.pdb on the side. Feeds
+# the linker's /DEBUG below.
+set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /Ob2 /DNDEBUG /Zi")
 set(CMAKE_SHARED_LINKER_FLAGS
-    # /MAP emits build/Release/ClassicAPI.map — a linker-only output (no effect
-    # on code layout) that maps `0001:offset` addresses from WoW's ERROR #132
-    # crash dumps back to functions. Published as a build/release artifact so
-    # any crash from a shipped DLL can be triaged exactly. (/OPT:ICF folds
-    # identical functions, so a few map symbols share an address — harmless.)
+    # Two debug artifacts for triaging crashes from a SHIPPED DLL. Both are
+    # published as release artifacts, match this exact build, and have no effect
+    # on code layout:
+    #   /MAP   -> build/Release/ClassicAPI.map: a text symbol->address table
+    #             that resolves the `0001:offset` addresses in WoW's ERROR #132
+    #             crash log back to functions by hand (no debugger/dump needed).
+    #   /DEBUG -> build/Release/ClassicAPI.pdb: full symbols (paired with the
+    #             compiler's /Zi) so WinDbg/x64dbg/VS produce a line-level
+    #             symbolicated call stack from a crash dump. A SEPARATE file —
+    #             it is NOT embedded in the DLL, only a small signature record
+    #             linking the two is.
+    # /DEBUG implicitly disables /OPT:REF and /OPT:ICF (dead-code strip +
+    # identical-COMDAT fold); they are listed explicitly below so they stay ON
+    # and the shipped DLL does not grow. (/OPT:ICF folds identical functions, so
+    # a few map symbols share an address — harmless.)
     # /DEF exports `Load` (VanillaFixes' post-injection entry point) undecorated
     # so its GetProcAddress(module, "Load") resolves. See src/ClassicAPI.def and
     # the loader-lock rationale in src/DllMain.cpp.
-    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT /MAP /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ClassicAPI.def"
+    "/OPT:REF /OPT:ICF /MERGE:.rdata=.text /MERGE:.pdata=.text /SECTION:.text,EWR /NODEFAULTLIB:MSVCRT /MAP /DEBUG /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ClassicAPI.def"
 )
