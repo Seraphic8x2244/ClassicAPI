@@ -449,23 +449,44 @@ const char *DispelName(uint32_t dispelTypeID) {
     return (name == nullptr || *name == '\0') ? nullptr : name;
 }
 
+// The display fields resolved from a spell record + caster, shared by the table
+// emitter (`BuildTable`) and the positional emitter (`PushPositional`) so the
+// name / icon / dispel-name lookups live in exactly one place. `castByPlayer` is
+// the positional tuple's field #13; the table uses `isFromPlayerOrPlayerPet`
+// instead, mirroring retail's own divergence between the two aura shapes.
+struct Display {
+    const char *name;
+    const char *icon;
+    const char *dispelName;
+    bool castByPlayer;
+};
+
+static Display ResolveDisplay(uint32_t spellID, uint64_t casterGuid) {
+    const uint8_t *spellRecord = SpellRecord(spellID);
+    uint32_t dispelTypeID = 0;
+    if (spellRecord != nullptr) {
+        dispelTypeID = *reinterpret_cast<const uint32_t *>(
+            spellRecord + Offsets::OFF_SPELL_DISPEL_TYPE);
+    }
+    Display d;
+    d.name = LocalizedSpellName(spellRecord);
+    d.icon = SpellIconPath(spellRecord);
+    d.dispelName = DispelName(dispelTypeID);
+    d.castByPlayer =
+        casterGuid != 0 && casterGuid == Unit::Identity::PlayerGuid();
+    return d;
+}
+
 // Writes the full modern AuraData table on top of the Lua stack from
 // already-resolved values. Shared by the descriptor path (`Push`) and the
 // cache-fallback path (`PushFromCache`). Net stack effect: +1 (the table).
 static void BuildTable(void *L, uint32_t spellID, int applications,
                        bool isHelpful, double duration, double expirationTime,
                        uint64_t casterGuid) {
-    const uint8_t *spellRecord = SpellRecord(spellID);
-
-    uint32_t dispelTypeID = 0;
-    if (spellRecord != nullptr) {
-        dispelTypeID = *reinterpret_cast<const uint32_t *>(
-            spellRecord + Offsets::OFF_SPELL_DISPEL_TYPE);
-    }
-
-    const char *name = LocalizedSpellName(spellRecord);
-    const char *icon = SpellIconPath(spellRecord);
-    const char *dispel = DispelName(dispelTypeID);
+    const Display disp = ResolveDisplay(spellID, casterGuid);
+    const char *name = disp.name;
+    const char *icon = disp.icon;
+    const char *dispel = disp.dispelName;
 
     Game::Lua::NewTable(L);
 
@@ -518,6 +539,45 @@ static void BuildTable(void *L, uint32_t spellID, int applications,
     // yields nil, so the table doesn't need an explicit entry.
 }
 
+// Emits the Classic-Era `UnitAura` 15-value tuple onto the Lua stack from the
+// same already-resolved values `BuildTable` takes. Net stack effect: +15 — NO
+// table allocation, the zero-GC path behind `C_UnitAuras.UnitAura`. Field order
+// matches Classic-Era `UnitAura`: name, icon, count, dispelType(string),
+// duration, expirationTime, source, isStealable, nameplateShowPersonal, spellId,
+// canApplyAura, isBossDebuff, castByPlayer, nameplateShowAll, timeMod. Values
+// mirror the AuraData table exactly so packed / non-packed callers agree: name /
+// icon / dispelType push `""` when absent (as `SetFieldString` does), while
+// `source` pushes nil when there's no caster (as the table omits `sourceUnit`).
+// `isHelpful` is unused (the tuple has no isHelpful/isHarmful) — kept so the leaf
+// dispatch calls either emitter with a uniform arg list.
+static void PushPositional(void *L, uint32_t spellID, int applications,
+                           bool /*isHelpful*/, double duration,
+                           double expirationTime, uint64_t casterGuid) {
+    const Display disp = ResolveDisplay(spellID, casterGuid);
+
+    const char *source = nullptr;
+    char tokenBuf[32];
+    if (casterGuid != 0)
+        source = Unit::Identity::TokenFromGUID(casterGuid, tokenBuf,
+                                               sizeof tokenBuf);
+
+    Game::Lua::PushString(L, disp.name ? disp.name : "");            // 1  name
+    Game::Lua::PushString(L, disp.icon ? disp.icon : "");            // 2  icon
+    Game::Lua::PushNumber(L, static_cast<double>(applications));     // 3  count
+    Game::Lua::PushString(L, disp.dispelName ? disp.dispelName : ""); // 4  dispelType
+    Game::Lua::PushNumber(L, duration);                              // 5  duration
+    Game::Lua::PushNumber(L, expirationTime);                        // 6  expirationTime
+    Game::Lua::PushString(L, source);                                // 7  source (nil if none)
+    Game::Lua::PushBool(L, false);                                   // 8  isStealable
+    Game::Lua::PushBool(L, false);                                   // 9  nameplateShowPersonal
+    Game::Lua::PushNumber(L, static_cast<double>(spellID));          // 10 spellId
+    Game::Lua::PushBool(L, false);                                   // 11 canApplyAura
+    Game::Lua::PushBool(L, false);                                   // 12 isBossDebuff
+    Game::Lua::PushBool(L, disp.castByPlayer);                       // 13 castByPlayer
+    Game::Lua::PushBool(L, false);                                   // 14 nameplateShowAll
+    Game::Lua::PushNumber(L, 1);                                     // 15 timeMod
+}
+
 // Enriches a bare `(guid, spellID)` into a full AuraData table — the shared
 // core behind every push path (descriptor, cache fallback, group-array). No
 // dependence on a live descriptor: the descriptor path passes what it read
@@ -546,7 +606,8 @@ static void BuildTable(void *L, uint32_t spellID, int applications,
 static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
                          bool isHelpful, int applications, int unitLevel,
                          bool isPlayer, int slot,
-                         const Attribution *known = nullptr) {
+                         const Attribution *known = nullptr,
+                         Emit emit = Emit::Table) {
     double duration = 0.0;
     double expirationTime = 0.0;
     uint64_t casterGuid = 0;
@@ -578,8 +639,12 @@ static void PushEnriched(void *L, uint64_t guid, uint32_t spellID,
             duration = static_cast<double>(a.durationMs) * 0.001;
         casterGuid = a.caster;
     }
-    BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
-               casterGuid);
+    if (emit == Emit::Positional)
+        PushPositional(L, spellID, applications, isHelpful, duration,
+                       expirationTime, casterGuid);
+    else
+        BuildTable(L, spellID, applications, isHelpful, duration, expirationTime,
+                   casterGuid);
 }
 
 // Attribution held directly by an `Aura::Source` cache entry (from `Enumerate`),
@@ -588,12 +653,13 @@ static Attribution CachedAttribution(const Aura::Source::CachedAura &c) {
     return {c.casterGuid, c.expirationMs, c.durationMs};
 }
 
-void Push(void *L, const uint8_t *unit, int slot) {
+void Push(void *L, const uint8_t *unit, int slot, Emit emit) {
     const uint32_t spellID = ReadSpellID(unit, slot);
     const bool isHelpful = slot < Offsets::UNIT_AURA_BUFF_COUNT;
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
     PushEnriched(L, UnitGuid(unit), spellID, isHelpful, ReadStacks(unit, slot),
-                 unitLevel, unit != nullptr && unit == LocalPlayer(), slot);
+                 unitLevel, unit != nullptr && unit == LocalPlayer(), slot,
+                 /*known*/ nullptr, emit);
 }
 
 namespace {
@@ -603,7 +669,8 @@ namespace {
 // in SMSG_SPELL_GO, so `applications` defaults to 1. `duration` uses the
 // applied (caster-modified) ms when known, else the Spell.dbc base.
 void PushFromCache(void *L, const uint8_t *unit,
-                   const Aura::Source::CachedAura &c, bool isHelpful) {
+                   const Aura::Source::CachedAura &c, bool isHelpful,
+                   Emit emit = Emit::Table) {
     // `c` already carries this exact instance's caster + timing (Enumerate
     // copied it out), so hand it to `PushEnriched` as `known` rather than
     // re-resolving by (guid, spell, slot) — an unbound entry sharing its spell
@@ -612,7 +679,7 @@ void PushFromCache(void *L, const uint8_t *unit,
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
     const Attribution a = CachedAttribution(c);
     PushEnriched(L, UnitGuid(unit), c.spellId, isHelpful, 1, unitLevel, false,
-                 c.slot, &a);
+                 c.slot, &a, emit);
 }
 
 // Reconciles the `Aura::Source` cache against `unit`'s descriptor: when the
@@ -698,7 +765,7 @@ bool FallbackEligible(const uint8_t *unit, const Aura::Source::CachedAura &c,
 } // namespace
 
 bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
-                          Filter filter, Match match) {
+                          Filter filter, Match match, Emit emit) {
     if (unit == nullptr)
         return false;
     ReconcileCache(unit); // drop entries the (synced) descriptor contradicts
@@ -721,7 +788,7 @@ bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
         if (!FallbackEligible(unit, buf[i], filter, match))
             continue;
         if (++seen == target) {
-            PushFromCache(L, unit, buf[i], filter == Filter::Helpful);
+            PushFromCache(L, unit, buf[i], filter == Filter::Helpful, emit);
             return true;
         }
     }
@@ -828,7 +895,8 @@ bool GroupFallbackEligible(const uint16_t *arr, const Aura::Source::CachedAura &
 // Nth (1-based) cache-fallback aura of `filter`'s kind for an out-of-range
 // member whose group array is empty. Pushes the AuraData table on a hit.
 bool PushNthGroupCacheFallback(void *L, uint64_t guid, const uint16_t *arr,
-                               int oneBasedIndex, Filter filter, Match match) {
+                               int oneBasedIndex, Filter filter, Match match,
+                               Emit emit = Emit::Table) {
     Aura::Source::CachedAura buf[kFallbackMax];
     const int n =
         Aura::Source::Enumerate(guid, filter == Filter::Harmful, buf, kFallbackMax);
@@ -839,7 +907,7 @@ bool PushNthGroupCacheFallback(void *L, uint64_t guid, const uint16_t *arr,
         if (++seen == oneBasedIndex) {
             const Attribution a = CachedAttribution(buf[i]);
             PushEnriched(L, guid, buf[i].spellId, filter == Filter::Helpful, 1,
-                         GroupMemberLevel(guid), false, buf[i].slot, &a);
+                         GroupMemberLevel(guid), false, buf[i].slot, &a, emit);
             return true;
         }
     }
@@ -893,7 +961,7 @@ bool PushGroupCacheFallbackMatch(void *L, uint64_t guid, const uint16_t *arr,
 } // namespace
 
 bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
-                      Match match) {
+                      Match match, Emit emit) {
     if (guid == 0 || oneBasedIndex < 1)
         return false;
     const uint16_t *arr = Group::MemberStats::AuraArray(guid);
@@ -909,14 +977,15 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
         if (++matches == oneBasedIndex) {
             PushEnriched(L, guid, GroupSpellID(arr, slot),
                          filter == Filter::Helpful, 1, GroupMemberLevel(guid),
-                         false, Aura::Source::SLOT_UNBOUND);
+                         false, Aura::Source::SLOT_UNBOUND, /*known*/ nullptr,
+                         emit);
             return true;
         }
     }
     // Empty array (server delta-resend gap): supplement from the cache.
     if (!GroupArrayHasVisibleAura(arr))
         return PushNthGroupCacheFallback(L, guid, arr, oneBasedIndex, filter,
-                                         match);
+                                         match, emit);
     return false;
 }
 

@@ -183,6 +183,31 @@ int PushAuraByIndex(void *L, const char *unitToken, int index,
     return 1;
 }
 
+// Positional (multi-return) sibling of `PushAuraByIndex` for the
+// `C_UnitAuras.UnitAura` family: pushes the Classic-Era `UnitAura` 15-tuple with
+// NO table allocation (the zero-GC path). Returns 15 on a hit, or 1 (a single
+// nil) on a miss. The bool-returning push helpers leave exactly the 15-tuple on a
+// hit and nothing on a miss, so the miss `PushNil` + `return 1` needs no cleanup.
+int PushUnitAuraPositional(void *L, const char *unitToken, int index,
+                           Data::Filter filter, Data::Match match = {}) {
+    const uint8_t *unit = ResolveUnit(unitToken);
+    if (unit != nullptr) {
+        const int slot = Data::FindNthSlot(unit, index, filter, match);
+        if (slot >= 0) {
+            Data::Push(L, unit, slot, Data::Emit::Positional);
+            return 15;
+        }
+        if (Data::PushNthCacheFallback(L, unit, index, filter, match,
+                                       Data::Emit::Positional))
+            return 15;
+    } else if (Data::PushNthGroupAura(L, GuidForOutOfRange(unitToken), index,
+                                      filter, match, Data::Emit::Positional)) {
+        return 15;
+    }
+    Game::Lua::PushNil(L);
+    return 1;
+}
+
 int __fastcall Script_GetAuraDataByIndex(void *L) {
     const char *unit = ArgUnit(L, 1);
     const int index = ArgInt(L, 2);
@@ -213,6 +238,50 @@ int __fastcall Script_GetDebuffDataByIndex(void *L) {
         return 1;
     }
     return PushAuraByIndex(L, unit, index, Data::Filter::Harmful);
+}
+
+// Zero-allocation positional accessors — Classic-Era `UnitAura`/`UnitBuff`/
+// `UnitDebuff` shape, namespaced under `C_UnitAuras` to avoid clashing with the
+// native `UnitBuff`/`UnitDebuff` globals (which keep their vanilla short return).
+// `UnitAura` reads the range from the filter (helpful by default); `UnitBuff` /
+// `UnitDebuff` lock the range and still honor the filter's PLAYER/DISPELLABLE/
+// CROWD_CONTROL predicates.
+int __fastcall Script_UnitAura(void *L) {
+    const char *unit = ArgUnit(L, 1);
+    const int index = ArgInt(L, 2);
+    const char *filterStr = ArgOptString(L, 3);
+    if (unit == nullptr || index < 1) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    const ParsedFilter pf = ParseFilters(filterStr);
+    return PushUnitAuraPositional(L, unit, index, RangeFilter(pf), pf.ToMatch());
+}
+
+int __fastcall Script_UnitBuff(void *L) {
+    const char *unit = ArgUnit(L, 1);
+    const int index = ArgInt(L, 2);
+    const char *filterStr = ArgOptString(L, 3);
+    if (unit == nullptr || index < 1) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    const ParsedFilter pf = ParseFilters(filterStr);
+    return PushUnitAuraPositional(L, unit, index, Data::Filter::Helpful,
+                                  pf.ToMatch());
+}
+
+int __fastcall Script_UnitDebuff(void *L) {
+    const char *unit = ArgUnit(L, 1);
+    const int index = ArgInt(L, 2);
+    const char *filterStr = ArgOptString(L, 3);
+    if (unit == nullptr || index < 1) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    const ParsedFilter pf = ParseFilters(filterStr);
+    return PushUnitAuraPositional(L, unit, index, Data::Filter::Harmful,
+                                  pf.ToMatch());
 }
 
 int __fastcall Script_GetUnitAuraBySpellID(void *L) {
@@ -426,6 +495,12 @@ static void RegisterLuaFunctions() {
                                      &Script_GetBuffDataByIndex);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "GetDebuffDataByIndex",
                                      &Script_GetDebuffDataByIndex);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "UnitAura",
+                                     &Script_UnitAura);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "UnitBuff",
+                                     &Script_UnitBuff);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "UnitDebuff",
+                                     &Script_UnitDebuff);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "GetUnitAuraBySpellID",
                                      &Script_GetUnitAuraBySpellID);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "GetPlayerAuraBySpellID",

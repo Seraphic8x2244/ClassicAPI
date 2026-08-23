@@ -28,6 +28,12 @@ build instructions.
 - [AuctionHouse](#auctionhouse)
   - [`C_AuctionHouse.PostItem(itemLocation, duration, quantity, numStacks, bid, buyout)`](#c_auctionhousepostitemitemlocation-duration-quantity-numstacks-bid-buyout)
 
+- [AuraUtil](#aurautil)
+  - [`AuraUtil.ForEachAura`](#aurautilforeachaura)
+  - [`AuraUtil.FindAura`](#aurautilfindaura)
+  - [`AuraUtil.FindAuraByName`](#aurautilfindaurabyname)
+  - [`AuraUtil.UnpackAuraData`](#aurautilunpackauradata)
+
 - [CharacterList](#characterlist)
   - [`GetSavedCharacterOrder(realm)` / `SetSavedCharacterOrder(realm, order)` — GlueXML only](#getsavedcharacterorderrealm--setsavedcharacterorderrealm-order--gluexml-only)
 
@@ -621,6 +627,8 @@ build instructions.
 - [UnitAuras](#unitauras)
   - [`C_UnitAuras.GetAuraDataByIndex(unit, index [, filter])`](#c_unitaurasgetauradatabyindexunit-index--filter)
   - [`C_UnitAuras.GetBuffDataByIndex(unit, index)` / `GetDebuffDataByIndex(unit, index)`](#c_unitaurasgetbuffdatabyindexunit-index--getdebuffdatabyindexunit-index)
+  - [`C_UnitAuras.UnitAura(unit, index [, filter])`](#c_unitaurasunitauraunit-index--filter)
+  - [`C_UnitAuras.UnitBuff(unit, index [, filter])` / `UnitDebuff(unit, index [, filter])`](#c_unitaurasunitbuffunit-index--filter--unitdebuffunit-index--filter)
   - [`C_UnitAuras.GetUnitAuraBySpellID(unit, spellID [, filter])`](#c_unitaurasgetunitaurabyspellidunit-spellid--filter)
   - [`C_UnitAuras.GetPlayerAuraBySpellID(spellID)`](#c_unitaurasgetplayeraurabyspellidspellid)
   - [`C_UnitAuras.GetAuraDataBySpellName(unit, spellName [, filter])`](#c_unitaurasgetauradatabyspellnameunit-spellname--filter)
@@ -1143,6 +1151,60 @@ aren't aggregated across bags — `quantity × numStacks` must fit in that one
 stack); temp splits use general-purpose bags only, so family-restricted items
 (arrows/shards that live in specialty bags) aren't supported; one job runs at
 a time.
+
+## AuraUtil
+
+Helper library over [`C_UnitAuras`](#unitauras), backported from FrameXML. Its
+purpose on 1.12 is the allocation-free aura scan: the non-packed path builds no
+table per aura, which matters under Lua's garbage collector when you scan many
+units each frame.
+
+### AuraUtil.ForEachAura
+
+`AuraUtil.ForEachAura(unit, filter, batchSize, func [, usePackedAura])` calls
+`func` for each aura on `unit` matching `filter`, in order, until `func` returns a
+truthy value or the auras run out.
+
+- Non-packed (default): `func` receives the 15 positional values of
+  [`C_UnitAuras.UnitAura`](#c_unitaurasunitauraunit-index--filter) — no table is
+  built per aura.
+- `usePackedAura` true: `func` receives the `AuraData` table from
+  `GetAuraDataByIndex`.
+
+`batchSize` of `0` or less does nothing; any other value (or `nil`) visits every
+matching aura — `batchSize` is retail's slot-batch hint, not a cap on the count.
+
+```lua
+AuraUtil.ForEachAura("target", "HARMFUL", nil, function(name, icon, count)
+    print(name, count)
+end)
+```
+
+### AuraUtil.FindAura
+
+`AuraUtil.FindAura(predicate, unit, filter [, arg1, arg2, arg3])` returns the
+positional values of the first aura for which `predicate` returns truthy, or
+`nil`. `predicate` receives the (up to three) caller arguments, then the aura's
+positional values:
+
+```lua
+local function castByMe(_, _, _, name, icon, count, dispelType, duration, exp, source)
+    return source == "player"
+end
+local name = AuraUtil.FindAura(castByMe, "target", "HARMFUL")
+```
+
+### AuraUtil.FindAuraByName
+
+`AuraUtil.FindAuraByName(auraName, unit, filter)` returns the positional values of
+the first aura whose name matches `auraName`, or `nil`. Names are localized and
+not unique, so this returns the first match.
+
+### AuraUtil.UnpackAuraData
+
+`AuraUtil.UnpackAuraData(auraData)` returns an `AuraData` table's fields as 15
+positional values in the classic `UnitAura` order, or `nil` when `auraData` is
+`nil`. (Position 13 is the table's `isFromPlayerOrPlayerPet`.)
 
 ## CharacterList
 
@@ -15260,6 +15322,40 @@ so `RAID_PLAYER_DISPELLABLE` is not read as `PLAYER`.
 Convenience wrappers locking the filter to `HELPFUL` or `HARMFUL`
 respectively. Equivalent to `GetAuraDataByIndex(unit, index,
 "HELPFUL")` / `"HARMFUL"`.
+
+### `C_UnitAuras.UnitAura(unit, index [, filter])`
+
+Returns the same aura as `GetAuraDataByIndex`, but as 15 positional values
+instead of a table — so it allocates nothing. Use it in an `OnUpdate` loop that
+scans many auras, where one table per aura strains Lua's garbage collector.
+Prefer [`AuraUtil.ForEachAura`](#aurautilforeachaura) for iteration.
+
+The values, in order:
+
+```
+name, icon, count, dispelType, duration, expirationTime, source, isStealable,
+nameplateShowPersonal, spellId, canApplyAura, isBossDebuff, castByPlayer,
+nameplateShowAll, timeMod
+```
+
+Returns a single `nil` when the unit has fewer than `index` matching auras.
+`dispelType` is the dispel-type string (`"Magic"`, `"Curse"`, `"Disease"`,
+`"Poison"`, or `nil`). `source` is the caster's unit token, or `nil` when the cast
+was not seen this session. `castByPlayer` is true when the local player cast the
+aura. `filter` takes the same tokens as `GetAuraDataByIndex`.
+
+The values are the `GetAuraDataByIndex` fields in the classic `UnitAura` order,
+with two field-name differences from the table: position 12 is `isBossDebuff`
+(the table field is `isBossAura`) and position 13 is `castByPlayer` (the table
+field is `isFromPlayerOrPlayerPet`). On 1.12 the boss field is always false;
+`castByPlayer` is reported truthfully.
+
+### `C_UnitAuras.UnitBuff(unit, index [, filter])` / `UnitDebuff(unit, index [, filter])`
+
+The `UnitAura` positional form with the range locked to `HELPFUL` or `HARMFUL`.
+The `filter` still honors the `PLAYER`, `DISPELLABLE`, and `CROWD_CONTROL`
+predicates. Namespaced under `C_UnitAuras` so they never clash with the native
+global `UnitBuff` / `UnitDebuff` (which keep their vanilla texture-first return).
 
 ### `C_UnitAuras.GetUnitAuraBySpellID(unit, spellID [, filter])`
 

@@ -33,6 +33,14 @@ namespace Aura::Data {
 // to helpful when no filter is specified.
 enum class Filter { Helpful, Harmful };
 
+// How a resolved aura is emitted onto the Lua stack by the single-aura push
+// paths. `Table` builds the modern `AuraData` table (net stack +1); `Positional`
+// pushes the Classic-Era `UnitAura` 15-value tuple (net stack +15) with NO table
+// allocation, for the `C_UnitAuras.UnitAura/UnitBuff/UnitDebuff` accessors that
+// avoid the per-call GC churn. Selection + timing resolution are identical for
+// both — only the terminal leaf differs.
+enum class Emit { Table, Positional };
+
 // Caster restriction from the `PLAYER` / `!PLAYER` aura filter tokens.
 // `Any` = no restriction; `PlayerOnly` = only auras the local player cast
 // (`PLAYER`); `NotPlayer` = only auras NOT cast by the local player
@@ -154,8 +162,9 @@ const char *DispelName(uint32_t dispelTypeID);
 //   nameplateShowPersonal=false, canApplyAura=false,
 //   shouldConsolidate=false, isRaid=false
 //
-// Net stack effect: +1 (the table).
-void Push(void *L, const uint8_t *unit, int slot);
+// Net stack effect: +1 for `Emit::Table` (the table), +15 for `Emit::Positional`
+// (the Classic-Era `UnitAura` tuple — see `Emit`).
+void Push(void *L, const uint8_t *unit, int slot, Emit emit = Emit::Table);
 
 // Fallback for the index path when the descriptor has dropped an aura's slot
 // (rogue stealth, party range fluctuation) but it's still active server-side.
@@ -165,9 +174,11 @@ void Push(void *L, const uint8_t *unit, int slot);
 // order). On a hit it pushes the AuraData table and returns true; on a miss it
 // pushes nothing and returns false (caller pushes nil). Only entries whose
 // helpful/harmful classification matches `filter` and that aren't already in a
-// populated descriptor slot are considered.
+// populated descriptor slot are considered. `emit` selects the table vs the
+// positional tuple leaf (see `Emit`); the pushed count follows `Push`.
 bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
-                          Filter filter, Match match = {});
+                          Filter filter, Match match = {},
+                          Emit emit = Emit::Table);
 
 // Appends every eligible `Aura::Source` cache fallback for `unit` matching
 // `filter` into the array table at `outerIdx`, continuing from `nextKey`
@@ -196,10 +207,11 @@ void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
 // to dedup against.
 
 // Pushes AuraData for the `oneBasedIndex`-th group-array aura on `guid`
-// matching `filter`. On a hit pushes the table and returns true; otherwise
-// pushes nothing and returns false (caller pushes nil).
+// matching `filter`. On a hit pushes the aura and returns true; otherwise
+// pushes nothing and returns false (caller pushes nil). `emit` selects the
+// table vs the positional tuple leaf (see `Emit`).
 bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
-                      Match match = {});
+                      Match match = {}, Emit emit = Emit::Table);
 
 // Pushes AuraData for the group-array aura with `spellID` on `guid`, optionally
 // restricted to one filter range (nullptr = both, helpful first). Returns true
