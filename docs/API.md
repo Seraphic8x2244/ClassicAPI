@@ -192,6 +192,11 @@ build instructions.
   - [`frame:GetEffectiveAlpha()`](#framegeteffectivealpha)
   - [`frame:SetAttribute` / `SetAttributeNoHandler` / `ClearAttribute` / `GetAttribute` (+ unit-frame mouseover)](#framesetattributename-value--framesetattributenohandlername-value--frameclearattributename--framegetattribute)
   - [`SetModernScriptArgs(enable)` / `GetModernScriptArgs()`](#setmodernscriptargsenable--getmodernscriptargs)
+  - [`SecureCmdOptionParse(options)`](#securecmdoptionparseoptions)
+  - [`RegisterStateDriver` / `UnregisterStateDriver`](#registerstatedriver--unregisterstatedriver)
+  - [`RegisterAttributeDriver` / `UnregisterAttributeDriver`](#registerattributedriver--unregisterattributedriver)
+  - [`RegisterUnitWatch` / `UnregisterUnitWatch` / `UnitWatchRegistered`](#registerunitwatch--unregisterunitwatch--unitwatchregistered)
+  - [`SecureButton_GetAttribute` / `SecureButton_GetUnit`](#securebutton_getattribute--securebutton_getunit)
 
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
@@ -4747,6 +4752,139 @@ end)
 
 GetModernScriptArgs()       -- true (default)
 ```
+
+### `SecureCmdOptionParse(options)`
+
+Parses a macro conditional string. Returns the value of the first clause that
+matches. This is the parser behind `/cast [combat] Spell`-style options.
+
+The `options` string is a list of clauses, separated by `;`. A clause is zero
+or more `[...]` condition groups, then a value:
+
+```lua
+SecureCmdOptionParse("[combat] Attack; [nostealth] Prowl; Rest")
+```
+
+Rules:
+- A clause with no group always matches.
+- Groups in one clause are OR'd. The first group that passes wins.
+- Conditions in a group are separated by `,` and are AND'd.
+- A `no` prefix negates a condition. A `:a/b/c` suffix adds arguments, which
+  are OR'd.
+- A `@unit` or `target=unit` piece sets the group's target. Conditions that
+  need a unit use it, and default to `"target"`.
+
+Returns the matched value, plus the passing group's target token as a second
+value (nil when the group set no target). Returns nil when no clause matches.
+
+```lua
+SecureCmdOptionParse("hello")                -- "hello"
+SecureCmdOptionParse("[combat] a; b")        -- "a" in combat, else "b"
+SecureCmdOptionParse("[@focus,harm] a; b")   -- "a", "focus" when focus is hostile
+SecureCmdOptionParse("[nocombat] rest")      -- "rest" out of combat, else nil
+```
+
+**Supported conditions.** Each maps to real 1.12 state:
+
+| Condition | Meaning |
+|---|---|
+| `combat` | the player is in combat |
+| `exists` / `dead` | the target exists / is dead or a ghost |
+| `help` / `harm` | the target is friendly / hostile |
+| `party` / `raid` | the target is in your party / raid |
+| `group` / `group:party` / `group:raid` | you are in a group / party or raid / raid |
+| `stance` / `stance:N` | you are shapeshifted / in bar form N (`form` is the same) |
+| `stealth` / `mounted` / `swimming` / `indoors` / `outdoors` | player state |
+| `mod` / `mod:shift` / `mod:ctrl` / `mod:alt` | a modifier key is held (`modifier` is the same) |
+| `button:N` | the current button is N (defaults to the left button; `btn` is the same) |
+| `bar:N` / `actionbar:N` | the current action bar page is N |
+| `bonusbar` / `bonusbar:N` | a bonus bar is active / bonus bar N is active |
+| `pet` / `pet:name` | you have a pet / a pet with that name or family |
+| `channeling` / `channeling:spell` | you are channeling / channeling that spell |
+| `equipped:type` | an item of that type, subtype, or slot is equipped (`worn` is the same) |
+| `cursor` | the cursor holds an item, a spell, or money |
+| `spec` / `spec:1` | always true (vanilla has one spec) |
+
+**Always false.** `flying`, `flyable`, `vehicleui`, and `unithasvehicleui`
+describe state that 1.12 does not have, so they never match.
+
+**Unknown condition.** An unrecognized keyword never matches, and prints a
+warning once. Keywords are case-sensitive: `[Combat]` is unknown, `[combat]` is
+not.
+
+The `[stance:N]` number is the shapeshift bar slot, not the form ID that
+[`GetShapeshiftFormID()`](#getshapeshiftformid) returns. On a druid, bar slot 1
+is Bear and slot 3 is Cat.
+
+### `RegisterStateDriver` / `UnregisterStateDriver`
+
+`RegisterStateDriver(frame, state, values)` drives a frame's state from a macro
+conditional string. The driver re-runs `SecureCmdOptionParse(values)` on a
+0.2 second poll and applies the result.
+
+For the state `"visibility"`, the value `"show"` or `"hide"` shows or hides the
+frame:
+
+```lua
+RegisterStateDriver(myFrame, "visibility", "[combat] hide; show")
+```
+
+For any other state, the driver sets the attribute `"state-"..state` to the
+value. An `OnAttributeChanged` handler then reacts to it.
+
+`UnregisterStateDriver(frame, state)` removes one driver.
+`UnregisterStateDriver(frame)` with no state removes every driver on the frame.
+
+The driver also rescans at once on combat, target, focus, form, pet, group,
+action-bar, and modifier-key changes, so state that a poll would lag catches up
+without delay.
+
+### `RegisterAttributeDriver` / `UnregisterAttributeDriver`
+
+`RegisterAttributeDriver(frame, attribute, values)` is the same as the
+state-driver pair, but it sets `attribute` directly instead of adding the
+`"state-"` prefix. An attribute name that starts with `_` is ignored.
+
+The driver coerces a numeric value to a number, and the literal string `"nil"`
+to nil, before it sets the attribute.
+
+`UnregisterAttributeDriver(frame, attribute)` removes one driver.
+`UnregisterAttributeDriver(frame)` with no attribute removes every driver on the
+frame.
+
+### `RegisterUnitWatch` / `UnregisterUnitWatch` / `UnitWatchRegistered`
+
+`RegisterUnitWatch(frame [, asState])` shows or hides a frame as its `unit`
+attribute comes into and out of existence. Set the `unit` attribute first:
+
+```lua
+myUnitFrame:SetAttribute("unit", "target")
+RegisterUnitWatch(myUnitFrame)     -- shown only while you have a target
+```
+
+With `asState` true, the watch sets the boolean attribute `"state-unitexists"`
+instead of calling Show/Hide, so an `OnAttributeChanged` handler drives the
+visibility.
+
+The Show/Hide form also sets a `"statehidden"` attribute (true when hidden), so
+unit-frame code can tell a driver-hidden frame from one the user hid.
+
+`UnregisterUnitWatch(frame)` stops the watch. The frame stays in its last shown
+or hidden state. `UnitWatchRegistered(frame)` returns whether a watch is active.
+
+### `SecureButton_GetAttribute` / `SecureButton_GetUnit`
+
+`SecureButton_GetAttribute(frame, name)` reads an attribute. When the frame opts
+in with a `"useparent-"..name` or `"useparent*"` attribute, it walks up to the
+parent frame to find the value.
+
+`SecureButton_GetUnit(frame)` returns the frame's `unit` attribute, with an
+optional `unitsuffix` attribute appended. The unit-watch and click systems use
+it to find a frame's unit.
+
+**No taint.** These are functional copies of the modern secure templates. 1.12
+has no combat lockdown or taint, so nothing here is protected — the names exist
+for addon compatibility.
 
 ## FriendList
 
