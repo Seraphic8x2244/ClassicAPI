@@ -34,4 +34,12 @@ void PrepareForReload();
 // Offsets.h (OFF_TEXT_NODE_PAGE_BUFFERS …).
 void RotateFontStringNode(void *node, void *fs);
 
+// The stored rotation for `region` (from SetRotation), if any: writes the angle
+// (radians, positive = counter-clockwise on screen) and the normalized pivot,
+// returns true. False when the region has no rotation. Texture::Mask reads a
+// MaskTexture's rotation through this to rotate its clip shape — a mask never
+// renders, so its corner rewrite is moot; the {angle, pivot} record is the
+// entire effect.
+bool GetRotation(void *region, float *angleRad, float *cxN, float *cyN);
+
 } // namespace Texture::Transform

@@ -179,6 +179,11 @@ build instructions.
   - [`texture:SetRotation(angle [, cx, cy])`](#texturesetrotationangle--cx-cy)
   - [`texture:SetVertexOffset(vertexIndex, offsetX, offsetY)`](#texturesetvertexoffsetvertexindex-offsetx-offsety)
   - [`texture:SetMask(path)`](#texturesetmaskpath)
+  - [`frame:CreateMaskTexture([name, layer, ...])`](#framecreatemasktexturename-layer-)
+  - [`texture:AddMaskTexture(mask)`](#textureaddmasktexturemask)
+  - [`texture:RemoveMaskTexture([mask])`](#textureremovemasktexturemask)
+  - [`texture:GetNumMaskTextures()`](#texturegetnummasktextures)
+  - [`texture:GetMaskTexture(index)`](#texturegetmasktextureindex)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
@@ -4418,6 +4423,57 @@ t:SetMask(nil)                                    -- remove the mask
 > coordinates. If you crop the texture with `SetTexCoord`, the mask follows the
 > cropped region rather than the full display area. For a normal, uncropped
 > texture the two are the same.
+
+### `frame:CreateMaskTexture([name, layer, ...])`
+
+Creates a MaskTexture and returns it. A MaskTexture is a texture that never draws
+itself. Instead it clips other textures to its shape. Later clients added this
+object; vanilla has only the special-cased minimap mask.
+
+Give the mask a shape with `SetTexture`, place and size it like any texture
+(`SetPoint`, `SetSize`, `SetAllPoints`), then attach it with
+`texture:AddMaskTexture`. Because the mask has its own position and size, it can
+cover only part of the target, sit to one side, or move each frame.
+
+The arguments match `frame:CreateTexture`. The mask shape lives in the texture's
+alpha channel and must load from a BLP or an uncompressed 32-bit TGA — the same
+rule as [`texture:SetMask`](#texturesetmaskpath).
+
+```lua
+local mask = frame:CreateMaskTexture()
+mask:SetTexture("Interface\\AddOns\\MyAddon\\circle")
+mask:SetAllPoints(icon)      -- cover the whole icon → a round icon
+icon:AddMaskTexture(mask)
+```
+
+### `texture:AddMaskTexture(mask)`
+
+Clips this texture to `mask`'s shape and position. Where the mask is opaque the
+texture shows; where the mask is transparent the texture is hidden.
+
+Call it again with a different mask to add another. A texture with several masks
+shows only where ALL of them are opaque — the masks intersect. So two circles
+show their overlapping lens, and a square plus a circle show a square with
+rounded corners. Up to 7 masks apply at once. Masks cannot subtract, so you
+cannot cut a hole with this.
+
+A mask honors [`texture:SetRotation`](#texturesetrotationangle--cx-cy): rotate
+the mask and its clip shape turns with it. The mask can also move or resize each
+frame (drive it from an `OnUpdate`), so the clip animates.
+
+### `texture:RemoveMaskTexture([mask])`
+
+Removes `mask` from this texture. With no argument, removes every mask, so the
+texture returns to its full rectangle.
+
+### `texture:GetNumMaskTextures()`
+
+Returns the number of masks attached to this texture.
+
+### `texture:GetMaskTexture(index)`
+
+Returns the mask at `index` (1 is the first one added), or `nil` when there is
+no mask at that index.
 
 ### `fontstring:SetRotation(angle [, cx, cy])`
 

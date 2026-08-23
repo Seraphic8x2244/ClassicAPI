@@ -679,4 +679,14 @@ void PrepareForReload() {
 // ApplyToNode / Transform.h for the timing contract.
 void RotateFontStringNode(void *node, void *fs) { ApplyToNode(node, fs, /*fresh=*/true); }
 
+bool GetRotation(void *region, float *angleRad, float *cxN, float *cyN) {
+    auto it = g_xf.find(region);
+    if (it == g_xf.end() || it->second.angle == 0.0f)
+        return false;
+    *angleRad = it->second.angle;
+    *cxN = it->second.cxN;
+    *cyN = it->second.cyN;
+    return true;
+}
+
 } // namespace Texture::Transform

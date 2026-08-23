@@ -419,6 +419,14 @@ enum Offsets {
     VAR_SIMPLETEXTURE_POOL = 0x00CF4CE0,      // &DAT_00cf4ce0 CSimpleTexture free-list pool (`this`)
     VAR_SIMPLETEXTURE_CLASS_TAG = 0x00846588, // ".?AVCSimpleTexture@@" (alloc debug tag)
     FUN_SIMPLETEXTURE_CTOR = 0x0076FC40,      // __thiscall(mem, parent, layer, sublayer) -> tex
+    // --- MaskTexture object API (frame:CreateMaskTexture / Texture:AddMaskTexture) ---
+    // CreateMaskTexture mints its mask region by calling the engine's own
+    // Script_CreateTexture (reads (frame,name,layer,template) off the Lua stack and
+    // pushes the new CSimpleTexture), then hides it — the mask is a source, never drawn.
+    // The draw hook reads the mask's HTEXTURE (OFF_SIMPLETEXTURE_HTEXTURE, +0xCC, set
+    // by SetTexture and valid while hidden) + its rect (FUN_REGION_GET_RECT); the
+    // +0xC4 shown flag is OFF_REGION_DESIRED_SHOWN (defined below).
+    FUN_SCRIPT_CREATE_TEXTURE = 0x00773A20,   // Script frame:CreateTexture, __fastcall(L)->int
     // CSimpleTexture::SetTexture(path). Loads via FUN_00449D90, stores the owned
     // HTEXTURE at +0xCC (releases the old via DecRef FUN_0041AED0), marks dirty.
     // `__thiscall(tex, path, 0, *VAR_TEXTURE_BLEND_DEFAULT, 0) -> u32`. The
@@ -482,6 +490,10 @@ enum Offsets {
     // rect (see FUN_00770410's SetTexCoord path); texture/Rotation.cpp reads it to
     // rebuild axis-aligned corners before rotating.
     FUN_REGION_GET_RECT = 0x00768320,
+    // __thiscall(region+OFF_REGION_ANCHOR) -> int (nonzero = layout dirty, needs a
+    // resolve). GetLeft gates its resolve on this. Paired with the flag-1 resolve
+    // below to read a hidden region's rect synchronously.
+    FUN_REGION_LAYOUT_DIRTY = 0x00768310,
 
     // __thiscall(region+OFF_REGION_ANCHOR, int flag /*stack; pass 0*/) — force a
     // synchronous layout resolve: recomputes the region's rect (+0x64) from its
@@ -6924,33 +6936,82 @@ enum Offsets {
     // alpha, so a white-with-alpha mask clips the base to the mask's shape.
     //
     // The recipe was also pinned by an in-game probe (git history's
-    // MaskProbe.cpp) on the live GL backend — findings, load-bearing:
+    // MaskProbe.cpp) on the live backend — findings, load-bearing:
     //   * The COMBINER PRESET selectors are 0x1F+unit (GXRS_COMBINER0), value 1 =
-    //     MODULATE/MODULATE (the .rdata preset tables at 0x0080a25c/0x0080a274).
-    //     Binding a texture on unit 1 alone happens to give MODULATE by default
-    //     on this GL backend, but FUN_004eae10 sets it EXPLICITLY — we mirror
-    //     that (robust, not default-dependent). Do NOT confuse these with
-    //     0x2F/0x30/0x37/0x38 (texture-TRANSFORM/texgen): the probe wrote those
-    //     and forced a texgen mode with no planes, so unit 1 sampled a single
-    //     texel (the mask's alpha-0 corner) and the base vanished.
-    //   * The SECOND vertex UV stream (uv1) DOES feed unit 1 on GL (FUN_004eae10
+    //     MODULATE/MODULATE (the .rdata preset tables at 0x0080a25c/0x0080a274,
+    //     consumed by the D3D9 combiner apply FUN_005a2dd0: COLOROP table
+    //     {4,4,13,7,5,12}, ALPHAOP {3,4,3,7,5,3} — value 1 is the only preset
+    //     that MODULATEs the alpha channel too, which is what masking rides).
+    //     Binding a texture on unit 1 alone happens to give MODULATE by default,
+    //     but FUN_004eae10 sets it EXPLICITLY — we mirror that.
+    //   * The SECOND vertex UV stream (uv1) DOES feed unit 1 (FUN_004eae10
     //     passes a distinct uv1 = this+0x50), so uv1 = uv0 makes unit 1 sample
     //     the mask at the base's own texcoords — exactly SetMask semantics.
-    //   * The unit MUST be bracketed FUN_GX_TEXUNIT_ENABLE(1) ... FUN_GX_TEXUNIT
-    //     _DISABLE(1); the disable is what stops the mask leaking onto every
-    //     later textured draw (there is no Gx state push/pop around the region
-    //     layer render's binds — units are managed explicitly).
-    GXRS_TEXTURE0 = 0x17,  // texture bind, +unit (via FUN_GX_RS_SET_PTR)
-    GXRS_COMBINER0 = 0x1F, // combiner preset, +unit (via FUN_GX_RS_SET int form)
+    //     uv1 is the LAST explicit UV slot that exists: the vertex-format
+    //     component table at 0x008097A8 (13 formats × 13 components) has no
+    //     format with a third UV set, so masks past the first CANNOT ride an
+    //     explicit stream — they use texgen (below).
+    GXRS_TEXTURE0 = 0x17,  // texture bind, +unit 0..7 (via FUN_GX_RS_SET_PTR)
+    GXRS_COMBINER0 = 0x1F, // combiner preset, +unit 0..7 (via FUN_GX_RS_SET)
     GXRS_COMBINE_MODULATE = 1, // preset value: COLOROP=MODULATE, ALPHAOP=MODULATE
     // GxRs setters — `__fastcall(selector, value)`. The int form (0x00589E60)
     // writes combiner presets and the like; the pointer form (0x00589E80) writes
     // texture binds.
     FUN_GX_RS_SET = 0x00589E60,
     FUN_GX_RS_SET_PTR = 0x00589E80,
-    // Per-texture-unit enable/disable — `__fastcall(int unit)`.
-    FUN_GX_TEXUNIT_ENABLE = 0x0058B200,
-    FUN_GX_TEXUNIT_DISABLE = 0x0058B220,
+
+    // --- Texgen + per-unit texture matrices (multi-mask / rotated masks) -------
+    // Decoded from the D3D9 backend's draw-time state flush FUN_005a2f00 (the
+    // selector → SetTextureStageState/SetTransform Rosetta stone) and the
+    // minimap DISC draw FUN_004ec440, which is the engine's own texgen-mask
+    // template (it submits positions+colors ONLY and feeds BOTH units via
+    // texgen + a per-unit texture matrix). Selector namespace is five per-unit
+    // families, each 8 units wide (device supports 8 fixed-function stages;
+    // live cap at [VAR_GX_DEVICE]+OFF_GXDEV_STAGE_CAP):
+    //   0x17+u bind   0x1F+u combiner   0x27+u mip-bias   0x2F+u texgen
+    //   0x37+u coord-transform mode
+    // Texgen values (FUN_005a2b40): 0 = passthrough (stage reads vertex UV set
+    // #u — the default; why stage 1 sees the explicit uv1 stream), 1 = OBJECT-
+    // space position (D3D TCI_CAMERASPACEPOSITION + an auto inv(view)·inv(model)
+    // basis matrix — UV becomes a pure function of the RAW vertex position,
+    // immune to whatever model/view the pass set), 2 = world-space position,
+    // 3 = camera-space position (identity basis; what the disc draw uses),
+    // 5/4/6 = normal/reflection.
+    // Coord-transform values (FUN_005a14e0): 0 = off, 1 = apply the unit's
+    // texture matrix (basis × user matrix, D3DTTFF_COUNT3), 2 = projected.
+    // Per-unit texture-matrix STACKS (4 levels, base ctx+0xFD0+unit*0x118;
+    // slot 8 = model, 10 = view) — the disc draw's push/translate/scale/pop:
+    GXRS_TEXGEN0 = 0x2F,      // texgen mode, +unit (int form)
+    GXRS_TEXGEN_OBJECT_POS = 1,
+    GXRS_TEXXFORM0 = 0x37,    // coord-transform mode, +unit (int form)
+    GXRS_TEXXFORM_MATRIX = 1,
+    // Texture-matrix stack ops — `__fastcall(int unit, ...)`. PUSH duplicates
+    // the top (max depth 4); PUSH_LOAD pushes then loads an arbitrary 4×4
+    // (row-vector D3D layout: out = pos·M, translation in row 3). POP restores.
+    // (PUSH/POP were previously mislabeled FUN_GX_TEXUNIT_ENABLE/_DISABLE —
+    // they never enabled anything; binding a texture is what enables a stage,
+    // binding null disables it, per FUN_005a29d0.)
+    FUN_GX_TEXMTX_PUSH = 0x0058B200,      // (unit)
+    FUN_GX_TEXMTX_PUSH_LOAD = 0x0058B210, // (unit, const float m[16])
+    FUN_GX_TEXMTX_POP = 0x0058B220,       // (unit)
+    // Gx render-state journal push/pop — brackets a state scope; pop replays
+    // every selector written since the push back to its prior value. The engine
+    // wraps each region-layer draw (FUN_0076fb00) and the disc draw in a pair.
+    FUN_GX_STATE_PUSH = 0x00589F40,
+    FUN_GX_STATE_POP = 0x00589F50,
+    // The indexed submit that actually queues the draw for the verts staged by
+    // FUN_GX_PRIM_STREAMS — `__fastcall(int primType, int indexCount, const
+    // void *indices)`. Every FUN_GX_PRIM_STREAMS caller invokes it immediately
+    // after (region layer: FUN_0076fb00; disc: FUN_004ec440). State/matrix
+    // RESTORES must run AFTER this call, not after the stream call — the disc
+    // draw pops its matrices/state only past this point, and restoring earlier
+    // reverts the state the queued draw will be flushed with.
+    FUN_GX_PRIM_INDEXED = 0x0058A2E0,
+    // The device/context singleton the Gx wrappers route through (set at
+    // backend creation, FUN_00589ac0). +0x23C holds the live texture-stage cap
+    // the per-stage applies clamp against (FUN_005a29d0/FUN_005a2b40).
+    VAR_GX_DEVICE = 0x00C0ED38,
+    OFF_GXDEV_STAGE_CAP = 0x23C,
     // The vertex-stream primitive every textured region draws through
     // (FUN_0076fb00 calls it per region). Decompiler signature (13 params):
     // (count, positions, posStride, s3, s3Stride, colors, colorStride, drop8,
