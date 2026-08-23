@@ -37,22 +37,6 @@ The flagship feature: run modern Lua 5.1 addon code on 1.12's Lua 5.0 VM.
 | Feature | Effect |
 |---------|--------|
 | Multi-flavor & conditional TOC | Loads modern multi-flavor addons that ship one folder. Selects a version-specific TOC (`<Name>_ClassicAPI.toc` or `<Name>_Turtle.toc`) and the matching keybinding file (`Bindings_ClassicAPI.xml` / `Bindings_Turtle.xml`), accepts a comma-separated `## Interface:` version list (compatible when it includes the client version `11200`), and honors per-line `[AllowLoadGameType]` / `[AllowLoadTextLocale]` conditions and `[Family]` / `[Game]` / `[TextLocale]` path variables inside a TOC. See [Conditional and multi-flavor TOC loading](docs/API.md#conditional-and-multi-flavor-toc-loading). |
-| SavedVariables loaded first | Honors the modern `## LoadSavedVariablesFirst` TOC directive: a flagged addon's SavedVariables load before its Lua runs, so file-scope code sees restored config (instead of vanilla's `nil`). See [SavedVariables loaded first](docs/API.md#savedvariables-loaded-first). |
-
-## Installation
-
-Download the prebuilt `ClassicAPI.dll` from the
-[latest release](https://github.com/brues-code/ClassicAPI/releases/latest)
-(or [build it yourself](#building)). It's loaded with
-[VanillaFixes](https://github.com/hannesmann/vanillafixes):
-
-1. Install VanillaFixes if it isn't already.
-2. Copy `ClassicAPI.dll` into your game directory.
-3. Add `ClassicAPI.dll` to `dlls.txt`.
-4. Launch the game with `VanillaFixes.exe`.
-
-The bundled `!!!ClassicAPI` addon ships *inside* the DLL — no separate
-addon download or install step needed.
 
 ## Full API reference
 
@@ -295,6 +279,21 @@ See [Predefined focus bindings](docs/API.md#predefined-focus-bindings-focustarge
 for the implementation note.
 
 </details>
+
+## Installation
+
+Download the prebuilt `ClassicAPI.dll` from the
+[latest release](https://github.com/brues-code/ClassicAPI/releases/latest)
+(or [build it yourself](#building)). It's loaded with
+[VanillaFixes](https://github.com/hannesmann/vanillafixes):
+
+1. Install VanillaFixes if it isn't already.
+2. Copy `ClassicAPI.dll` into your game directory.
+3. Add `ClassicAPI.dll` to `dlls.txt`.
+4. Launch the game with `VanillaFixes.exe`.
+
+The bundled `!!!ClassicAPI` addon ships *inside* the DLL — no separate
+addon download or install step needed.
 
 ## Bundled addon: !!!ClassicAPI
 
