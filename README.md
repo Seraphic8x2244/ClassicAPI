@@ -25,17 +25,14 @@ The flagship feature: run modern Lua 5.1 addon code on 1.12's Lua 5.0 VM.
 | String methods | Every string value accepts method calls — `("asd"):upper()`, `("%d gold"):format(n)`, `msg:match("^!(%w+)")` — resolving through the `string` table, the way Lua 5.1 works. Vanilla's Lua 5.0 errors with `attempt to index a string value`. Works on literals and variables, in-world and on the login screen, and inside coroutines. See [String methods](docs/API.md#string-methods-supper-sformat). |
 | Script-handler arguments | Frame-script handlers receive their values as positional arguments — `OnMouseWheel(self, delta)`, `OnClick(self, button)`, `OnEvent(self, event, ...)`, etc. — the way 5.1+ clients do, so modern addon ports work unmodified. The `this` / `arg1` globals stay set. A handler that declares no parameters is unaffected. A handler that declared a parameter and expected nil now receives its real value. On by default. `SetModernScriptArgs(false)` restores exact vanilla dispatch. See [SetModernScriptArgs](docs/API.md#setmodernscriptargsenable--getmodernscriptargs). |
 
-### Modern text rendering
+### Modern client behaviors
 
 | Feature | Effect |
 |---------|--------|
 | Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips, the way 4.3.4+ clients do. Vanilla 1.12 shows the raw escape as literal text instead. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
 | Tooltip line cap | Lifts `GameTooltip`'s hard 30-line limit to 60 for every `GameTooltipTemplate` frame (`GameTooltip`, `ShoppingTooltip1/2`, `ItemRefTooltip`, AtlasLoot, …). Stat-heavy tooltips and comparison blocks (e.g. pfUI's eqcompare) no longer have their extra lines silently dropped. Done in pure C++ by growing the engine's FontString pool at tooltip-creation time. |
-
-### Modern addon loading
-
-| Feature | Effect |
-|---------|--------|
+| Event-driven nameplates | The modern `C_NamePlate` API, driven by real events instead of vanilla frame-scraping. `NAME_PLATE_UNIT_ADDED` / `NAME_PLATE_UNIT_REMOVED` fire as plates appear and vanish, `nameplate1`..`nameplateN` tokens resolve with every `UnitX` function (and fire `UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "nameplateN"`), and `C_NamePlate.GetNamePlateForUnit` / `GetNamePlates` hand back the live frames. See [NamePlate](docs/API.md#nameplate). |
+| Focus target | A sticky focus unit, like later clients. `FocusUnit("target")` pins it and `ClearFocus()` drops it, with `PLAYER_FOCUS_CHANGED` on every change. The `focus` / `focustarget` tokens resolve with every `UnitX` function and fire unit events (`UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "focus"`), and the predefined `FOCUSTARGET` / `TARGETFOCUS` keybinds are ready to set. See [Focus](docs/API.md#focus). |
 | Multi-flavor & conditional TOC | Loads modern multi-flavor addons that ship one folder. Selects a version-specific TOC (`<Name>_ClassicAPI.toc` or `<Name>_Turtle.toc`) and the matching keybinding file (`Bindings_ClassicAPI.xml` / `Bindings_Turtle.xml`), accepts a comma-separated `## Interface:` version list (compatible when it includes the client version `11200`), and honors per-line `[AllowLoadGameType]` / `[AllowLoadTextLocale]` conditions and `[Family]` / `[Game]` / `[TextLocale]` path variables inside a TOC. See [Conditional and multi-flavor TOC loading](docs/API.md#conditional-and-multi-flavor-toc-loading). |
 
 ## Full API reference
