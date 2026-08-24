@@ -340,6 +340,10 @@ Entry *Claim(uint32_t now) {
 
 // ---- Writes --------------------------------------------------------------
 
+// Defined in the duration-modifier section below; used by StoreFromCast's
+// refresh path too.
+void SignalAuraChanged(uint64_t guid);
+
 // The SpellGo hook: authoritative caster + caster-modified (talented) timing.
 // Identity is `(target, spell, caster)`, so a second caster of the same spell
 // opens its own entry instead of overwriting the first's, and a recast by the
@@ -373,6 +377,12 @@ void StoreFromCast(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
     e->casterGuid = casterGuid;
     e->expirationMs = expirationMs;
     e->durationMs = durationMs;
+    // An in-place recast refresh changes no descriptor field, so the engine
+    // fires no UNIT_AURA — event-driven consumers (aura-bar addons counting
+    // down a once-read duration) would never re-read the new timing. Signal it
+    // ourselves (deferred to the world tick, coalesced). A NEW application
+    // doesn't need this: its descriptor write fires the engine's own event.
+    SignalAuraChanged(targetGuid);
 }
 
 // The OnAuraAdded / OnAuraStacksChanged application hooks: a descriptor slot,
@@ -810,6 +820,114 @@ void OnWorldTick() {
 
 const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
+// ---- Paladin judgement identity + refresh (pfUI#45) ----------------------
+//
+// The judgement debuff (Judgement of Light/Wisdom/Justice/Crusader) is cast
+// SERVER-side as a triggered spell whose SMSG_SPELL_GO never reaches the
+// client, so its cache entry is seated caster-less by OnAuraAdded — and the
+// server's refresh mechanics are keyed by caster. The one attributable
+// signal is the Judgement CAST itself (SPELL_PALADIN_JUDGEMENT, the single
+// spell every seal judges through): its SPELL_GO names caster and victim.
+// HandleSpellGo uses it to (a) refresh existing judgement entries WITH
+// adoption — a re-judge is an in-place RefreshHolder server-side, no
+// descriptor change, no OnAuraAdded — and (b) arm a short window so the
+// fresh debuff's application gets attributed to the judging caster. From
+// then on the caster-STRICT swing refresh (Aura::JudgementRefresh's
+// SMSG_ATTACKERSTATEUPDATE subscriber) can do its job.
+
+constexpr uint32_t kSpellJudgement = 20271; // server SPELL_PALADIN_JUDGEMENT
+
+// The server's judgement-debuff selector, verbatim from its melee-refresh
+// block (tortoise-wow Unit::DealMeleeDamage): SPELLFAMILY_PALADIN +
+// SPELL_ATTR_EX3_ALWAYS_HIT. All 14 debuff ranks carry it (client DBC
+// verified); no shared family-flag mask exists (each seal's debuff has its
+// own bit), which is why this isn't an AddDurationMod rule.
+bool IsJudgementSpell(const uint8_t *rec) {
+    constexpr uint32_t kPaladinFamily = 10; // SPELLFAMILY_PALADIN
+    if (rec == nullptr)
+        return false;
+    if (*reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != kPaladinFamily)
+        return false;
+    return (*reinterpret_cast<const uint32_t *>(
+                rec + Offsets::OFF_SPELL_RECORD_ATTRIBUTES_EX3) &
+            Offsets::SPELL_ATTR_EX3_ALWAYS_HIT) != 0;
+}
+
+// Armed attribution: a Judgement cast went off from `caster` at `victim`;
+// the triggered debuff's OnAuraAdded lands ~a server tick later (SPELL_GO
+// precedes the aura's SMSG_UPDATE_OBJECT — the same ordering kEvictGraceMs
+// exists for). One-shot, short TTL so a judge whose debuff never lands
+// can't mis-attribute a later application.
+struct JudgeArm {
+    uint64_t victim;
+    uint64_t caster;
+    uint32_t untilMs;
+};
+constexpr int kJudgeArmMax = 4; // simultaneous judging paladins in view
+constexpr uint32_t kJudgeArmTtlMs = 2000;
+JudgeArm g_judgeArms[kJudgeArmMax];
+
+void ArmJudgementAttribution(uint64_t victim, uint64_t caster) {
+    const uint32_t now = NowMs();
+    JudgeArm *slot = nullptr;
+    for (auto &a : g_judgeArms) {
+        if (a.victim == victim && a.caster == caster) {
+            slot = &a; // re-judge inside the TTL — refresh in place
+            break;
+        }
+        if (slot == nullptr &&
+            (a.victim == 0 || Time::Clock::Reached(now, a.untilMs)))
+            slot = &a;
+    }
+    if (slot == nullptr)
+        slot = &g_judgeArms[0]; // all live (>4 paladins?) — steal the first
+    *slot = {victim, caster, now + kJudgeArmTtlMs};
+}
+
+// The caster armed for `victim`, or 0. One-shot: consumed on hit.
+uint64_t ConsumeJudgementAttribution(uint64_t victim, uint32_t now) {
+    for (auto &a : g_judgeArms) {
+        if (a.victim != victim || a.victim == 0 ||
+            Time::Clock::Reached(now, a.untilMs))
+            continue;
+        const uint64_t caster = a.caster;
+        a = {};
+        return caster;
+    }
+    return 0;
+}
+
+// Shared body of the two refresh triggers. `adopt` lets the Judgement-cast
+// path claim a caster-less entry (the cast is proof of ownership); the swing
+// path stays caster-strict — a swing gives no proof, and adopting there
+// would let any tank's white swings pin another paladin's judgement timer.
+int RefreshJudgementsImpl(uint64_t unitGuid, uint64_t attackerGuid, bool adopt) {
+    if (unitGuid == 0 || attackerGuid == 0)
+        return 0;
+    const uint32_t now = NowMs();
+    int refreshed = 0;
+    for (int i = 0; i < g_usedHigh; ++i) {
+        Entry &e = g_cache[i];
+        if (!e.used || e.targetGuid != unitGuid)
+            continue;
+        if (e.casterGuid != attackerGuid && !(adopt && e.casterGuid == 0))
+            continue;
+        if (e.durationMs == 0)
+            continue; // never invent a duration
+        if (!IsJudgementSpell(
+                Spell::Lookup::RecordForID(static_cast<int>(e.spellId))))
+            continue;
+        if (e.casterGuid == 0)
+            e.casterGuid = attackerGuid; // adoption claim
+        e.expirationMs = now + e.durationMs; // RefreshHolder → own duration
+        e.stampMs = now;
+        SignalAuraChanged(e.targetGuid);
+        ++refreshed;
+    }
+    return refreshed;
+}
+
 // ---- SMSG_SPELL_GO co-hook ----------------------------------------------
 
 // The hit-target list is all we need: each entry is a unit the cast landed
@@ -846,6 +964,16 @@ void HandleSpellGo(uint64_t caster, uint32_t spellId, const uint64_t *targets,
     // (Conflagrate -3s Immolate, Molten Blast refresh Flame Shock, …). Runs
     // before the aura gate below: the trigger spell applies no aura itself.
     ApplyDurationModifiers(spellId, caster, targets, numTargets);
+
+    // Judgement: refresh-with-adoption for a re-judge (in-place server
+    // refresh, no aura event) and arm attribution for the fresh debuff that
+    // follows. Before the aura gate — Judgement itself applies no aura.
+    if (spellId == kSpellJudgement) {
+        for (int i = 0; i < numTargets; ++i) {
+            RefreshJudgementsImpl(targets[i], caster, /*adopt*/ true);
+            ArmJudgementAttribution(targets[i], caster);
+        }
+    }
 
     const uint8_t *rec = Spell::Lookup::RecordForID(static_cast<int>(spellId));
     if (!SpellAppliesAura(rec))
@@ -935,7 +1063,12 @@ void StampApplication(void *unit, uint32_t spellId, int slot) {
     // mods). See WasRecentPlayerCast.
     const bool byPlayer = WasRecentPlayerCast(spellId);
     const uint32_t durationMs = SpellDurationMs(rec, byPlayer);
-    const uint64_t caster = byPlayer ? Unit::Identity::PlayerGuid() : 0;
+    uint64_t caster = byPlayer ? Unit::Identity::PlayerGuid() : 0;
+    // A judgement debuff is cast server-side (no SPELL_GO, so neither path
+    // above can name its caster) — attribute it to the paladin whose
+    // Judgement cast just armed this victim. See the judgement section.
+    if (caster == 0 && IsJudgementSpell(rec))
+        caster = ConsumeJudgementAttribution(unitGuid, NowMs());
     const uint32_t expirationMs = durationMs > 0 ? NowMs() + durationMs : 0;
     StoreFromApplication(unitGuid, spellId, caster, expirationMs, durationMs,
                          slot, KindForSlot(slot));
@@ -1041,6 +1174,13 @@ bool AddDurationMod(uint32_t triggerSpellId, uint32_t affectedFamily,
     return RegisterDurationMod(triggerSpellId, /*triggerFamily*/ 0,
                                /*triggerSchool*/ -1, affectedFamily, affectedMask,
                                affectedIcon, op, valueMs);
+}
+
+int RefreshJudgements(uint64_t unitGuid, uint64_t attackerGuid) {
+    // Caster-strict (no adoption) — the Judgement-cast path inside
+    // HandleSpellGo is the one with proof of ownership; see
+    // RefreshJudgementsImpl.
+    return RefreshJudgementsImpl(unitGuid, attackerGuid, /*adopt*/ false);
 }
 
 uint32_t RefreshDurationByFamily(uint64_t unitGuid, uint32_t family,

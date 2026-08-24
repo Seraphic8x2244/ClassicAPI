@@ -69,6 +69,21 @@ uint32_t RefreshDurationByFamily(uint64_t unitGuid, uint32_t family,
                                  uint64_t mask, uint32_t icon,
                                  uint64_t casterGuid);
 
+// Mirrors the server's melee-swing judgement refresh (tortoise-wow
+// Unit::DealMeleeDamage): a white swing from `attackerGuid` that dealt any
+// damage refreshes every aura it cast on `unitGuid` whose spell is
+// SPELLFAMILY_PALADIN with SPELL_ATTR_EX3_ALWAYS_HIT (the judgement-debuff
+// marker — all Judgement of Light/Wisdom/Justice/Crusader ranks) back to its
+// own applied duration. Caster-strict: entries with an unknown caster are
+// left alone (a swing gives no proof of ownership). The caster comes from
+// the Judgement-cast attribution inside the SpellGo path — the debuff itself
+// is cast server-side with no client-visible SPELL_GO, so the Judgement cast
+// (20271) is what names the owner: it refresh-with-adoption's existing
+// entries (re-judge = in-place server refresh, no aura event) and arms the
+// fresh application's attribution. Returns the number refreshed. Fed by
+// Aura::JudgementRefresh's SMSG_ATTACKERSTATEUPDATE subscriber.
+int RefreshJudgements(uint64_t unitGuid, uint64_t attackerGuid);
+
 // Op codes for AddDurationMod (mirror the Lua op strings).
 enum DurationModOp {
     DURATION_MOD_REFRESH = 0,

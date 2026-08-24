@@ -1785,6 +1785,13 @@ enum Offsets {
     SMSG_SPELL_CHANNEL_UPDATE = 0x13A,
     SMSG_SPELL_DELAYED = 0x1E2,
     SMSG_SPELL_FAILED_OTHER = 0x2A6,
+    // Melee swing result broadcast. Body (verified against the server's own
+    // writer, tortoise-wow Unit::SendAttackStateUpdate): u32 hitInfo,
+    // packedGuid attacker, packedGuid victim, u32 totalDamage, u8 subCount,
+    // per-sub {u32 school, f32 coeff, u32 damage, u32 absorb, i32 resist},
+    // u32 targetState, u32, u32 spellId, u32 blocked. `Aura::JudgementRefresh`
+    // reads through totalDamage.
+    SMSG_ATTACKERSTATEUPDATE = 0x14A,
 
     // NetClient send — `__thiscall void(void *conn, CDataStore *packet)`.
     // The outgoing counterpart of FUN_NET_MESSAGE_DISPATCH: every CMSG the
@@ -6499,6 +6506,12 @@ enum Offsets {
     // SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS (verified via disassembly; the
     // server enum agrees). NOT AttributesEx2's bit 29 (that's CANT_CRIT).
     SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS = 0x20000000,
+    // AttributesEx3 bit 18 — the paladin judgement-debuff marker. The server's
+    // melee-swing judgement refresh selects auras by SPELLFAMILY_PALADIN +
+    // this bit (tortoise-wow SpellDefines.h SPELL_ATTR_EX3_ALWAYS_HIT,
+    // Unit::DealMeleeDamage). Verified in the client Spell.dbc: all 14
+    // Judgement of Light/Wisdom/Justice/Crusader debuff ranks carry it.
+    SPELL_ATTR_EX3_ALWAYS_HIT = 0x00040000,
     // AttributesEx channel bits (CHANNELED_1 0x4 | CHANNELED_2 0x40) and the
     // AttributesEx2 autorepeat flag (bit 5, Auto Shot / Shoot) — each shared
     // by more than one module, so kept here rather than redefined locally.
