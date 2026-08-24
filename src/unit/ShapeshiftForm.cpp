@@ -173,8 +173,7 @@ void __fastcall BonusActionBarUpdate_h() {
     if (current < 0 || current == s_lastForm)
         return;
     s_lastForm = current;
-    const int slot = Event::Custom::Lookup(kEventName);
-    Event::Custom::Fire(slot, "");
+    Event::Custom::Fire(_reserve.Slot(), "");
 }
 
 } // namespace

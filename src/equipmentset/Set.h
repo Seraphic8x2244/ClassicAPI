@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include "event/Custom.h"
+
 #include <cstdint>
 #include <string>
 
@@ -109,8 +111,9 @@ constexpr int LOC_MISSING = -1;
 // coincidence, not load-bearing).
 constexpr int LOC_IGNORED = 1;
 
-// Custom event names. All three are reserved at module-init time
-// via `Event::Custom::AutoReserve` in `Api.cpp`.
+// Custom event reservations, shared by the Data and Api TUs (C++17 inline
+// variables — one instance each; the AutoReserve ctor dedups by name anyway).
+// Fire via `kEvt*.Slot()`.
 //
 //   EQUIPMENT_SETS_CHANGED   — no payload; fires on any mutation
 //                              (create / save / modify / delete /
@@ -130,8 +133,8 @@ constexpr int LOC_IGNORED = 1;
 //                              pickup→equip pair actually completed,
 //                              matching modern's "we dispatched"
 //                              definition of success).
-constexpr const char *kEventName = "EQUIPMENT_SETS_CHANGED";
-constexpr const char *kSwapPendingEvent = "EQUIPMENT_SWAP_PENDING";
-constexpr const char *kSwapFinishedEvent = "EQUIPMENT_SWAP_FINISHED";
+inline const Event::Custom::AutoReserve kEvtSetsChanged{"EQUIPMENT_SETS_CHANGED"};
+inline const Event::Custom::AutoReserve kEvtSwapPending{"EQUIPMENT_SWAP_PENDING"};
+inline const Event::Custom::AutoReserve kEvtSwapFinished{"EQUIPMENT_SWAP_FINISHED"};
 
 } // namespace EquipmentSet

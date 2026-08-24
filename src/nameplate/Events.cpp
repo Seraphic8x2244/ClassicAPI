@@ -59,13 +59,9 @@ namespace NamePlate::Events {
 
 namespace {
 
-constexpr const char *kEventCreated = "NAME_PLATE_CREATED";
-constexpr const char *kEventUnitAdded = "NAME_PLATE_UNIT_ADDED";
-constexpr const char *kEventUnitRemoved = "NAME_PLATE_UNIT_REMOVED";
-
-const Event::Custom::AutoReserve _r1{kEventCreated};
-const Event::Custom::AutoReserve _r2{kEventUnitAdded};
-const Event::Custom::AutoReserve _r3{kEventUnitRemoved};
+const Event::Custom::AutoReserve _evtCreated{"NAME_PLATE_CREATED"};
+const Event::Custom::AutoReserve _evtUnitAdded{"NAME_PLATE_UNIT_ADDED"};
+const Event::Custom::AutoReserve _evtUnitRemoved{"NAME_PLATE_UNIT_REMOVED"};
 
 // Previous tick's snapshot — GUID → nameplate-frame pointer for each
 // nameplated unit. Compared against the next tick's walk to compute
@@ -112,14 +108,14 @@ int AssignSlot(uint64_t guid) {
     return static_cast<int>(g_slots.size() - 1);
 }
 
-// Fire `eventName` with a pre-formatted string as `arg1`. The engine
+// Fire `event` with a pre-formatted string as `arg1`. The engine
 // dispatcher's `%s` format code pushes the C string into `_G.arg1`
 // as a Lua string — no escaping concerns for our own input
 // (`"nameplateN"`).
-void FireWithString(const char *eventName, const char *value) {
+void FireWithString(const Event::Custom::AutoReserve &event, const char *value) {
     if (value == nullptr)
         return;
-    const int slot = Event::Custom::Lookup(eventName);
+    const int slot = event.Slot();
     if (slot < 0)
         return;
     Event::Custom::Fire(slot, "%s", value);
@@ -172,10 +168,10 @@ using LuaRefRef_t = int(__fastcall *)(void *L, int t);
 using LuaRefUnref_t = void(__fastcall *)(void *L, int t, int ref);
 using LuaRawGetI_t = void(__fastcall *)(void *L, int t, int n);
 
-void FireWithFrame(const char *eventName, void *frame) {
+void FireWithFrame(const Event::Custom::AutoReserve &event, void *frame) {
     if (frame == nullptr)
         return;
-    const int slot = Event::Custom::Lookup(eventName);
+    const int slot = event.Slot();
     if (slot < 0)
         return;
 
@@ -229,7 +225,7 @@ void OnWorldTick() {
     // event handler.
     for (const auto &kv : g_currentTickPlates) {
         if (g_seenPlates.insert(kv.second).second)
-            FireWithFrame(kEventCreated, const_cast<void *>(kv.second));
+            FireWithFrame(_evtCreated, const_cast<void *>(kv.second));
         if (g_lastTickPlates.find(kv.first) == g_lastTickPlates.end()) {
             const int slot = AssignSlot(kv.first);
             // Watch this unit's fields so UNIT_HEALTH/UNIT_AURA/… fire with
@@ -237,7 +233,7 @@ void OnWorldTick() {
             // target/party/raid tokens, not nameplates).
             Unit::TokenObserver::Register(kv.first, &NamePlateFieldCb);
             char tokenBuf[24];
-            FireWithString(kEventUnitAdded,
+            FireWithString(_evtUnitAdded,
                 FormatNamePlateToken(tokenBuf, sizeof tokenBuf, slot + 1));
         }
     }
@@ -254,7 +250,7 @@ void OnWorldTick() {
                 continue;
             const int oneBased = static_cast<int>(it - g_slots.begin()) + 1;
             char tokenBuf[24];
-            FireWithString(kEventUnitRemoved,
+            FireWithString(_evtUnitRemoved,
                 FormatNamePlateToken(tokenBuf, sizeof tokenBuf, oneBased));
             Unit::TokenObserver::Unregister(kv.first, &NamePlateFieldCb);
             *it = 0; // free the slot (no shift of survivors)

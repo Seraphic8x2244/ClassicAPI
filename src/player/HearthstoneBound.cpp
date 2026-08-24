@@ -68,8 +68,7 @@ void __fastcall BindPointUpdateHandler_h(void *packetBuffer) {
             static_cast<uintptr_t>(Offsets::VAR_IN_WORLD)) == 0)
         return;
 
-    const int slot = Event::Custom::Lookup(kEventName);
-    Event::Custom::Fire(slot, "");
+    Event::Custom::Fire(_reserve.Slot(), "");
 }
 
 } // namespace

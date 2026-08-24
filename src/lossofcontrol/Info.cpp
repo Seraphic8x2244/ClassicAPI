@@ -223,8 +223,8 @@ int BuildList(LocEntry *out, int maxOut) {
 // lesson). The scan is bounded (16 debuff slots) and early-outs when idle, so
 // the per-frame cost is negligible.
 
-constexpr const char *kEventAdded = "LOSS_OF_CONTROL_ADDED";
-constexpr const char *kEventUpdate = "LOSS_OF_CONTROL_UPDATE";
+const Event::Custom::AutoReserve _reserveAdded{"LOSS_OF_CONTROL_ADDED"};
+const Event::Custom::AutoReserve _reserveUpdate{"LOSS_OF_CONTROL_UPDATE"};
 
 // Identity of an active effect for frame-to-frame diffing: a CC is keyed by
 // spellID, a school interrupt by its school mask (spellID 0).
@@ -255,7 +255,7 @@ void OnWorldTick() {
     for (int i = 0; i < n; ++i) {
         if (!ContainsKey(g_prev, g_prevCount, cur[i])) {
             // A newly-applied effect -> LOSS_OF_CONTROL_ADDED(eventIndex).
-            Event::Custom::Fire(Event::Custom::Lookup(kEventAdded), "%d", i + 1);
+            Event::Custom::Fire(_reserveAdded.Slot(), "%d", i + 1);
             changed = true;
         }
     }
@@ -269,15 +269,13 @@ void OnWorldTick() {
     // forward-compatible with per-unit tracking and matches modern WoW, whose
     // LOSS_OF_CONTROL_UPDATE carries the unit token.
     if (changed)
-        Event::Custom::Fire(Event::Custom::Lookup(kEventUpdate), "%s", "player");
+        Event::Custom::Fire(_reserveUpdate.Slot(), "%s", "player");
 
     for (int i = 0; i < n; ++i)
         g_prev[i] = cur[i];
     g_prevCount = n;
 }
 
-static const Event::Custom::AutoReserve _reserveAdded{kEventAdded};
-static const Event::Custom::AutoReserve _reserveUpdate{kEventUpdate};
 static const Tick::WorldTick::AutoSubscribe _tick{&OnWorldTick};
 
 // `C_LossOfControl.GetActiveLossOfControlDataCount()` -> number.

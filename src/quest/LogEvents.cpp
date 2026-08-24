@@ -157,7 +157,7 @@ void __fastcall QuestLogRebuild_h(int param_1) {
     // (login or post-reload). Modern WoW's QUEST_ACCEPTED doesn't
     // fire on initial sync either; we match that.
     if (newCount == 1) {
-        const int slot = Event::Custom::Lookup(kAcceptedEventName);
+        const int slot = _reserveAccepted.Slot();
         if (slot >= 0)
             Event::Custom::Fire(slot, "%d%d", firstNewIdx, firstNewID);
     }
@@ -168,7 +168,7 @@ void __fastcall QuestLogRebuild_h(int param_1) {
     // all but one of the previous character's quests (1 removal, N
     // additions in the same rebuild).
     if (removedCount == 1 && newCount <= 1) {
-        const int slot = Event::Custom::Lookup(kRemovedEventName);
+        const int slot = _reserveRemoved.Slot();
         if (slot >= 0)
             Event::Custom::Fire(slot, "%d", firstRemovedID);
     }

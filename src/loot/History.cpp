@@ -344,7 +344,7 @@ StartFn_t g_origStart = nullptr;
 // structurally: a new item appears or the ring evicts an old one (shifting
 // every index).
 void FireFullUpdate() {
-    Event::Custom::Fire(Event::Custom::Lookup(kFullUpdate), "");
+    Event::Custom::Fire(_evFullUpdate.Slot(), "");
 }
 
 // START_ROLL: let the original build the store node, then read the item's
@@ -373,8 +373,7 @@ void __fastcall Roll_h(void *msg, void *ctx, int a3) {
     if (structural)
         FireFullUpdate();
     if (itemIdx > 0)
-        Event::Custom::Fire(Event::Custom::Lookup(kRollChanged), "%d%d", itemIdx,
-                            playerIdx);
+        Event::Custom::Fire(_evRollChanged.Slot(), "%d%d", itemIdx, playerIdx);
 }
 
 void __fastcall Won_h(void *ctx, void *msg, int a3) {
@@ -388,7 +387,7 @@ void __fastcall Won_h(void *ctx, void *msg, int a3) {
     if (structural)
         FireFullUpdate();
     if (itemIdx > 0)
-        Event::Custom::Fire(Event::Custom::Lookup(kRollComplete), "%d", itemIdx);
+        Event::Custom::Fire(_evRollComplete.Slot(), "%d", itemIdx);
 }
 
 void __fastcall Passed_h(void *ctx, void *msg) {
@@ -402,7 +401,7 @@ void __fastcall Passed_h(void *ctx, void *msg) {
     if (structural)
         FireFullUpdate();
     if (itemIdx > 0)
-        Event::Custom::Fire(Event::Custom::Lookup(kRollComplete), "%d", itemIdx);
+        Event::Custom::Fire(_evRollComplete.Slot(), "%d", itemIdx);
 }
 
 const Game::HookAutoRegister _hookRoll{

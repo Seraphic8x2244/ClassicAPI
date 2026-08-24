@@ -386,7 +386,7 @@ int __fastcall Script_UseEquipmentSet(void *L) {
     const uint32_t setID = ArgSetID(L, 1);
     const Set *s = Data::FindByID(setID);
     if (s == nullptr) {
-        const int evt = Event::Custom::Lookup(kSwapFinishedEvent);
+        const int evt = kEvtSwapFinished.Slot();
         if (evt >= 0)
             Event::Custom::Fire(evt, "%d%d", 0, static_cast<int>(setID));
         Game::Lua::PushBoolean(L, 0);
@@ -396,7 +396,7 @@ int __fastcall Script_UseEquipmentSet(void *L) {
     // Fire PENDING right after the set-exists check, before any of
     // the swap work. Addon UI can use this to gate swap-in-progress
     // visuals.
-    const int pendingEvt = Event::Custom::Lookup(kSwapPendingEvent);
+    const int pendingEvt = kEvtSwapPending.Slot();
     if (pendingEvt >= 0)
         Event::Custom::Fire(pendingEvt, "%d", static_cast<int>(setID));
 
@@ -569,7 +569,7 @@ int __fastcall Script_UseEquipmentSet(void *L) {
             virtualPaperdoll[targetSlot - 1] = 0;
     }
 
-    const int evt = Event::Custom::Lookup(kSwapFinishedEvent);
+    const int evt = kEvtSwapFinished.Slot();
     if (evt >= 0)
         Event::Custom::Fire(evt, "%d%d", 1, static_cast<int>(setID));
 
@@ -620,8 +620,5 @@ static void RegisterLuaFunctions() {
 }
 
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
-static const Event::Custom::AutoReserve _reserve{kEventName};
-static const Event::Custom::AutoReserve _reservePending{kSwapPendingEvent};
-static const Event::Custom::AutoReserve _reserveFinished{kSwapFinishedEvent};
 
 } // namespace EquipmentSet::Api

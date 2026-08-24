@@ -318,7 +318,7 @@ void AppendNonBagOwned(uint64_t *out, int *count) {
 }
 
 void FireChanged() {
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtNewItems), "");
+    Event::Custom::Fire(_r.Slot(), "");
 }
 
 // Login-baseline handler. Runs every frame but does no work once the

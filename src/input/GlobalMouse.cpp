@@ -64,8 +64,8 @@ namespace Input::GlobalMouse {
 
 namespace {
 
-constexpr const char *kDownEvent = "GLOBAL_MOUSE_DOWN";
-constexpr const char *kUpEvent   = "GLOBAL_MOUSE_UP";
+const Event::Custom::AutoReserve _reserveDown{"GLOBAL_MOUSE_DOWN"};
+const Event::Custom::AutoReserve _reserveUp{"GLOBAL_MOUSE_UP"};
 
 // Held-state bitmap — bit `i` set means the button with 1-based
 // `IsMouseButtonDown` ID `i+1` is currently held. Modern API IDs:
@@ -154,7 +154,7 @@ void ProcessMouseMessage(UINT msg, WPARAM wParam) {
         else      g_mouseButtonMask &= ~bit;
     }
 
-    const int slot = Event::Custom::Lookup(down ? kDownEvent : kUpEvent);
+    const int slot = (down ? _reserveDown : _reserveUp).Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "%s", name);
 }
@@ -241,8 +241,6 @@ void RegisterLuaFunctions() {
     InstallHook();
 }
 
-const Event::Custom::AutoReserve _reserveDown{kDownEvent};
-const Event::Custom::AutoReserve _reserveUp{kUpEvent};
 const Tick::WorldTick::AutoSubscribe _evict{&EvictTick};
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 

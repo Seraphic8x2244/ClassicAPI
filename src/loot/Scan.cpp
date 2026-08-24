@@ -267,7 +267,7 @@ void Complete() {
     s_scan.currentGuid = 0;
     s_scan.suppressEvents = false;
     s_scan.lootMode = false;
-    Event::Custom::Fire(Event::Custom::Lookup(kEventCompleted), "");
+    Event::Custom::Fire(_reserve.Slot(), "");
 }
 
 void TryStartNext() {

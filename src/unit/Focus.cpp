@@ -284,7 +284,7 @@ void Set(uint64_t guid) {
         TokenObserver::Register(guid, &FocusFieldCb);
         g_focusObserved = true;
     }
-    const int slot = Event::Custom::Lookup(kEventName);
+    const int slot = _reserve.Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "");
 }

@@ -75,7 +75,7 @@ uint32_t NextAvailableID() {
 }
 
 void FireChanged() {
-    const int slot = Event::Custom::Lookup(kEventName);
+    const int slot = kEvtSetsChanged.Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "");
 }

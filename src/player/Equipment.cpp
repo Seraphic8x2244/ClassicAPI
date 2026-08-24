@@ -109,8 +109,7 @@ int __fastcall EquipSlotChanged_cb(uint32_t fieldOffset, uint32_t /*size*/,
     const int slot0 =
         static_cast<int>(fieldOffset - Offsets::OFF_DESC_PLAYER_EQUIP_FIRST) >> 3;
     if (slot0 >= 0 && slot0 < Offsets::DESC_PLAYER_EQUIP_SLOTS) {
-        Event::Custom::FireIdSuccess(Event::Custom::Lookup(kEvtEquipmentChanged),
-                                     slot0 + 1,
+        Event::Custom::FireIdSuccess(_r.Slot(), slot0 + 1,
                                      SlotHasItem(guidLo, guidHi, slot0));
         // Gear swap changes item +healing and Spirit/Armor — invalidate the
         // GetSpellBonusHealing cache.
@@ -225,7 +224,7 @@ void __fastcall AlertsRecompute_h() {
         return;
     }
     if (changed)
-        Event::Custom::Fire(Event::Custom::Lookup(kEvtDurability), "");
+        Event::Custom::Fire(_r2.Slot(), "");
 }
 
 static const Game::HookAutoRegister _alertsHook{

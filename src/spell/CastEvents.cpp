@@ -31,33 +31,20 @@ namespace Spell::CastEvents {
 namespace {
 
 
-constexpr const char *kStart = "UNIT_SPELLCAST_START";
-constexpr const char *kStop = "UNIT_SPELLCAST_STOP";
-constexpr const char *kDelayed = "UNIT_SPELLCAST_DELAYED";
-constexpr const char *kChannelStart = "UNIT_SPELLCAST_CHANNEL_START";
-constexpr const char *kChannelStop = "UNIT_SPELLCAST_CHANNEL_STOP";
-constexpr const char *kChannelUpdate = "UNIT_SPELLCAST_CHANNEL_UPDATE";
-constexpr const char *kSucceeded = "UNIT_SPELLCAST_SUCCEEDED";
-constexpr const char *kInterrupted = "UNIT_SPELLCAST_INTERRUPTED";
-constexpr const char *kFailed = "UNIT_SPELLCAST_FAILED";
-constexpr const char *kFailedQuiet = "UNIT_SPELLCAST_FAILED_QUIET";
-constexpr const char *kSent = "UNIT_SPELLCAST_SENT";
-constexpr const char *kReticleTarget = "UNIT_SPELLCAST_RETICLE_TARGET";
-constexpr const char *kReticleClear = "UNIT_SPELLCAST_RETICLE_CLEAR";
-
-const Event::Custom::AutoReserve _rStart{kStart};
-const Event::Custom::AutoReserve _rStop{kStop};
-const Event::Custom::AutoReserve _rDelayed{kDelayed};
-const Event::Custom::AutoReserve _rChannelStart{kChannelStart};
-const Event::Custom::AutoReserve _rChannelStop{kChannelStop};
-const Event::Custom::AutoReserve _rChannelUpdate{kChannelUpdate};
-const Event::Custom::AutoReserve _rSucceeded{kSucceeded};
-const Event::Custom::AutoReserve _rInterrupted{kInterrupted};
-const Event::Custom::AutoReserve _rFailed{kFailed};
-const Event::Custom::AutoReserve _rFailedQuiet{kFailedQuiet};
-const Event::Custom::AutoReserve _rSent{kSent};
-const Event::Custom::AutoReserve _rReticleTarget{kReticleTarget};
-const Event::Custom::AutoReserve _rReticleClear{kReticleClear};
+// The reservations double as the fire handles (`k*.Slot()` — O(1)).
+const Event::Custom::AutoReserve kStart{"UNIT_SPELLCAST_START"};
+const Event::Custom::AutoReserve kStop{"UNIT_SPELLCAST_STOP"};
+const Event::Custom::AutoReserve kDelayed{"UNIT_SPELLCAST_DELAYED"};
+const Event::Custom::AutoReserve kChannelStart{"UNIT_SPELLCAST_CHANNEL_START"};
+const Event::Custom::AutoReserve kChannelStop{"UNIT_SPELLCAST_CHANNEL_STOP"};
+const Event::Custom::AutoReserve kChannelUpdate{"UNIT_SPELLCAST_CHANNEL_UPDATE"};
+const Event::Custom::AutoReserve kSucceeded{"UNIT_SPELLCAST_SUCCEEDED"};
+const Event::Custom::AutoReserve kInterrupted{"UNIT_SPELLCAST_INTERRUPTED"};
+const Event::Custom::AutoReserve kFailed{"UNIT_SPELLCAST_FAILED"};
+const Event::Custom::AutoReserve kFailedQuiet{"UNIT_SPELLCAST_FAILED_QUIET"};
+const Event::Custom::AutoReserve kSent{"UNIT_SPELLCAST_SENT"};
+const Event::Custom::AutoReserve kReticleTarget{"UNIT_SPELLCAST_RETICLE_TARGET"};
+const Event::Custom::AutoReserve kReticleClear{"UNIT_SPELLCAST_RETICLE_CLEAR"};
 
 // Autoshot spams client-side failures while ramping — nampower filters it
 // out of its failure event, so do we.
@@ -108,8 +95,9 @@ void BuildCastGuid(char *out, size_t n, int type, int spellID, int castUID) {
 // rank)`. Gated on a listener so an unwatched event does no DBC lookups or
 // string formatting. A null name/rank pushes `nil` through the dispatcher's
 // `lua_pushstring(NULL) → pushnil` tail-jump, which is fine.
-void Fire(const char *eventName, int spellID, int guidNum, int type = 3) {
-    const int slot = Event::Custom::Lookup(eventName);
+void Fire(const Event::Custom::AutoReserve &event, int spellID, int guidNum,
+          int type = 3) {
+    const int slot = event.Slot();
     if (!Event::Custom::HasListeners(slot))
         return;
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
@@ -127,7 +115,7 @@ void Fire(const char *eventName, int spellID, int guidNum, int type = 3) {
 // inserted at arg2. `target` is a unit token (e.g. "target") resolved from
 // the cast packet, or "" for self / no-target casts.
 void FireSent(int spellID, int guidNum, const char *target) {
-    const int slot = Event::Custom::Lookup(kSent);
+    const int slot = kSent.Slot();
     if (!Event::Custom::HasListeners(slot))
         return;
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
@@ -148,8 +136,8 @@ void FireSent(int spellID, int guidNum, const char *target) {
 // the load-bearing fields — are exact; only arg2 differs (`""` vs `nil`),
 // which is inconsequential for a reticle (no cast to identify). spellName /
 // rank are our usual extension tail.
-void FireReticle(const char *eventName, int spellID) {
-    const int slot = Event::Custom::Lookup(eventName);
+void FireReticle(const Event::Custom::AutoReserve &event, int spellID) {
+    const int slot = event.Slot();
     if (!Event::Custom::HasListeners(slot))
         return;
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);
@@ -382,9 +370,9 @@ const Net::SendObserver::AutoSubscribe _sendSub{&OnSend};
 // the payload is fanned out per token (`target` / `focus` / `nameplateN` /
 // `party` / `raid` / `mouseover`). Same `(unit, castGUID, spellID, spellName,
 // rank)` shape as the player events, just with a non-"player" unit.
-void FireRemote(const char *eventName, uint64_t casterGuid, int spellID,
-                int guidNum) {
-    const int slot = Event::Custom::Lookup(eventName);
+void FireRemote(const Event::Custom::AutoReserve &event, uint64_t casterGuid,
+                int spellID, int guidNum) {
+    const int slot = event.Slot();
     if (!Event::Custom::HasListeners(slot))
         return;
     const uint8_t *rec = Spell::Lookup::RecordForID(spellID);

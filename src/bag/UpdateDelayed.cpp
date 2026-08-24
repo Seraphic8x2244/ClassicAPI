@@ -143,7 +143,7 @@ void OnWorldTick() {
             static_cast<uintptr_t>(Offsets::VAR_IN_WORLD)) == 0)
         return;
     g_pending = false;
-    const int slot = Event::Custom::Lookup(kEventName);
+    const int slot = _reserve.Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "");
     // Notify C++ subscribers of the bag-change frame (see UpdateDelayed.h).

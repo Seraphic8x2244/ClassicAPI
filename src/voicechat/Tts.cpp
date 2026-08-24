@@ -108,6 +108,19 @@ constexpr const char *kEvtPlaybackStarted  = "VOICE_CHAT_TTS_PLAYBACK_STARTED";
 constexpr const char *kEvtSpeakTextUpdate  = "VOICE_CHAT_TTS_SPEAK_TEXT_UPDATE";
 constexpr const char *kEvtVoicesUpdate     = "VOICE_CHAT_TTS_VOICES_UPDATE";
 
+// The lazily-created reservations, set by RegisterLuaFunctions. Null while
+// standing down for VanillaTTS — but the fire helpers only run from our own
+// registered surface, so they never see null in that mode; SlotOf's guard is
+// belt-and-suspenders (`Fire(-1)` no-ops).
+const Event::Custom::AutoReserve *g_evtPlaybackFailed = nullptr;
+const Event::Custom::AutoReserve *g_evtPlaybackFinished = nullptr;
+const Event::Custom::AutoReserve *g_evtPlaybackStarted = nullptr;
+const Event::Custom::AutoReserve *g_evtVoicesUpdate = nullptr;
+
+int SlotOf(const Event::Custom::AutoReserve *r) {
+    return r != nullptr ? r->Slot() : -1;
+}
+
 // ---------------------------------------------------------------------------
 // CVar names + handles (registered in RegisterLuaFunctions)
 // ---------------------------------------------------------------------------
@@ -186,18 +199,18 @@ std::wstring Utf8ToWide(const char *s) {
 // Event fire helpers (engine dispatcher via Event::Custom)
 // ---------------------------------------------------------------------------
 void FireVoicesUpdate() {
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtVoicesUpdate), "");
+    Event::Custom::Fire(SlotOf(g_evtVoicesUpdate), "");
 }
 void FirePlaybackStarted(int numConsumers, int utteranceID, int durationMS, int dest) {
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtPlaybackStarted), "%d%d%d%d",
+    Event::Custom::Fire(SlotOf(g_evtPlaybackStarted), "%d%d%d%d",
                         numConsumers, utteranceID, durationMS, dest);
 }
 void FirePlaybackFinished(int numConsumers, int utteranceID, int dest) {
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtPlaybackFinished), "%d%d%d",
+    Event::Custom::Fire(SlotOf(g_evtPlaybackFinished), "%d%d%d",
                         numConsumers, utteranceID, dest);
 }
 void FirePlaybackFailed(const char *status, int utteranceID, int dest) {
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtPlaybackFailed), "%s%d%d",
+    Event::Custom::Fire(SlotOf(g_evtPlaybackFailed), "%s%d%d",
                         status, utteranceID, dest);
 }
 
@@ -565,6 +578,10 @@ void RegisterLuaFunctions() {
     static const Event::Custom::AutoReserve _r3{kEvtPlaybackStarted};
     static const Event::Custom::AutoReserve _r4{kEvtSpeakTextUpdate};
     static const Event::Custom::AutoReserve _r5{kEvtVoicesUpdate};
+    g_evtPlaybackFailed = &_r1;
+    g_evtPlaybackFinished = &_r2;
+    g_evtPlaybackStarted = &_r3;
+    g_evtVoicesUpdate = &_r5;
 
     g_cvarVoice  = CVar::Factory::Register(kCVarVoice,  "0",   0, &OnVoiceChanged);
     g_cvarSpeed  = CVar::Factory::Register(kCVarSpeed,  "0",   0, &OnSpeedChanged);

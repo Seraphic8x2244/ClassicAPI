@@ -15,6 +15,10 @@
 
 #include <cstdint>
 
+namespace Event::Custom {
+struct AutoReserve;
+}
+
 // Shared async-load machinery for the client query caches that aren't
 // item/quest — creature, gameobject, and (potentially) the other
 // SMSG_*_QUERY caches. Modeled on `Item::Data`'s pending/timeout/event
@@ -30,10 +34,9 @@
 // functions, so hooking creature's and gameobject's separately is fine);
 // item/quest have their own parsers and aren't touched.
 //
-//   static const char *kEvent = "CREATURE_DATA_LOAD_RESULT";
-//   static const Event::Custom::AutoReserve _r{kEvent};   // reserve the event
+//   static const Event::Custom::AutoReserve _r{"CREATURE_DATA_LOAD_RESULT"};
 //   ...
-//   Cache::QueryLoad::Register(cacheInstance, kEvent,
+//   Cache::QueryLoad::Register(cacheInstance, &_r,
 //                              Offsets::FUN_CREATURE_GET_RECORD);  // at init
 //   Cache::QueryLoad::RequestLoad(cacheInstance, id);             // fire a load
 //
@@ -44,13 +47,14 @@ namespace Cache::QueryLoad {
 
 // Register a query cache for async-load tracking. `cacheInstance` is the
 // cache global (e.g. `Offsets::VAR_CREATURE_CACHE` cast to void*);
-// `eventName` is a Custom event the caller has reserved via
-// `Event::Custom::AutoReserve`, fired `(id, success)` on completion;
-// `getRecordAddr` is the cache class's `_GetRecord` (e.g.
-// `Offsets::FUN_CREATURE_GET_RECORD`). `cacheInstance`/`eventName` must
-// outlive the process (pass static values). Idempotent — calling again
-// for the same cache is a no-op (safe across /reload).
-void Register(void *cacheInstance, const char *eventName, uintptr_t getRecordAddr);
+// `reserve` is the caller's `Event::Custom::AutoReserve` for the
+// completion event, fired `(id, success)`; `getRecordAddr` is the cache
+// class's `_GetRecord` (e.g. `Offsets::FUN_CREATURE_GET_RECORD`).
+// `cacheInstance`/`reserve` must outlive the process (pass statics).
+// Idempotent — calling again for the same cache is a no-op (safe across
+// /reload).
+void Register(void *cacheInstance, const Event::Custom::AutoReserve *reserve,
+              uintptr_t getRecordAddr);
 
 // True if `id` is already in the cache (pure peek, no network query).
 bool IsCached(void *cacheInstance, uint32_t id);

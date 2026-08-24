@@ -244,25 +244,25 @@ void Grow() {
 } // namespace
 
 AutoReserve::AutoReserve(const char *name) {
-    if (name == nullptr || g_reservedCount >= MAX_RESERVED)
+    if (name == nullptr)
         return;
+    // Dedup: a name reserved twice resolves both instances to the one entry.
     for (int i = 0; i < g_reservedCount; ++i) {
-        if (std::strcmp(g_reserved[i].name, name) == 0)
+        if (std::strcmp(g_reserved[i].name, name) == 0) {
+            index_ = i;
             return;
+        }
     }
+    if (g_reservedCount >= MAX_RESERVED)
+        return; // overflow — index_ stays -1, Slot() reports unclaimed
     g_reserved[g_reservedCount].name = name;
     g_reserved[g_reservedCount].slot = -1;
+    index_ = g_reservedCount;
     ++g_reservedCount;
 }
 
-int Lookup(const char *name) {
-    if (name == nullptr)
-        return -1;
-    for (int i = 0; i < g_reservedCount; ++i) {
-        if (std::strcmp(g_reserved[i].name, name) == 0)
-            return g_reserved[i].slot;
-    }
-    return -1;
+int AutoReserve::Slot() const {
+    return index_ >= 0 ? g_reserved[index_].slot : -1;
 }
 
 int LookupByName(const char *name) {

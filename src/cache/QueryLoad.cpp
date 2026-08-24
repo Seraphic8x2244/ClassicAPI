@@ -61,8 +61,8 @@ constexpr int kMaxWaitTicks = 1200; // give up and fire failure after this many 
 
 struct Registered {
     void *cache;
-    const char *eventName;
-    uintptr_t getRecord; // this cache class's _GetRecord
+    const Event::Custom::AutoReserve *reserve; // completion event's reservation
+    uintptr_t getRecord;                       // this cache class's _GetRecord
     Pending pending[kMaxPending];
     int pendingCount;
 };
@@ -79,8 +79,7 @@ Registered *Find(void *cache) {
 }
 
 void Fire(const Registered *r, uint32_t id, bool success) {
-    Event::Custom::FireIdSuccess(Event::Custom::Lookup(r->eventName),
-                                 static_cast<int>(id), success);
+    Event::Custom::FireIdSuccess(r->reserve->Slot(), static_cast<int>(id), success);
 }
 
 int FindPending(const Registered *r, uint32_t id) {
@@ -176,15 +175,16 @@ const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
 } // namespace
 
-void Register(void *cacheInstance, const char *eventName, uintptr_t getRecordAddr) {
-    if (cacheInstance == nullptr || eventName == nullptr || getRecordAddr == 0)
+void Register(void *cacheInstance, const Event::Custom::AutoReserve *reserve,
+              uintptr_t getRecordAddr) {
+    if (cacheInstance == nullptr || reserve == nullptr || getRecordAddr == 0)
         return;
     if (Find(cacheInstance) != nullptr) // idempotent (safe across /reload)
         return;
     if (g_cacheCount >= kMaxCaches)
         return;
     g_caches[g_cacheCount].cache = cacheInstance;
-    g_caches[g_cacheCount].eventName = eventName;
+    g_caches[g_cacheCount].reserve = reserve;
     g_caches[g_cacheCount].getRecord = getRecordAddr;
     g_caches[g_cacheCount].pendingCount = 0;
     ++g_cacheCount;

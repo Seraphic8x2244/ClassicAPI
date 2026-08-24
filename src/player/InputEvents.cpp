@@ -43,12 +43,12 @@ namespace Player::InputEvents {
 
 namespace {
 
-constexpr const char *kStartedMovingEvent  = "PLAYER_STARTED_MOVING";
-constexpr const char *kStoppedMovingEvent  = "PLAYER_STOPPED_MOVING";
-constexpr const char *kStartedLookingEvent = "PLAYER_STARTED_LOOKING";
-constexpr const char *kStoppedLookingEvent = "PLAYER_STOPPED_LOOKING";
-constexpr const char *kStartedTurningEvent = "PLAYER_STARTED_TURNING";
-constexpr const char *kStoppedTurningEvent = "PLAYER_STOPPED_TURNING";
+const Event::Custom::AutoReserve _reserveStartedMoving{"PLAYER_STARTED_MOVING"};
+const Event::Custom::AutoReserve _reserveStoppedMoving{"PLAYER_STOPPED_MOVING"};
+const Event::Custom::AutoReserve _reserveStartedLooking{"PLAYER_STARTED_LOOKING"};
+const Event::Custom::AutoReserve _reserveStoppedLooking{"PLAYER_STOPPED_LOOKING"};
+const Event::Custom::AutoReserve _reserveStartedTurning{"PLAYER_STARTED_TURNING"};
+const Event::Custom::AutoReserve _reserveStoppedTurning{"PLAYER_STOPPED_TURNING"};
 
 // Below this per-frame delta, treat the yaw as stable. Picks up
 // real rotation (smallest user-perceptible RMB-drag is ~0.5°/frame
@@ -85,12 +85,12 @@ const uint8_t *Camera() {
         gameState, Offsets::OFF_GAME_STATE_CAMERA_PTR);
 }
 
-void FireTransition(bool now, bool &prev, const char *startedName,
-                    const char *stoppedName) {
+void FireTransition(bool now, bool &prev, const Event::Custom::AutoReserve &started,
+                    const Event::Custom::AutoReserve &stopped) {
     if (now == prev)
         return;
     prev = now;
-    const int slot = Event::Custom::Lookup(now ? startedName : stoppedName);
+    const int slot = (now ? started : stopped).Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "");
 }
@@ -172,19 +172,13 @@ void OnWorldTick() {
         g_havePrevCameraYaw = true;
     }
 
-    FireTransition(moving,  g_wasMoving,  kStartedMovingEvent,  kStoppedMovingEvent);
-    FireTransition(turning, g_wasTurning, kStartedTurningEvent, kStoppedTurningEvent);
-    FireTransition(looking, g_wasLooking, kStartedLookingEvent, kStoppedLookingEvent);
+    FireTransition(moving,  g_wasMoving,  _reserveStartedMoving,  _reserveStoppedMoving);
+    FireTransition(turning, g_wasTurning, _reserveStartedTurning, _reserveStoppedTurning);
+    FireTransition(looking, g_wasLooking, _reserveStartedLooking, _reserveStoppedLooking);
 }
 
 } // namespace
 
-static const Event::Custom::AutoReserve _reserveStartedMoving{kStartedMovingEvent};
-static const Event::Custom::AutoReserve _reserveStoppedMoving{kStoppedMovingEvent};
-static const Event::Custom::AutoReserve _reserveStartedLooking{kStartedLookingEvent};
-static const Event::Custom::AutoReserve _reserveStoppedLooking{kStoppedLookingEvent};
-static const Event::Custom::AutoReserve _reserveStartedTurning{kStartedTurningEvent};
-static const Event::Custom::AutoReserve _reserveStoppedTurning{kStoppedTurningEvent};
 static const Tick::WorldTick::AutoSubscribe _tickSub{&OnWorldTick};
 
 } // namespace Player::InputEvents

@@ -68,12 +68,9 @@ namespace AuctionHouse::PostItem {
 
 namespace {
 
-constexpr const char *kEvtStart = "AUCTION_MULTISELL_START";
-constexpr const char *kEvtUpdate = "AUCTION_MULTISELL_UPDATE";
-constexpr const char *kEvtFailure = "AUCTION_MULTISELL_FAILURE";
-const Event::Custom::AutoReserve _r1{kEvtStart};
-const Event::Custom::AutoReserve _r2{kEvtUpdate};
-const Event::Custom::AutoReserve _r3{kEvtFailure};
+const Event::Custom::AutoReserve _evtStart{"AUCTION_MULTISELL_START"};
+const Event::Custom::AutoReserve _evtUpdate{"AUCTION_MULTISELL_UPDATE"};
+const Event::Custom::AutoReserve _evtFailure{"AUCTION_MULTISELL_FAILURE"};
 
 // Generous per-step abort bound. A split or a post is one server round-trip
 // (~tens of frames); 600 frames (~10s at 60fps) means "something's wrong"
@@ -206,7 +203,7 @@ bool FindFreeGeneralSlot(void *L, int *outBag, int *outSlot) {
 void Finish(bool success) {
     g_job.active = false;
     if (!success)
-        Event::Custom::Fire(Event::Custom::Lookup(kEvtFailure), "");
+        Event::Custom::Fire(_evtFailure.Slot(), "");
     // success needs no event: the last PostWait already fired
     // AUCTION_MULTISELL_UPDATE(total, total).
 }
@@ -279,7 +276,7 @@ void Tick() {
         // Post confirmed once the server pulls the item out of the slot.
         if (w.item == nullptr || w.guid != g_job.postGuid) {
             ++g_job.postedStacks;
-            Event::Custom::Fire(Event::Custom::Lookup(kEvtUpdate), "%d%d",
+            Event::Custom::Fire(_evtUpdate.Slot(), "%d%d",
                                 g_job.postedStacks, g_job.totalStacks);
             g_job.phase = Phase::Idle;
             g_job.waitTicks = 0;
@@ -400,7 +397,7 @@ int __fastcall Script_C_AuctionHouse_PostItem(void *L) {
     g_job.runTime = runTime;
     g_job.phase = Phase::Idle;
 
-    Event::Custom::Fire(Event::Custom::Lookup(kEvtStart), "");
+    Event::Custom::Fire(_evtStart.Slot(), "");
     Game::Lua::PushBool(L, true);
     return 1;
 }

@@ -58,13 +58,13 @@ static const Event::Custom::AutoReserve _reserveItemDataLoadResult{kItemDataLoad
 static const Event::Custom::AutoReserve _reserveGetItemInfoReceived{kGetItemInfoReceived};
 
 static void FireGetItemInfoReceived(int itemID, bool success) {
-    Event::Custom::FireIdSuccess(Event::Custom::Lookup(kGetItemInfoReceived),
-                                 itemID, success);
+    Event::Custom::FireIdSuccess(_reserveGetItemInfoReceived.Slot(), itemID,
+                                 success);
 }
 
 static void FireItemDataLoadResult(int itemID, bool success) {
-    Event::Custom::FireIdSuccess(Event::Custom::Lookup(kItemDataLoadResult),
-                                 itemID, success);
+    Event::Custom::FireIdSuccess(_reserveItemDataLoadResult.Slot(), itemID,
+                                 success);
 }
 
 // Item-load callbacks are __stdcall, 2 args / 8 bytes — matching the

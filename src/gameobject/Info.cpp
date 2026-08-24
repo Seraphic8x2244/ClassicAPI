@@ -107,7 +107,7 @@ void RegisterLuaFunctions() {
     Game::Lua::RegisterTableFunction("C_GameObjectInfo", "RequestLoadGameObjectByID",
                                      &Script_RequestLoadGameObjectByID);
     Cache::QueryLoad::Register(reinterpret_cast<void *>(Offsets::VAR_GAMEOBJECT_CACHE),
-                               kGameObjectDataLoadResult, Offsets::FUN_GAMEOBJECT_GET_RECORD);
+                               &_reserveLoadResult, Offsets::FUN_GAMEOBJECT_GET_RECORD);
 }
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};

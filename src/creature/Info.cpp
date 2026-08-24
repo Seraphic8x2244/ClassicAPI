@@ -361,7 +361,7 @@ void RegisterLuaFunctions() {
     Game::Lua::RegisterTableFunction("C_CreatureInfo", "GetCreatureTypeIDs",
                                      &Script_GetCreatureTypeIDs);
     Cache::QueryLoad::Register(reinterpret_cast<void *>(Offsets::VAR_CREATURE_CACHE),
-                               kCreatureDataLoadResult, Offsets::FUN_CREATURE_GET_RECORD);
+                               &_reserveLoadResult, Offsets::FUN_CREATURE_GET_RECORD);
 }
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};

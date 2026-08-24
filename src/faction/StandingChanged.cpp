@@ -98,7 +98,7 @@ void __fastcall FireNotify_h(int factionID, int delta) {
     // any addon relying on the chat event firing first would expect.
     FireNotify_o(factionID, delta);
 
-    const int slot = Event::Custom::Lookup(kEventName);
+    const int slot = _reserve.Slot();
     if (slot >= 0)
         Event::Custom::Fire(slot, "%d%d%d", factionID, newStanding, delta);
 

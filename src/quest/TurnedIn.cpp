@@ -77,8 +77,7 @@ int __fastcall Handler_h(void *thisPlayer, void *edx, void *packetStream) {
     const int result = Handler_o(thisPlayer, edx, packetStream);
 
     if (questID > 0) {
-        const int slot = Event::Custom::Lookup(kEventName);
-        Event::Custom::Fire(slot, "%u%u%u",
+        Event::Custom::Fire(_reserve.Slot(), "%u%u%u",
                             questID, xpReward, moneyReward);
     }
 

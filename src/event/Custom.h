@@ -37,31 +37,36 @@ namespace Event::Custom {
 // DLL operate on the table independently of the others.
 //
 // The name pointer must outlive the engine (a string literal does).
-// Same name reserved twice is deduped; reserving more than `MAX_RESERVED`
-// names total (see Custom.cpp) silently drops the overflow — keep that cap
-// above the codebase-wide `AutoReserve` count.
+// Same name reserved twice is deduped (both instances resolve to the same
+// reservation); reserving more than `MAX_RESERVED` names total (see
+// Custom.cpp) silently drops the overflow — keep that cap above the
+// codebase-wide `AutoReserve` count.
+//
+// Fire through the instance: `Fire(_r.Slot(), …)`. `Slot()` is the O(1)
+// read of the reservation's current slot id — it resolves through the
+// shared reservation table, so reload invalidation (`PrepareForReload`)
+// and re-claiming (`RetryClaims`) stay centralized and the value is never
+// stale. Returns -1 while unclaimed (before the first Lua-side
+// `RegisterEvent` triggers `RetryClaims`), which `Fire` treats as a no-op.
+// Do NOT cache the return across frames — read it at fire time (the read
+// is two loads; there is nothing to save).
 struct AutoReserve {
     explicit AutoReserve(const char *name);
-};
+    int Slot() const;
 
-// Returns the slot id currently assigned to `name`, or -1 if not yet
-// claimed (e.g. before the first Lua-side `RegisterEvent` has
-// triggered `RetryClaims`). Slot indices may change across `/reload`,
-// so call this at fire time rather than caching the value.
-//
-// Only consults our reservation cache — for engine-defined events
-// (UNIT_FACTION, BAG_UPDATE, etc.) use `LookupByName`.
-int Lookup(const char *name);
+private:
+    int index_ = -1; // into the reservation table; -1 = dropped (overflow)
+};
 
 // Walks the live engine event table at `[VAR_EVENT_TABLE_BASE_PTR]`
 // looking for an entry whose name strcmps equal to `name`. Returns
 // the slot index, or -1 if no entry matches.
 //
 // Works for both engine-defined events AND our `AutoReserve`-claimed
-// custom events (both populate the same table). Slightly slower than
-// `Lookup` (O(table size) vs O(reservations)) — prefer `Lookup` for
-// names we've reserved. Use this for engine-defined events we want to
-// fire ourselves (e.g., polyfilling missing event dispatches).
+// custom events (both populate the same table). O(table size) — for
+// names we've reserved, prefer the O(1) `AutoReserve::Slot()`. Use this
+// for engine-defined events we want to fire ourselves (e.g., polyfilling
+// missing event dispatches).
 int LookupByName(const char *name);
 
 // True iff at least one frame is currently registered for the event in
@@ -88,7 +93,7 @@ bool HasListeners(int slot);
 //   Fire(slot, "%s%d", keyName, down);    // MODIFIER_STATE_CHANGED(key, down)
 //
 // No-op for `eventID < 0`, which lets callers cheaply guard on the
-// `Lookup()` result without an explicit if.
+// `Slot()` result without an explicit if.
 template <typename... Args>
 inline void Fire(int eventID, const char *format, Args... args) {
     if (eventID < 0)
