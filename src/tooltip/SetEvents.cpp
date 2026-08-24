@@ -62,10 +62,19 @@ constexpr const char *kNamesLower[SK_COUNT] = {
 };
 
 // Per-tooltip storage: one 8-byte {handler, context} slot per script kind.
-// Tooltips are few and permanent (GameTooltip, ItemRefTooltip,
-// ShoppingTooltip1/2, AtlasLootTooltip, WorldMapTooltip, plus the odd addon
-// tooltip), so a small fixed table with a linear scan is plenty and gives each
-// cell a stable address to hand out.
+// Tooltips are few (GameTooltip, ItemRefTooltip, ShoppingTooltip1/2,
+// AtlasLootTooltip, WorldMapTooltip, plus the odd addon tooltip), so a small
+// fixed table with a linear scan is plenty and gives each cell a stable
+// address to hand out.
+//
+// Few — but NOT permanent: every /reload (and logout) destroys and recreates
+// the tooltip objects, usually at new addresses. `PrepareForReload` clears the
+// table at each UI teardown; without it the table gained ~2 dead cells per
+// reload until full (≈18 reloads — SetScript then failed with "doesn't have a
+// 'OnTooltipSetItem' script") and a stale cell whose address the allocator
+// recycled into a new tooltip fired its dead handler ref → crash (issue #33).
+// The clear is also semantically right: handler refs never survive the Lua
+// reset, so post-reload every cell held garbage regardless.
 struct Cell {
     void *tooltip;
     uint32_t slot[SK_COUNT][2]; // [kind] = {handler, exec context}
@@ -236,6 +245,12 @@ Suppressor::Suppressor() { ++g_suppress; }
 Suppressor::~Suppressor() {
     if (g_suppress > 0)
         --g_suppress;
+}
+
+void PrepareForReload() {
+    // Forget every cell — count gates the scan, so resetting it is a full
+    // clear; the create path re-initializes a cell's slots on reuse.
+    g_cellCount = 0;
 }
 
 } // namespace Tooltip::SetEvents

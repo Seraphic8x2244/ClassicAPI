@@ -24,6 +24,7 @@
 #include "text/InlineTexturePool.h"
 #include "texture/Mask.h"
 #include "texture/Transform.h"
+#include "tooltip/SetEvents.h"
 
 static Game::FrameScript_Initialize_t FrameScript_Initialize_o = nullptr;
 static Game::LoadScriptFunctions_t LoadScriptFunctions_o = nullptr;
@@ -69,6 +70,12 @@ static bool __fastcall FrameScript_Initialize_h() {
     // Drop pending character-dress jobs and their engine compositors — the
     // reload destroys every Model frame the jobs point at.
     Model::DisplayInfo::PrepareForReload();
+
+    // Drop the per-tooltip OnTooltipSet* handler cells — the reload destroys
+    // and recreates every tooltip object, and the handler refs die with the
+    // Lua reset (issue #33: the cell table filled after ~18 reloads, then
+    // recycled tooltip addresses fired dead refs).
+    Tooltip::SetEvents::PrepareForReload();
 
     // Forget the captured `string` table before the world Lua state resets
     // (this hook also fires on /logout, where the state's tables die) —
