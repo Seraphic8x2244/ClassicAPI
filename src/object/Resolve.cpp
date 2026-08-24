@@ -17,7 +17,17 @@
 
 namespace Object {
 
+bool RegistryReady() {
+    return *reinterpret_cast<void *const volatile *>(
+               static_cast<uintptr_t>(Offsets::VAR_LOCAL_PLAYER_PTR)) != nullptr;
+}
+
 void *ByGuid(int typeMask, uint64_t guid, const char *debugName, int priority) {
+    // Out of world the engine resolver null-derefs its registry root (see
+    // RegistryReady in Resolve.h); with no world there are no live objects, so
+    // "not found" is also the correct answer.
+    if (!RegistryReady())
+        return nullptr;
     using Fn = void *(__fastcall *)(int typeMask, const char *debugName,
                                     uint32_t guidLo, uint32_t guidHi,
                                     int priority);

@@ -35,6 +35,7 @@
 #include "unit/TokenObserver.h"
 
 #include "Offsets.h"
+#include "object/Resolve.h"
 
 #include <cstdint>
 
@@ -55,20 +56,15 @@ const char *const *EventNames() {
         static_cast<uintptr_t>(Offsets::VAR_EVENT_NAME_TABLE_STATIC));
 }
 
-// Both register and unregister funnel through `FUN_00464890`, which
-// dereferences the client/player-rooted observer registry at
-// `[VAR_LOCAL_PLAYER_PTR]` (reads its `+0x24` mask). That root is NULL out of
-// world — login screen, loading screens, logout teardown — where the engine
-// helper null-derefs (crash: `MOV EAX,[EDX+0x24]`, EDX=0). Bail when it isn't
-// up: there are no live objects or observer nodes to touch anyway (nodes die
-// with their objects during teardown), and in-world callers re-register/clean
-// up on the next tick. Unlike `Player::Equipment` (which only ever registers
-// from the enter-world hook), our consumers register from Lua / WorldTick,
-// which can run mid-transition — hence the guard here.
-bool RegistryReady() {
-    return *reinterpret_cast<void *const volatile *>(
-               static_cast<uintptr_t>(Offsets::VAR_LOCAL_PLAYER_PTR)) != nullptr;
-}
+// Both register and unregister funnel through `FUN_00464890`, whose registry
+// root at `[VAR_LOCAL_PLAYER_PTR]` is NULL out of world — the shared
+// `Object::RegistryReady` (object/Resolve.h) documents the crash mechanics.
+// Bail when it isn't up: there are no live objects or observer nodes to touch
+// anyway (nodes die with their objects during teardown), and in-world callers
+// re-register/clean up on the next tick. Unlike `Player::Equipment` (which
+// only ever registers from the enter-world hook), our consumers register from
+// Lua / WorldTick, which can run mid-transition — hence the guard here.
+using Object::RegistryReady;
 
 // Bytes the engine watches for the observer on event index `i` — verbatim
 // from `FUN_0051bbb0`'s size switch. The 8-byte entries are the 64-bit GUID
