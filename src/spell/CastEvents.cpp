@@ -164,7 +164,7 @@ int g_guidCounter = 0;
 int g_castSpell = 0;   // 0 = not casting
 int g_castStart = 0;   // startMs of the tracked cast (detects same-spell recast)
 int g_castGuid = 0;    // castGUID counter value for the tracked cast
-int g_castDelay = 0;   // last-seen accumulated pushback (ms)
+int g_castEnd = 0;     // last-seen endMs (any movement fires DELAYED)
 bool g_castSucceeded = false; // SPELL_GO seen for the tracked cast this cast
 
 // UNIT_SPELLCAST_INTERRUPTED de-dup. SpellFailed_h and PollPlayer can both
@@ -429,7 +429,7 @@ RemoteEvt *AllocRemoteEvt(uint64_t guid) {
 
 bool PlayerCastSucceeded() { return g_castSucceeded; }
 
-void PollPlayer(int castSpellID, int castStartMs, int castDelayMs,
+void PollPlayer(int castSpellID, int castStartMs, int castEndMs,
                 int channelSpellID, int channelStartMs) {
     // ---- Regular cast -------------------------------------------------
     // A "new cast" is a different spell OR the same spell re-stamped at a
@@ -462,12 +462,18 @@ void PollPlayer(int castSpellID, int castStartMs, int castDelayMs,
         g_castGuid = NextCastGuid(castSpellID);
         g_castSpell = castSpellID;
         g_castStart = castStartMs;
-        g_castDelay = castDelayMs;
+        g_castEnd = castEndMs;
         g_castSucceeded = false;
         Fire(kStart, castSpellID, g_castGuid);
-    } else if (g_castSpell != 0 && castDelayMs > g_castDelay) {
-        // Pushback grew (SMSG_SPELL_DELAYED extended the cast).
-        g_castDelay = castDelayMs;
+    } else if (g_castSpell != 0 && castEndMs != g_castEnd) {
+        // The cast's end moved: pushback (SMSG_SPELL_DELAYED extends it) or
+        // the confirming SMSG_SPELL_START snapping the client-predicted cast
+        // time to the server's authoritative one — the server scales ranged
+        // abilities by ranged attack speed (Steady/Aimed Shot), which the
+        // client's prediction helper doesn't model, so the confirming packet
+        // shortens the bar ~RTT after START (pfUI#43). Either direction, the
+        // addon must re-read the times; DELAYED is the re-read trigger.
+        g_castEnd = castEndMs;
         Fire(kDelayed, g_castSpell, g_castGuid);
     }
 

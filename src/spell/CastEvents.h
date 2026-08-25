@@ -45,11 +45,15 @@ namespace Spell::CastEvents {
 // after its own upkeep, passing the live `g_cast` / `g_channel` fields.
 // Detects, against the previous snapshot:
 //   - regular cast start / stop / same-spell recast  → UNIT_SPELLCAST_START / _STOP
-//   - accumulated pushback growth                     → UNIT_SPELLCAST_DELAYED
+//   - end-time movement (either direction)            → UNIT_SPELLCAST_DELAYED
 //   - channel start / stop                            → UNIT_SPELLCAST_CHANNEL_START / _STOP
+// End-time movement covers both pushback (SMSG_SPELL_DELAYED) and the
+// confirming SMSG_SPELL_START reconciling the client-predicted cast time to
+// the server's (ranged-haste-scaled Steady/Aimed Shot, pfUI#43) — DELAYED is
+// the "re-read the times" trigger, whichever way the end moved.
 // Channels never fire INTERRUPTED — retail emits only CHANNEL_STOP for a
 // channel whether it ends naturally or is cut short.
-void PollPlayer(int castSpellID, int castStartMs, int castDelayMs,
+void PollPlayer(int castSpellID, int castStartMs, int castEndMs,
                 int channelSpellID, int channelStartMs);
 
 // Derive the ground-target reticle events from the engine's targeting flags.

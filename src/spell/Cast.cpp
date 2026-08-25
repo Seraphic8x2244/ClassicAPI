@@ -514,14 +514,18 @@ void HandleSpellStart(uint64_t caster, int spellID, uint32_t castTime,
             now - g_cast.startMs < kCastStartDedupMs) {
             // Confirming packet. Keep startMs (no visual restart), but SNAP the
             // end time to the server's authoritative castTime. The client stamp
-            // came from FUN_006e3340, which folds in the caster's cast-speed /
-            // ranged-haste multiplier (descriptor +0x22c) — right for spells the
-            // server also hastes (Aimed/Multi-Shot), WRONG for ones it doesn't.
-            // Volley is the case that surfaced this: not channeled, not sped by
-            // Quick Shots server-side, so the hasted prediction ended the bar
-            // early and the player was "still casting after the bar finished."
-            // The server's castTime is reality; reconcile to it (preserving any
-            // pushback already accumulated). A no-op when client and server agree.
+            // came from FUN_006e3340, whose only caster factor is the cast-speed
+            // multiplier at descriptor +0x22c (UNIT_MOD_CAST_SPEED — spell
+            // haste); the server additionally scales ranged ABILITIES by ranged
+            // attack speed (SpellEntry::GetCastTime's IsRangedSpell branch,
+            // m_modAttackSpeedPct[RANGED_ATTACK] — quiver/Quick Shots), which
+            // the prediction can't see. Two real divergences so far: Volley
+            // (client +0x22c hastes it, server doesn't → bar ended early) and
+            // Steady/Aimed Shot (server ranged-hastes it, client doesn't → bar
+            // ran long, pfUI#43). The server's castTime is reality; reconcile
+            // to it (preserving accumulated pushback). A no-op when they agree;
+            // when they differ, PollPlayer sees the end move and fires
+            // UNIT_SPELLCAST_DELAYED so cast bars re-read the corrected times.
             g_cast.endMs =
                 g_cast.startMs + static_cast<int>(castTime) + g_cast.delayMs;
             g_castTargetGuid = targetGuid; // confirming packet carries the target
@@ -837,7 +841,7 @@ void OnWorldTick() {
     // based so it needs no changes to the many stamp/clear sites; ~1 frame
     // latency is imperceptible for a cast bar, and every fire is
     // listener-gated (near-free when no addon uses these).
-    Spell::CastEvents::PollPlayer(g_cast.spellID, g_cast.startMs, g_cast.delayMs,
+    Spell::CastEvents::PollPlayer(g_cast.spellID, g_cast.startMs, g_cast.endMs,
                                   g_channel.spellID, g_channel.startMs);
     Spell::CastEvents::PollRemote();
     Spell::CastEvents::PollReticle();
