@@ -4109,6 +4109,15 @@ enum Offsets {
     VAR_PET_SPELLBOOK = 0x00B6F098,
     SPELLBOOK_MAX_SLOTS = 0x400,
 
+    // Active minimap-tracking spell ID (0 = none). Vanilla tracks exactly
+    // one active tracker as a plain int here, derived from the player's
+    // active Track Creatures/Resources/Stealthed aura by `FUN_004E4170`
+    // (an aura-descriptor observer registered by `FUN_004E4100`). Read by
+    // `Script_GetTrackingTexture` (`0x004E4A20`), `Script_CancelTrackingBuff`
+    // (`0x004E4A80`), and `GameTooltip:SetTrackingSpell` (`0x00532C50`);
+    // `Spell::Tracking::GetTrackingInfo` reads it to report `active`.
+    VAR_ACTIVE_TRACKING_SPELL = 0x00BC6378,
+
     // Player-spell-knowledge bitmap — `[VAR_PLAYER_SPELL_BITMAP]` is a
     // pointer to a dword bitmap covering all spellIDs the player has
     // learned, including talent passives, racials, profession recipes,
@@ -4378,6 +4387,15 @@ enum Offsets {
     // to the engine's cast path at `FUN_004B3300`. Returns 0 (no Lua
     // results). Callable directly from C++ — push args on stack, call.
     FUN_SCRIPT_CAST_SPELL_BY_NAME = 0x004B4AB0,
+
+    // `Script_CastSpell` — engine's Lua wrapper for the slot-based
+    // `CastSpell(spellbookSlot, bookType)` global. `int __fastcall(void *L)`.
+    // Parses (slot, bookType) from stack[1]/[2] via `FUN_004B3EC0`, then
+    // dispatches through `FUN_SPELL_CAST_DISPATCH` with the current target
+    // (or self). Raises "Invalid spell slot in CastSpell" for a bad slot.
+    // Callable from C++ by preparing the stack and tail-calling it (the
+    // `Spell::Tracking::SetTracking` "select = cast" path does this).
+    FUN_SCRIPT_CAST_SPELL = 0x004B42F0,
 
     // Inner spell-cast dispatcher — `__fastcall(slot, bookType, targetGuidLo,
     // targetGuidHi)`. `Script_CastSpellByName` calls this after resolving

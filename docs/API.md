@@ -584,6 +584,11 @@ build instructions.
   - [`GetTotemDuration(slot)`](#gettotemdurationslot)
   - [`TargetTotem(slot)`](#targettotemslot)
 
+- [Tracking](#tracking)
+  - [`GetNumTrackingTypes()`](#getnumtrackingtypes)
+  - [`GetTrackingInfo(index)`](#gettrackinginfoindex)
+  - [`SetTracking(index)`](#settrackingindex)
+
 - [TradeSkillUI](#tradeskillui)
   - [`C_TradeSkillUI.GetTradeSkillListLink()`](#c_tradeskilluigettradeskilllistlink)
   - [`C_TradeSkillUI.GetCraftListLink()`](#c_tradeskilluigetcraftlistlink)
@@ -14140,6 +14145,62 @@ TargetTotem(2)   -- target your Earth totem
 Looks up the totem creature's live GUID (object-manager scan for the
 player-owned creature of the slot's tracked entry) and sets the target
 through the same engine path `TargetUnit` uses (`CMSG_SET_SELECTION`).
+
+## Tracking
+
+Vanilla 1.12 stores only the tracking spell that is active now. It does
+not keep a list of the tracking spells you know. These globals add that
+list. A minimap addon can then build a tracking menu without a hardcoded
+spell table.
+
+A tracking spell is a spell in your spellbook that finds creatures,
+resources, or hidden units. This is the same test the engine uses to find
+the active tracker. The list covers Find Herbs, Find Minerals, Find
+Treasure, the Hunter Track spells, Sense Undead, Sense Demons, and Track
+Humanoids. It also covers server-added trackers, such as Turtle's Find
+Trees. You do not have to maintain a spell list.
+
+### `GetNumTrackingTypes()`
+
+Returns the number of tracking spells in your spellbook.
+
+```lua
+GetNumTrackingTypes()   -- for example, 8 for a Hunter
+```
+
+### `GetTrackingInfo(index)`
+
+`index` starts at 1 and follows spellbook order. The function returns
+these five values, or `nil` if `index` is out of range:
+
+| # | Value | Type | Notes |
+|---|-------|------|-------|
+| 1 | `name` | string | Localized spell name. |
+| 2 | `texture` | string | Icon path. Give it to `texture:SetTexture(...)`. `nil` if the icon is missing. |
+| 3 | `active` | boolean | `true` when this tracker is the one now in effect. |
+| 4 | `category` | string | Always `"spell"`. Vanilla has no non-spell trackers. |
+| 5 | `spellID` | number | The tracking spell's ID. This is a ClassicAPI extra. The retail 5th value is `nested`, which has no meaning here. |
+
+```lua
+local name, texture, active, category, spellID = GetTrackingInfo(1)
+```
+
+### `SetTracking(index)`
+
+Turns on the tracking spell at `index`. In vanilla, you select a tracker
+when you cast its spell. This function casts it. For an out-of-range
+index, it does nothing. To turn tracking off, use the built-in
+`CancelTrackingBuff()`.
+
+```lua
+for i = 1, GetNumTrackingTypes() do
+    local name = GetTrackingInfo(i)
+    if name == "Find Herbs" then
+        SetTracking(i)
+        break
+    end
+end
+```
 
 ## TradeSkillUI
 
