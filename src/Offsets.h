@@ -1755,6 +1755,15 @@ enum Offsets {
     // from SMSG_SPELL_START, not server-broadcast state).
     OFF_UNIT_CAST_SPELL = 0xC8C,
 
+    // CGUnit field: the unit's sheath state as a plain int member (NOT a
+    // descriptor UpdateField). 0 = sheathed / no weapon shown, 1 = melee
+    // weapon drawn, 2 = ranged weapon drawn. Read and written by the engine's
+    // own sheath toggler `FUN_005EB480` (behind `ToggleSheath`) and its setter
+    // `FUN_00611CF0` (`*(this+0xD40) = newState`, saving the prior state to
+    // `+0xD3C`). `Unit::Sheath::GetSheathState` reads the local player's value
+    // and returns it 1-based (Lua's GetSheathState is 1=None/2=Melee/3=Ranged).
+    OFF_UNIT_SHEATH_STATE = 0xD40,
+
     // NetClient message dispatch — `__thiscall void(void *conn, uint32_t
     // arg, CDataStore *packet)`. Reads the u16 opcode off the packet
     // cursor, then invokes `[conn + opcode*4 + 0x74]` (the handler table

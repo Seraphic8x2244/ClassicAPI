@@ -540,6 +540,7 @@ build instructions.
   - [`GetMirrorTimerInfo(index)` / `GetMirrorTimerProgress(label)`](#getmirrortimerinfoindex--getmirrortimerprogresslabel)
   - [`GetShapeshiftFormID()`](#getshapeshiftformid)
   - [`CancelShapeshiftForm()`](#cancelshapeshiftform)
+  - [`GetSheathState()`](#getsheathstate)
 
 - [System](#system)
   - [`GetPhysicalScreenSize()`](#getphysicalscreensize)
@@ -13417,6 +13418,29 @@ via the engine's direct sender at [`FUN_006E7040`](../src/Offsets.h#L428).
 Mirrors 3.3.5a's `Script_CancelShapeshiftForm` inner (`FUN_00726CE0`),
 which does the same effect-array scan + form-id match before issuing
 its cancel packet. Vanilla just lacks the public Lua surface.
+
+### `GetSheathState()`
+
+Returns the weapon type that the player has drawn. Takes no arguments.
+The value is 1-based:
+
+| Value | Meaning |
+|-------|---------|
+| `1` | None. The weapons are put away. |
+| `2` | A melee weapon is drawn. |
+| `3` | A ranged weapon is drawn. |
+
+Returns `1` before the player object exists (out of world).
+
+```lua
+if GetSheathState() == 3 then
+    -- the ranged weapon is out
+end
+```
+
+Vanilla 1.12 has `ToggleSheath()` but no matching getter. `GetSheathState`
+adds the query, with the same 1-based values that modern WoW returns. To
+change the state, use the built-in `ToggleSheath()`.
 
 ## System
 
