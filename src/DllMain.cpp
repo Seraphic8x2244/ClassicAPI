@@ -16,6 +16,7 @@
 #include "MinHook.h"
 #include "Offsets.h"
 #include "event/Custom.h"
+#include "frame/ClickEvents.h"
 #include "luasyntax/StringMethods.h"
 #include "model/DisplayInfo.h"
 #include "nameplate/Walk.h"
@@ -76,6 +77,11 @@ static bool __fastcall FrameScript_Initialize_h() {
     // Lua reset (issue #33: the cell table filled after ~18 reloads, then
     // recycled tooltip addresses fired dead refs).
     Tooltip::SetEvents::PrepareForReload();
+
+    // Drop the per-button PreClick/PostClick handler cells — same reasoning as
+    // the tooltip cells above: the reload recreates the button objects and the
+    // handler refs die with the Lua reset.
+    Frame::ClickEvents::PrepareForReload();
 
     // Forget the captured `string` table before the world Lua state resets
     // (this hook also fires on /logout, where the state's tables die) —

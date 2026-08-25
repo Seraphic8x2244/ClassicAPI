@@ -226,6 +226,35 @@ enum Offsets {
     // so a pointer-keyed cell never goes stale). Same pattern + ABI modeling as
     // FUN_GAMETOOLTIP_SCRIPT_RESOLVER.
     FUN_FRAME_SCRIPT_RESOLVER = 0x0076A0D0,
+
+    // Button widget script-name resolver — __thiscall(button, const char *name)
+    // -> int* slot, 0 for an unknown name. Sits at vtable+0xC on all four
+    // button-family vtables (Button + subclasses). Delegates to the base frame
+    // resolver FUN_FRAME_SCRIPT_RESOLVER first, then maps the two button
+    // scripts: OnClick -> button+0x4CC, OnDoubleClick -> button+0x4D4 (each an
+    // 8-byte {handler, context} slot). Vanilla has no PreClick/PostClick, so
+    // `Frame::ClickEvents` co-hooks this to hand out an external per-button cell
+    // for those two names — same technique as FUN_GAMETOOLTIP_SCRIPT_RESOLVER.
+    FUN_BUTTON_SCRIPT_RESOLVER = 0x00778C50,
+    // Button OnClick script slot offset (the resolver's OnClick return). Used
+    // by `Frame::ClickEvents` to recognize an OnClick fire at the runner hook
+    // below: the fire passes slotPtr == button + this offset.
+    OFF_BUTTON_ONCLICK_HANDLER = 0x4CC,
+    // Frame-script runner WITH exec-context stamping — __cdecl(void *frame,
+    // int *slotPtr, const char *fmt, void *vaPtr). Saves DAT_00ceeac0, stamps
+    // it from slotPtr[1] (the cell's context), then calls FUN_FRAME_RUN_SCRIPT_ARGS
+    // (the arg'd runner Frame::ScriptArgs hooks) and restores. Every arg'd
+    // input-script fire funnels through here via FUN_007026F0 (its variadic
+    // forwarder); the event dispatcher FUN_00703F50 is the only other caller.
+    // `Frame::ClickEvents` co-hooks it, gates on `slotPtr == frame +
+    // OFF_BUTTON_ONCLICK_HANDLER` (an exact OnClick match — no other fire passes
+    // that slot address), and fires PreClick before / PostClick after by
+    // re-invoking with the same (fmt, vaPtr) so the button-name arg is reused.
+    // Deliberately NOT the button click vmethod FUN_00779540, which SuperWoW
+    // inline-hooks for click-casting (a second hook there faults, ERROR #132 —
+    // see the note near FUN_SCRIPT_FRAME_GET_STRATA); this runner is uncontested.
+    FUN_FRAME_RUN_SCRIPT_WITH_CONTEXT = 0x00702710,
+
     // The other per-object tooltip builders, co-hooked the same way as
     // FUN_GAMETOOLTIP_BUILD_ITEM to back OnTooltipSetSpell / OnTooltipSetUnit /
     // OnTooltipSetGameObject (see Tooltip::SetEvents). Each is the single funnel

@@ -203,6 +203,7 @@ build instructions.
   - [`RegisterAttributeDriver` / `UnregisterAttributeDriver`](#registerattributedriver--unregisterattributedriver)
   - [`RegisterUnitWatch` / `UnregisterUnitWatch` / `UnitWatchRegistered`](#registerunitwatch--unregisterunitwatch--unitwatchregistered)
   - [`SecureButton_GetAttribute` / `SecureButton_GetUnit`](#securebutton_getattribute--securebutton_getunit)
+  - [`PreClick` / `PostClick` button scripts](#preclick--postclick-button-scripts)
 
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
@@ -4960,6 +4961,36 @@ it to find a frame's unit.
 **No taint.** These are functional copies of the modern secure templates. 1.12
 has no combat lockdown or taint, so nothing here is protected — the names exist
 for addon compatibility.
+
+### `PreClick` / `PostClick` button scripts
+
+Two button scripts that run immediately before and after `OnClick`. Vanilla
+1.12 has only `OnClick` and `OnDoubleClick` on buttons. Patch 2.0 added
+`PreClick` and `PostClick`. They are real scripts: set them with `SetScript`,
+read them with `GetScript`, and hook them with `HookScript`.
+
+One click runs the three handlers in this order:
+
+```
+PreClick  ->  OnClick  ->  PostClick
+```
+
+Each handler gets `arg1` — the mouse button name (`"LeftButton"`,
+`"RightButton"`, …) — the same value `OnClick` gets. With modern positional
+arguments on (the default), the handler signature is `function(self, button)`.
+
+```lua
+local btn = CreateFrame("Button", "MyButton", UIParent)
+btn:SetScript("PreClick",  function() print("before the click:", arg1) end)
+btn:SetScript("OnClick",   function() print("the click") end)
+btn:SetScript("PostClick", function(self, button) print("after the click:", button) end)
+```
+
+**The button must also have an `OnClick` handler.** `PreClick` and `PostClick`
+fire around `OnClick`. A button with no `OnClick` set fires neither. This serves
+the normal use: run code just before or after a button's click action. (Modern
+WoW fires them even with no `OnClick`; that path is not available on this
+client.)
 
 ## FriendList
 
