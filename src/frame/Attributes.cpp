@@ -103,6 +103,8 @@
 // (`FUN_FRAME_SCRIPT_RESOLVER`) and handing out an external per-frame cell for
 // that name — the `Tooltip::SetEvents` analog, applied to every frame.
 
+#include "frame/Attributes.h"
+
 #include "Game.h"
 #include "Offsets.h"
 #include "baselib/Ascii.h"
@@ -945,11 +947,30 @@ void FireAttributeChanged(void *L, void *frame, const char *name) {
 // ---- the methods -----------------------------------------------------------
 
 // Enables the frame's mouse so it can become the mouse-focus (a bare frame
-// otherwise never registers as hovered). Operates on self at index 1.
+// otherwise never registers as hovered).
+//
+// Two properties, both deliberate:
+//   * STACK-NEUTRAL. The old form did SetTop(L, 1) to set up (self, true) for
+//     the engine setter, which DESTROYED the (name, value) at stack[2]/[3] that
+//     FireAttributeChanged reads right after — handing any OnAttributeChanged
+//     handler a nil `arg2`. We instead push the call at the top and restore the
+//     caller's stack, so DoSet's (self, name, value) survives intact.
+//   * PROTECTED. SetAttribute is Frame-scoped (VAR_FRAME_METHOD_REGISTRY), so
+//     `self` is a real Frame and the setter's type check normally passes;
+//     invoking through lua_pcall is belt-and-suspenders so a best-effort side
+//     effect can never surface an error in the addon's SetAttribute. (Calling
+//     via pcall is also what lets us pass the args at the callee's own stack
+//     base without clobbering ours.)
 void EnableFrameMouse(void *L) {
-    Game::Lua::SetTop(L, 1); // (self)
-    Game::Lua::PushBoolean(L, 1);
-    CallScript(Offsets::FUN_SCRIPT_FRAME_ENABLEMOUSE, L);
+    const int top = Game::Lua::GetTop(L);
+    Game::Lua::PushCClosure(
+        L,
+        reinterpret_cast<Game::Lua::CFunction>(Offsets::FUN_SCRIPT_FRAME_ENABLEMOUSE),
+        0);
+    Game::Lua::PushValue(L, 1);   // self (the frame)
+    Game::Lua::PushBoolean(L, 1); // enable = true
+    Game::Lua::PCall(L, 2, 0, 0); // best-effort; swallow a transient type error
+    Game::Lua::SetTop(L, top);    // restore the caller's stack
 }
 
 int DoSet(void *L, bool fireHandler) { // (self, name, value)
@@ -1087,5 +1108,24 @@ const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 const Tick::WorldTick::AutoSubscribe _tick{&MouseoverTick};
 
 } // namespace
+
+// Drop every per-frame map before a /reload (or logout) resets the Lua state.
+// Both are keyed by the frame's C object pointer, which the allocator recycles
+// across a reload:
+//   * g_attrHandlers holds OnAttributeChanged handler refs. The refs die with
+//     the Lua reset, so a stale entry whose address a new frame reuses would
+//     fire a DEAD ref from FireAttributeChanged — the invoker's protected pcall
+//     catches it, but the engine error handler still prints it as an error "in
+//     SetAttribute" (SecureStateDriverManager sets OnAttributeChanged every
+//     session, so there's always at least one entry to go stale). This was the
+//     "SetAttribute occasionally errors after /reload" report; same class of
+//     bug as Tooltip::SetEvents issue #33.
+//   * g_unitByFrame maps a frame to its `unit` token for the mouse-focus poll;
+//     a stale entry at a reused address would point the mouseover at the wrong
+//     unit and mislead the isNew mouse-enable gate.
+void PrepareForReload() {
+    g_attrHandlers.clear();
+    g_unitByFrame.clear();
+}
 
 } // namespace Frame::Attributes
