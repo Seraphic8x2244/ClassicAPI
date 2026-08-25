@@ -1128,4 +1128,6 @@ void PrepareForReload() {
     g_unitByFrame.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Frame::Attributes

@@ -674,6 +674,8 @@ void PrepareForReload() {
     g_fsBaseline.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 // Fresh-bake entry (the inline-texture DrawBuilder co-hook): the emitter just
 // baked axis-aligned verts, so capture the baseline and apply the rotation. See
 // ApplyToNode / Transform.h for the timing contract.

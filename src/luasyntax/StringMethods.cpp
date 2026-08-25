@@ -202,4 +202,6 @@ void PrepareForReload() {
     g_gameSlot.tv.value = nullptr;
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace LuaSyntax::StringMethods

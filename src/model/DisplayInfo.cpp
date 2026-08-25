@@ -433,4 +433,6 @@ void PrepareForReload() {
         CancelJob(job);
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Model::DisplayInfo

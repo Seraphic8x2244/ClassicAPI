@@ -16,17 +16,11 @@
 #include "MinHook.h"
 #include "Offsets.h"
 #include "event/Custom.h"
-#include "frame/Attributes.h"
-#include "frame/ClickEvents.h"
-#include "luasyntax/StringMethods.h"
-#include "model/DisplayInfo.h"
-#include "nameplate/Walk.h"
 #include "player/NameCache.h"
 #include "text/InlineTexture.h"
 #include "text/InlineTexturePool.h"
 #include "texture/Mask.h"
 #include "texture/Transform.h"
-#include "tooltip/SetEvents.h"
 
 static Game::FrameScript_Initialize_t FrameScript_Initialize_o = nullptr;
 static Game::LoadScriptFunctions_t LoadScriptFunctions_o = nullptr;
@@ -42,63 +36,17 @@ static FrameRegisterEvent_t FrameRegisterEvent_o = nullptr;
 static void __fastcall InvalidFunctionPtrCheck_h() {}
 
 static bool __fastcall FrameScript_Initialize_h() {
-    // BEFORE the engine tears down the old event table (at the start of
-    // FrameScript_Initialize), invalidate our cached slot indices. The
-    // table is rebuilt at a fresh allocation; the old slots are stale.
-    Event::Custom::PrepareForReload();
+    // Fire every module's PrepareForReload BEFORE the engine tears down the old
+    // event table / Lua state. Each module that keeps reload-fragile state (Lua
+    // refs, frame-pointer-keyed maps, cached event-slot indices) self-registers
+    // via `static const Game::ReloadAutoRegister _reload{&PrepareForReload};`,
+    // so this one call clears them all — a new module can't forget to wire in
+    // (see the ReloadAutoRegister doc in Game.h). This hook fires on both
+    // `/reload` and `/logout` (the engine re-inits the Lua state in both).
+    Game::RunReloadCleanups();
 
-    // Clear the nameplate diff state so currently-visible plates
-    // refire CREATED and UNIT_ADDED on the next tick — re-presents
-    // them to the freshly reloaded UI, matching modern WoW. The
-    // wrappers themselves now live in the engine's own registry
-    // (via `FrameScript_Object::ScriptRegister`), which the engine
-    // tears down and rebuilds across the Lua reset — no per-module
-    // cache to clear here.
-    NamePlate::Events::PrepareForReload();
-
-    // The reload teardown destroys every icon pool texture, fontstring,
-    // and text node — forget all inline-icon pointers now so nothing
-    // touches them (see InlineTexture.h / InlineTexturePool.h).
-    Text::InlineTexture::PrepareForReload();
-    Text::InlineTexturePool::PrepareForReload();
-
-    // Drop per-region corner transforms (SetRotation / SetVertexOffset) — the
-    // reload destroys every addon texture and the region pool reuses their pointers.
-    Texture::Transform::PrepareForReload();
-
-    // Drop per-region texture masks for the same reason (SetMask).
-    Texture::Mask::PrepareForReload();
-
-    // Drop pending character-dress jobs and their engine compositors — the
-    // reload destroys every Model frame the jobs point at.
-    Model::DisplayInfo::PrepareForReload();
-
-    // Drop the per-tooltip OnTooltipSet* handler cells — the reload destroys
-    // and recreates every tooltip object, and the handler refs die with the
-    // Lua reset (issue #33: the cell table filled after ~18 reloads, then
-    // recycled tooltip addresses fired dead refs).
-    Tooltip::SetEvents::PrepareForReload();
-
-    // Drop the per-button PreClick/PostClick handler cells — same reasoning as
-    // the tooltip cells above: the reload recreates the button objects and the
-    // handler refs die with the Lua reset.
-    Frame::ClickEvents::PrepareForReload();
-
-    // Drop the per-frame OnAttributeChanged handler + unit-token maps for the
-    // same reason: a recycled frame address must not fire a dead attribute
-    // handler ref (this was "SetAttribute occasionally errors after /reload").
-    Frame::Attributes::PrepareForReload();
-
-    // Forget the captured `string` table before the world Lua state resets
-    // (this hook also fires on /logout, where the state's tables die) —
-    // string-method resolution fails closed (stock index error) until
-    // LoadScriptFunctions re-captures.
-    LuaSyntax::StringMethods::PrepareForReload();
-
-    // Persist the name cache before the engine starts tearing down.
-    // This hook fires on both `/reload` and `/logout` (the engine
-    // re-initializes Lua state in both cases), giving us a clean
-    // deterministic save point for the common lifecycle events.
+    // Persist the name cache before the engine tears down — a SAVE, not a clear,
+    // so it stays an explicit call rather than a ReloadAutoRegister.
     Player::NameCache::Flush();
 
     FrameScript_Initialize_o();

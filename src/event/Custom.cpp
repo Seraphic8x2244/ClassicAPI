@@ -320,6 +320,8 @@ void PrepareForReload() {
     g_growLatched = false;      // re-arm the one-shot grow for the new table
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 // Diagnostic Lua functions — registered via the auto-register pattern
 // at the bottom of this file. Not on any hot path.
 namespace {

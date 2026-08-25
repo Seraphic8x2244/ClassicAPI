@@ -293,7 +293,23 @@ void RegisterLuaFunctions() {
 
 } // namespace
 
+// Cancel every pending timer and release its Lua registry callback before a
+// /reload (or logout) resets the Lua state. Otherwise g_timers would carry
+// entries whose "ClassicAPI.Timer.N" registry callbacks died with the reset:
+// the WorldTick fire pass drops a nil callback safely, but a surviving/stale
+// registry ref could fire a dead closure. Clearing here is the consistent,
+// correct behavior — a reload cancels pending timers, matching modern WoW,
+// where C_Timer callbacks are Lua closures that don't survive the reset.
+void PrepareForReload() {
+    if (void *L = Game::Lua::State())
+        for (const auto &t : g_timers)
+            ReleaseCallback(L, t.id);
+    g_timers.clear();
+    g_nextID = 1;
+}
+
 static const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
 static const Tick::WorldTick::AutoSubscribe _tick{&Tick};
 
 } // namespace Time::Timer

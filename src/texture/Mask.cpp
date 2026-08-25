@@ -604,4 +604,6 @@ void PrepareForReload() {
     g_maskRegions.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Texture::Mask

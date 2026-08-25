@@ -176,4 +176,6 @@ void PrepareForReload() {
     g_cells.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Frame::ClickEvents

@@ -2039,4 +2039,6 @@ void PrepareForReload() {
     g_nodeBakedColor.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Text::InlineTexture

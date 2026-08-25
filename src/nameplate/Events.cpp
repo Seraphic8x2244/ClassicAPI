@@ -290,6 +290,8 @@ void PrepareForReload() {
     g_slots.clear();
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 // Exposed via `nameplate/Walk.h` so the `nameplateN` token resolver
 // in `unit/TokenExtensions.cpp` can map an index to a GUID without seeing
 // the internal array. Returns 0 for an out-of-range OR currently-free slot.

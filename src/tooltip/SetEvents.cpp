@@ -253,4 +253,6 @@ void PrepareForReload() {
     g_cellCount = 0;
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Tooltip::SetEvents

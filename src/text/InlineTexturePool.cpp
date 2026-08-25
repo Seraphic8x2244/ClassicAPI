@@ -559,4 +559,6 @@ void PrepareForReload() {
     g_maintainDisabled = false; // re-arm the SEH latch for the fresh UI
 }
 
+static const Game::ReloadAutoRegister _reloadReg{&PrepareForReload};
+
 } // namespace Text::InlineTexturePool
