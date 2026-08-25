@@ -103,6 +103,39 @@ bool AddDurationMod(uint32_t triggerSpellId, uint32_t affectedFamily,
                     uint64_t affectedMask, uint32_t affectedIcon, int op,
                     int32_t valueMs);
 
+// Register a server "triggered application" rule from C++: `triggerSpellId`'s
+// SMSG_SPELL_GO — local player casts only — arms its hit targets for a short
+// window, and a caster-less aura application on an armed target matching
+// `affectedFamily` + a family-flag overlap with `affectedMask` is attributed
+// to the player at `durationPct` percent of the aura's own player-modified
+// base duration (the server's `max(1, CalculateDuration(caster) * pct / 100)`).
+// For server mechanics that AddAura an aura off another spell's hit with no
+// cast packet of its own (Turtle's Stinging Nettle: Mongoose Bite / fire-trap
+// effects apply the highest known Serpent Sting rank at 20/40% duration).
+// A re-trigger over an EXISTING matching aura is also handled: the server's
+// re-add reuses the descriptor slot (no application event), so the trigger
+// additionally refreshes the player's existing cached entry in place,
+// honoring the server's keep-the-longer-remaining guard.
+// `gateSpellId` (0 = none) keeps the rule live only while the player knows
+// that spell (a talent-granted passive), read from the spell-knowledge bitmap
+// at trigger time so respecs are honored; rules matching the same trigger are
+// tried in registration order and the first live one arms (register the
+// higher talent rank first). Returns false on bad input or a full table.
+bool AddTriggeredApplication(uint32_t triggerSpellId, uint32_t gateSpellId,
+                             uint32_t affectedFamily, uint64_t affectedMask,
+                             int32_t durationPct);
+
+// Family-mask trigger form of the above: the trigger matches any cast whose
+// spell is SpellFamilyName `triggerFamily` with a family-flag overlap of
+// `triggerMask` — rank-proof when the bit selects exactly the trigger set
+// (verify against the DBC that no unrelated spell shares it first: hunter
+// 0x4 is exactly the fire-trap effects, but 0x2 is Mongoose Bite AND Raptor
+// Strike, so that trigger needs the exact-ID form).
+bool AddTriggeredApplicationByFamily(uint32_t triggerFamily,
+                                     uint64_t triggerMask, uint32_t gateSpellId,
+                                     uint32_t affectedFamily,
+                                     uint64_t affectedMask, int32_t durationPct);
+
 // One cached aura, as returned by `Enumerate`.
 struct CachedAura {
     uint32_t spellId;

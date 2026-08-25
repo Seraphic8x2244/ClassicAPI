@@ -928,6 +928,171 @@ int RefreshJudgementsImpl(uint64_t unitGuid, uint64_t attackerGuid, bool adopt) 
     return refreshed;
 }
 
+// ---- Triggered applications (server AddAura inference) --------------------
+//
+// Some server mechanics APPLY an aura as a side effect of another spell via a
+// direct AddAura — no cast, no SMSG_SPELL_GO for the applied aura, and a
+// duration the packet stream never carries. The application itself reaches
+// the client only as a descriptor change (OnAuraAdded → caster-less, base
+// duration). But the TRIGGER's SMSG_SPELL_GO is visible, so — same shape as
+// the judgement attribution above — a registered trigger cast by the local
+// player arms its hit targets for a short window, and the caster-less
+// application that follows consumes the arm: player attribution + the rule's
+// percentage of the aura's own (player-modified) base duration, mirroring
+// the server's `max(1, CalculateDuration(caster) * pct / 100)`.
+//
+// Registered from src/turtle (Stinging Nettle: Mongoose Bite / fire-trap
+// effects apply the highest known Serpent Sting rank at 20/40%). Local
+// player only — a rule may be gated on a talent-granted passive
+// (`gateSpellId`), and other players' talents aren't client-knowable.
+
+struct TriggeredApplication {
+    uint32_t triggerSpellId; // exact trigger spell; 0 = match by family+mask below
+    uint32_t triggerFamily;  // (triggerSpellId==0) trigger's SpellFamilyName
+    uint64_t triggerMask;    // (triggerSpellId==0) family-flag overlap — rank-proof
+    uint32_t gateSpellId;    // rule live only while the player knows this; 0 = always
+    uint32_t affectedFamily; // applied aura's SpellFamilyName
+    uint64_t affectedMask;   //   + family-flag overlap
+    int32_t durationPct;     // applied duration = pct% of its own base
+};
+constexpr int kTrigAppMax = 32;
+TriggeredApplication g_trigApps[kTrigAppMax];
+int g_trigAppCount = 0;
+
+// Talent gate: does the player currently know `spellID`? The engine's
+// spell-knowledge bitmap (same store IsPlayerSpell reads — covers talent
+// passives), checked live at trigger time so respecs are honored.
+bool PlayerKnowsSpell(uint32_t spellID) {
+    if (spellID == 0)
+        return false;
+    auto *bitmap = Game::Read<const uint32_t *>(
+        static_cast<uintptr_t>(Offsets::VAR_PLAYER_SPELL_BITMAP));
+    if (bitmap == nullptr)
+        return false;
+    const uint32_t spellCount = Game::Read<uint32_t>(
+        static_cast<uintptr_t>(Offsets::VAR_SPELL_RECORD_COUNT));
+    if (spellID > spellCount)
+        return false;
+    return (bitmap[spellID >> 5] & (1u << (spellID & 31))) != 0;
+}
+
+// Armed rule instance awaiting its application on `victim`. Caster is
+// implicitly the local player (only player triggers arm).
+struct TrigAppArm {
+    uint64_t victim; // 0 = empty
+    uint32_t affectedFamily;
+    uint64_t affectedMask;
+    int32_t durationPct;
+    uint32_t untilMs;
+};
+constexpr int kTrigAppArmMax = 8;
+constexpr uint32_t kTrigAppArmTtlMs = 2000;
+TrigAppArm g_trigAppArms[kTrigAppArmMax];
+
+// Mirror the server's re-apply on an EXISTING matching aura at trigger time
+// (tortoise-wow ApplyStingingNettle): an existing holder from this caster
+// whose remaining time exceeds the scaled duration is kept; otherwise the
+// server re-AddAura's at the scaled duration — a remove+add of the same
+// spellID that reuses the descriptor slot, so NO OnAuraAdded fires and the
+// armed window is never consumed (verified in-game: chained Mongoose Bites
+// left the first application's timer running out). The trigger is the only
+// audible signal, so the refresh happens here. A caster-less matching entry
+// is adopted and stamped unconditionally: it's a nettle application whose
+// arm was missed, seated by the application hook at the WRONG base duration,
+// so its remaining time can't gate the mirror — and the player's trigger is
+// proof of ownership, same as the judgement-cast adoption.
+void RefreshTriggeredExisting(uint64_t victim, const TriggeredApplication &r,
+                              uint32_t now) {
+    for (int i = 0; i < g_usedHigh; ++i) {
+        Entry &e = g_cache[i];
+        if (!e.used || e.targetGuid != victim)
+            continue;
+        const bool mine = e.casterGuid == Unit::Identity::PlayerGuid();
+        if (!mine && e.casterGuid != 0)
+            continue; // another caster's aura — not ours to touch
+        const uint8_t *rec =
+            Spell::Lookup::RecordForID(static_cast<int>(e.spellId));
+        if (!Spell::Lookup::IsFitToFamily(rec, r.affectedFamily,
+                                          r.affectedMask))
+            continue;
+        const uint32_t base = SpellDurationMs(rec, /*casterIsPlayer*/ true);
+        if (base == 0)
+            continue;
+        uint32_t newMs = base * static_cast<uint32_t>(r.durationPct) / 100;
+        if (newMs == 0)
+            newMs = 1;
+        // The server's keep-the-longer guard, applied only to trusted
+        // (player-stamped) timing. An elapsed timer yields Remaining 0 and
+        // refreshes — the invisible server re-adds are exactly what let it
+        // elapse while the aura stayed up.
+        if (mine && e.expirationMs != 0 &&
+            Time::Clock::Remaining(now, e.expirationMs) > newMs)
+            continue;
+        e.casterGuid = Unit::Identity::PlayerGuid();
+        e.durationMs = newMs;
+        e.expirationMs = now + newMs;
+        e.stampMs = now;
+        SignalAuraChanged(victim);
+        break; // one aura instance per (target, spell, caster) — server touches one holder
+    }
+}
+
+// A player trigger cast landed on `victim`: arm the first live rule for this
+// trigger (rules sharing a trigger are registration-ordered — the higher
+// talent rank registers first, so its gate wins while known). Also refreshes
+// an existing matching aura in place (see RefreshTriggeredExisting) — the arm
+// only covers applications that reach the descriptor as a change.
+void ArmTriggeredApplications(uint64_t victim, uint32_t triggerSpellId,
+                              const uint8_t *triggerRec) {
+    for (int i = 0; i < g_trigAppCount; ++i) {
+        const TriggeredApplication &r = g_trigApps[i];
+        if (r.triggerSpellId != 0
+                ? r.triggerSpellId != triggerSpellId
+                : !Spell::Lookup::IsFitToFamily(triggerRec, r.triggerFamily,
+                                                r.triggerMask))
+            continue;
+        if (r.gateSpellId != 0 && !PlayerKnowsSpell(r.gateSpellId))
+            continue;
+        const uint32_t now = NowMs();
+        RefreshTriggeredExisting(victim, r, now);
+        TrigAppArm *slot = nullptr;
+        for (auto &a : g_trigAppArms) {
+            if (a.victim == victim && a.affectedFamily == r.affectedFamily &&
+                a.affectedMask == r.affectedMask) {
+                slot = &a; // re-trigger inside the TTL — refresh in place
+                break;
+            }
+            if (slot == nullptr &&
+                (a.victim == 0 || Time::Clock::Reached(now, a.untilMs)))
+                slot = &a;
+        }
+        if (slot == nullptr)
+            slot = &g_trigAppArms[0]; // all live — steal the first
+        *slot = {victim, r.affectedFamily, r.affectedMask, r.durationPct,
+                 now + kTrigAppArmTtlMs};
+        return;
+    }
+}
+
+// The armed duration percent for a caster-less application of `rec` on
+// `victim`, or 0. One-shot: consumed on hit.
+int32_t ConsumeTriggeredApplication(uint64_t victim, const uint8_t *rec,
+                                    uint32_t now) {
+    if (victim == 0 || rec == nullptr)
+        return 0;
+    for (auto &a : g_trigAppArms) {
+        if (a.victim != victim || Time::Clock::Reached(now, a.untilMs))
+            continue;
+        if (!Spell::Lookup::IsFitToFamily(rec, a.affectedFamily,
+                                          a.affectedMask))
+            continue;
+        const int32_t pct = a.durationPct;
+        a = {};
+        return pct;
+    }
+    return 0;
+}
+
 // ---- SMSG_SPELL_GO co-hook ----------------------------------------------
 
 // The hit-target list is all we need: each entry is a unit the cast landed
@@ -976,6 +1141,16 @@ void HandleSpellGo(uint64_t caster, uint32_t spellId, const uint64_t *targets,
     }
 
     const uint8_t *rec = Spell::Lookup::RecordForID(static_cast<int>(spellId));
+
+    // Triggered-application rules (Stinging Nettle): a registered trigger
+    // cast by the local player arms its hit targets so the server-added aura
+    // that follows (no SPELL_GO of its own) gets player attribution + the
+    // rule's scaled duration. Before the aura gate — Mongoose Bite applies
+    // no aura of its own.
+    if (g_trigAppCount != 0 && caster == Unit::Identity::PlayerGuid())
+        for (int i = 0; i < numTargets; ++i)
+            ArmTriggeredApplications(targets[i], spellId, rec);
+
     if (!SpellAppliesAura(rec))
         return;
 
@@ -1061,14 +1236,38 @@ void StampApplication(void *unit, uint32_t spellId, int slot) {
     // (and attribute the caster) — SpellGo couldn't always land the talented
     // value on this target's entry. Otherwise base (we lack other casters'
     // mods). See WasRecentPlayerCast.
-    const bool byPlayer = WasRecentPlayerCast(spellId);
-    const uint32_t durationMs = SpellDurationMs(rec, byPlayer);
-    uint64_t caster = byPlayer ? Unit::Identity::PlayerGuid() : 0;
-    // A judgement debuff is cast server-side (no SPELL_GO, so neither path
-    // above can name its caster) — attribute it to the paladin whose
-    // Judgement cast just armed this victim. See the judgement section.
-    if (caster == 0 && IsJudgementSpell(rec))
-        caster = ConsumeJudgementAttribution(unitGuid, NowMs());
+    uint64_t caster = 0;
+    uint32_t durationMs = 0;
+    // A triggered-application arm (Stinging Nettle): the server AddAura'd
+    // this aura off the player's trigger cast at a scaled duration —
+    // attribute the player and mirror the server's max(1, base × pct / 100),
+    // player-modified base since the player is the caster. Checked BEFORE
+    // the recent-cast window below: the arm names this exact TARGET, while
+    // WasRecentPlayerCast is spell-scoped only — a real Serpent Sting cast
+    // at unit A must not stamp its full duration onto a nettle application
+    // landing on unit B moments later. The order is safe for a real cast's
+    // own application: its entry is already cast-owned (StoreFromCast), and
+    // StoreFromApplication never overwrites an owned entry's timing.
+    if (const int32_t pct = ConsumeTriggeredApplication(unitGuid, rec, NowMs())) {
+        const uint32_t playerBase = SpellDurationMs(rec, /*player*/ true);
+        if (playerBase > 0) {
+            caster = Unit::Identity::PlayerGuid();
+            durationMs = playerBase * static_cast<uint32_t>(pct) / 100;
+            if (durationMs == 0)
+                durationMs = 1;
+        }
+    }
+    if (caster == 0) {
+        const bool byPlayer = WasRecentPlayerCast(spellId);
+        durationMs = SpellDurationMs(rec, byPlayer);
+        caster = byPlayer ? Unit::Identity::PlayerGuid() : 0;
+        // A judgement debuff is cast server-side (no SPELL_GO, so neither
+        // path above can name its caster) — attribute it to the paladin
+        // whose Judgement cast just armed this victim. See the judgement
+        // section.
+        if (caster == 0 && IsJudgementSpell(rec))
+            caster = ConsumeJudgementAttribution(unitGuid, NowMs());
+    }
     const uint32_t expirationMs = durationMs > 0 ? NowMs() + durationMs : 0;
     StoreFromApplication(unitGuid, spellId, caster, expirationMs, durationMs,
                          slot, KindForSlot(slot));
@@ -1174,6 +1373,56 @@ bool AddDurationMod(uint32_t triggerSpellId, uint32_t affectedFamily,
     return RegisterDurationMod(triggerSpellId, /*triggerFamily*/ 0,
                                /*triggerSchool*/ -1, affectedFamily, affectedMask,
                                affectedIcon, op, valueMs);
+}
+
+namespace {
+
+bool RegisterTriggeredApplication(uint32_t triggerSpellId,
+                                  uint32_t triggerFamily, uint64_t triggerMask,
+                                  uint32_t gateSpellId, uint32_t affectedFamily,
+                                  uint64_t affectedMask, int32_t durationPct) {
+    // Trigger must be identified one way or the other.
+    if ((triggerSpellId == 0 && (triggerFamily == 0 || triggerMask == 0)) ||
+        affectedMask == 0 || durationPct <= 0)
+        return false;
+    for (int i = 0; i < g_trigAppCount; ++i) { // replace an identical rule
+        TriggeredApplication &r = g_trigApps[i];
+        if (r.triggerSpellId == triggerSpellId &&
+            r.triggerFamily == triggerFamily && r.triggerMask == triggerMask &&
+            r.gateSpellId == gateSpellId && r.affectedFamily == affectedFamily &&
+            r.affectedMask == affectedMask) {
+            r.durationPct = durationPct;
+            return true;
+        }
+    }
+    if (g_trigAppCount >= kTrigAppMax)
+        return false;
+    g_trigApps[g_trigAppCount++] = {triggerSpellId,  triggerFamily, triggerMask,
+                                    gateSpellId,     affectedFamily,
+                                    affectedMask,    durationPct};
+    return true;
+}
+
+} // namespace
+
+bool AddTriggeredApplication(uint32_t triggerSpellId, uint32_t gateSpellId,
+                             uint32_t affectedFamily, uint64_t affectedMask,
+                             int32_t durationPct) {
+    return RegisterTriggeredApplication(triggerSpellId, /*triggerFamily*/ 0,
+                                        /*triggerMask*/ 0, gateSpellId,
+                                        affectedFamily, affectedMask,
+                                        durationPct);
+}
+
+bool AddTriggeredApplicationByFamily(uint32_t triggerFamily,
+                                     uint64_t triggerMask, uint32_t gateSpellId,
+                                     uint32_t affectedFamily,
+                                     uint64_t affectedMask,
+                                     int32_t durationPct) {
+    return RegisterTriggeredApplication(/*triggerSpellId*/ 0, triggerFamily,
+                                        triggerMask, gateSpellId,
+                                        affectedFamily, affectedMask,
+                                        durationPct);
 }
 
 int RefreshJudgements(uint64_t unitGuid, uint64_t attackerGuid) {
