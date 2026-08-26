@@ -7040,11 +7040,13 @@ enum Offsets {
     //     but FUN_004eae10 sets it EXPLICITLY — we mirror that.
     //   * The SECOND vertex UV stream (uv1) DOES feed unit 1 (FUN_004eae10
     //     passes a distinct uv1 = this+0x50), so uv1 = uv0 makes unit 1 sample
-    //     the mask at the base's own texcoords — exactly SetMask semantics.
-    //     uv1 is the LAST explicit UV slot that exists: the vertex-format
-    //     component table at 0x008097A8 (13 formats × 13 components) has no
-    //     format with a third UV set, so masks past the first CANNOT ride an
-    //     explicit stream — they use texgen (below).
+    //     the mask at the base's own texcoords. SetMask originally rode this
+    //     recipe but was moved to texgen (below): texcoord-relative sampling
+    //     breaks for SetTexCoord'd sprites (the mask gets sampled at the same
+    //     sub-rect OF THE MASK IMAGE), and uv1 is the LAST explicit UV slot
+    //     that exists — the vertex-format component table at 0x008097A8
+    //     (13 formats × 13 components) has no format with a third UV set, so
+    //     masks past the first cannot ride an explicit stream anyway.
     GXRS_TEXTURE0 = 0x17,  // texture bind, +unit 0..7 (via FUN_GX_RS_SET_PTR)
     GXRS_COMBINER0 = 0x1F, // combiner preset, +unit 0..7 (via FUN_GX_RS_SET)
     GXRS_COMBINE_MODULATE = 1, // preset value: COLOROP=MODULATE, ALPHAOP=MODULATE

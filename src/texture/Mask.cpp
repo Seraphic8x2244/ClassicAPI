@@ -23,17 +23,23 @@
 // bind the mask(s) on texture units 1..N (the MODULATE combiner multiplies each
 // mask's alpha into the base's alpha) and re-run the engine's own submit.
 //
-// Two mask sources, two sampling paths:
-//   * SetMask("path") — the mask samples at the base's own texcoords, so it
-//     rides the explicit second UV stream (uv1 = uv0). One mask max: the
-//     engine's vertex-format table has no third UV set.
-//   * AddMaskTexture(maskRegion) — positioned masks. These use TEXGEN, the same
-//     mechanism as the engine's own minimap-disc mask (FUN_004ec440): each
-//     unit's UV is generated from the raw vertex POSITION and mapped through a
-//     per-unit texture matrix built from the mask's rect (plus its SetRotation,
-//     which is just a rotation term in the matrix). No vertex stream needed, so
-//     up to 7 simultaneous masks (device-stage-cap-clamped), each independently
-//     positioned, sized, rotated, and animated.
+// Two mask sources, ONE sampling path — TEXGEN, the same mechanism as the
+// engine's own minimap-disc mask (FUN_004ec440): each unit's UV is generated
+// from the raw vertex POSITION and mapped through a per-unit texture matrix.
+// No vertex stream is consumed per mask, so up to 7 simultaneous masks
+// (device-stage-cap-clamped), and both sources compose (alpha intersection):
+//   * SetMask("path") — the matrix is built from the BASE region's own rect
+//     (+ its SetRotation, so the mask follows a rotated base). Position-based
+//     on purpose: the original recipe here (the minimap BLIP mask's
+//     FUN_004eae10, explicit second UV stream with uv1 = uv0) sampled the mask
+//     at the base's texcoords, which breaks for SetTexCoord'd sprites — the
+//     mask is then sampled at the same sub-rect OF THE MASK IMAGE, showing a
+//     corner chunk of the shape instead of the shape. Texgen spans the drawn
+//     quad regardless of texcoords (retail semantics); for default 0..1
+//     texcoords the two formulas are identical (see BuildMaskMatrix).
+//   * AddMaskTexture(maskRegion) — positioned masks: matrix from the mask
+//     region's rect (plus its SetRotation, a rotation term in the matrix);
+//     each independently positioned, sized, rotated, and animated.
 //
 // State discipline: the queued draw is only flushed at the indexed submit
 // (FUN_GX_PRIM_INDEXED) the engine issues right after this stream call, so the
@@ -130,51 +136,7 @@ using PrimStreams_t = void(__fastcall *)(int count, const void *pos, int posStri
 
 PrimStreams_t g_primStreamsOriginal = nullptr;
 
-// Runs the engine's own submit with the mask bound on unit 1 and uv1 = uv0.
-// Returns true if it drew; false if the mask isn't resident yet (caller draws
-// the base unmasked this frame and retries next). POD-only body for the SEH
-// wrapper.
-bool MaskedDrawImpl(void *maskH, int count, const void *pos, int posStride, const void *s3,
-                    int s3Stride, const void *colors, int colorStride, int drop8, int drop9,
-                    const void *uv0, int uv0Stride) {
-    // Per-frame residency reference (force=1), exactly like the minimap's mask.
-    void *maskCGx =
-        reinterpret_cast<GetRenderable_t>(Offsets::FUN_TEXTURE_GET_RENDERABLE)(maskH, 1, nullptr);
-    if (maskCGx == nullptr)
-        return false;
-    auto rs = reinterpret_cast<GxRsSet_t>(Offsets::FUN_GX_RS_SET);
-    auto rsPtr = reinterpret_cast<GxRsSetPtr_t>(Offsets::FUN_GX_RS_SET_PTR);
-    // Historical note: this push/pop pair was believed to be a per-unit
-    // enable/disable; it's actually unit 1's texture-matrix push/pop (binding
-    // is what enables a stage). The pair is a net no-op here but its
-    // dirty-marking is part of the exact sequence this path shipped and was
-    // verified with — left untouched.
-    reinterpret_cast<GxTexMtxOp_t>(Offsets::FUN_GX_TEXMTX_PUSH)(1);
-    rsPtr(Offsets::GXRS_TEXTURE0 + 1, maskCGx); // bind mask on unit 1
-    // Force unit 1's combiner to MODULATE, exactly as the engine's own masked
-    // draw FUN_004eae10 does (GxRs(0x20, 1)) — robust vs. relying on the
-    // backend default.
-    rs(Offsets::GXRS_COMBINER0 + 1, Offsets::GXRS_COMBINE_MODULATE);
-    // uv1 = uv0 → unit 1 samples the mask at the base's texcoords.
-    g_primStreamsOriginal(count, pos, posStride, s3, s3Stride, colors, colorStride, drop8, drop9,
-                          uv0, uv0Stride, uv0, uv0Stride);
-    reinterpret_cast<GxTexMtxOp_t>(Offsets::FUN_GX_TEXMTX_POP)(1);
-    return true;
-}
-
-bool SafeMaskedDraw(void *maskH, int count, const void *pos, int posStride, const void *s3,
-                    int s3Stride, const void *colors, int colorStride, int drop8, int drop9,
-                    const void *uv0, int uv0Stride) {
-    __try {
-        return MaskedDrawImpl(maskH, count, pos, posStride, s3, s3Stride, colors, colorStride,
-                              drop8, drop9, uv0, uv0Stride);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_enabled = false; // disable the feature for the session
-        return true;       // may have partly drawn — don't double-draw
-    }
-}
-
-// --- object mask: clip the base to a positioned mask region ------------------
+// --- region rect resolution ---------------------------------------------------
 
 using RegionGetRect_t = int(__thiscall *)(void *anchor, float *outTLBR);
 using RegionResolve_t = void(__thiscall *)(void *anchor, int flag);
@@ -197,13 +159,13 @@ bool RegionRect(void *region, float outTLBR[4]) {
     return reinterpret_cast<RegionGetRect_t>(Offsets::FUN_REGION_GET_RECT)(anchor, outTLBR) != 0;
 }
 
-// --- texgen path: positioned masks on units 1..N -----------------------------
+// --- texgen: every mask samples on its own unit, 1..N -------------------------
 //
 // Each mask unit samples via texgen (object-space position) through a texture
 // matrix mapping the raw vertex position to the mask's UV — the engine's own
 // minimap-disc-mask mechanism. Outside the mask's rect the UV leaves [0,1] and
 // the sampler clamps to the mask's transparent border, clipping the base
-// (verified live on the uv1 path; same sampler state).
+// (verified live on the original uv1 = uv0 SetMask recipe; same sampler state).
 //
 // The position→UV map is affine, derived from two verified facts:
 //   * corner positions and the layout rect share the same anchor-unit space
@@ -219,8 +181,10 @@ bool RegionRect(void *region, float outTLBR[4]) {
 //   v = ( s·x − c·y + Ty − maskTop ) / maskHd     [maskHd = bottom − top]
 // with c = cos a, s = sin a, pivot P in rendered space, and
 //   Tx = Px·(1−c) − s·(midY−Py),  Ty = Py + c·(midY−Py) − s·Px
-// (a = 0 ⇒ u = (x − left)/W, v = (midY − y − top)/Hd — exactly the shipped and
-// verified uv1-path formula re-expressed through positions).
+// (a = 0 ⇒ u = (x − left)/W, v = (midY − y − top)/Hd — exactly the retired
+// uv1 = uv0 SetMask recipe's formula re-expressed through positions, so a
+// path mask on a default-texcoord texture renders identically to that
+// shipped-and-verified path).
 bool BuildMaskMatrix(const float mr[4], float midY, bool rotated, float angle, float cxN,
                      float cyN, float out[16]) {
     const float mW = mr[3] - mr[1];  // left→right
@@ -285,13 +249,15 @@ void __fastcall PrimIndexed_h(int primType, int indexCount, const void *indices)
 
 // Runs the engine submit with each mask bound on its own unit via texgen. All
 // fallible resolution happens before any Gx state is touched; the restores run
-// in PrimIndexed_h. POD-only body for the SEH wrapper.
-bool MaskedRegionDrawImpl(void *base, void *const *masks, int maskCount, int count,
-                          const void *pos, int posStride, const void *s3, int s3Stride,
-                          const void *colors, int colorStride, int drop8, int drop9,
-                          const void *uv0, int uv0Stride) {
-    // Stage budget: units 1..(cap−1), 7 max. Extra masks are dropped, first-
-    // added wins — the base still draws with every mask that fits.
+// in PrimIndexed_h. Returns false when a mask isn't resolvable yet (caller
+// draws the base unmasked this frame and retries next). POD-only body for the
+// SEH wrapper.
+bool MaskedRegionDrawImpl(void *base, void *pathMaskH, void *const *masks, int maskCount,
+                          int count, const void *pos, int posStride, const void *s3,
+                          int s3Stride, const void *colors, int colorStride, int drop8,
+                          int drop9, const void *uv0, int uv0Stride) {
+    // Stage budget: units 1..(cap−1), 7 max. Extra masks are dropped, path
+    // mask then Add order — the base still draws with every mask that fits.
     void *dev = Game::Read<void *>(Offsets::VAR_GX_DEVICE);
     if (dev == nullptr)
         return false;
@@ -300,8 +266,6 @@ bool MaskedRegionDrawImpl(void *base, void *const *masks, int maskCount, int cou
         usable = 7;
     if (usable < 1)
         return false;
-    if (maskCount > usable)
-        maskCount = usable;
 
     float br[4]; // base rect {top, left, bottom, right}
     if (!RegionRect(base, br))
@@ -315,26 +279,45 @@ bool MaskedRegionDrawImpl(void *base, void *const *masks, int maskCount, int cou
 
     void *cgx[7];
     float mtx[7][16];
-    for (int i = 0; i < maskCount; ++i) {
+    int units = 0;
+
+    // The path mask (SetMask) spans the base's own rect and follows the base's
+    // rotation — the exact matrix a mask region covering the base would get.
+    // Per-frame residency reference (force=1), exactly like the minimap's mask.
+    if (pathMaskH != nullptr) {
+        cgx[units] = reinterpret_cast<GetRenderable_t>(Offsets::FUN_TEXTURE_GET_RENDERABLE)(
+            pathMaskH, 1, nullptr);
+        if (cgx[units] == nullptr)
+            return false;
+        float angle = 0.0f, cxN = 0.5f, cyN = 0.5f;
+        const bool rotated = Texture::Transform::GetRotation(base, &angle, &cxN, &cyN);
+        if (!BuildMaskMatrix(br, midY, rotated, angle, cxN, cyN, mtx[units]))
+            return false;
+        ++units;
+    }
+
+    for (int i = 0; i < maskCount && units < usable; ++i, ++units) {
         // The mask's owned HTEXTURE (stored by SetTexture at +0xCC, present
         // even while hidden — the draw-entry array only exists after a render,
         // which a hidden mask never gets). Resolving to a renderable each frame
-        // IS the residency reference, exactly like the path-mask path.
+        // IS the residency reference, same as the path mask above.
         void *hTex = Game::Read<void *>(masks[i], Offsets::OFF_SIMPLETEXTURE_HTEXTURE);
         if (hTex == nullptr)
             return false;
-        cgx[i] = reinterpret_cast<GetRenderable_t>(Offsets::FUN_TEXTURE_GET_RENDERABLE)(hTex, 1,
-                                                                                        nullptr);
-        if (cgx[i] == nullptr)
+        cgx[units] = reinterpret_cast<GetRenderable_t>(Offsets::FUN_TEXTURE_GET_RENDERABLE)(
+            hTex, 1, nullptr);
+        if (cgx[units] == nullptr)
             return false;
         float mr[4];
         if (!RegionRect(masks[i], mr))
             return false;
         float angle = 0.0f, cxN = 0.5f, cyN = 0.5f;
         const bool rotated = Texture::Transform::GetRotation(masks[i], &angle, &cxN, &cyN);
-        if (!BuildMaskMatrix(mr, midY, rotated, angle, cxN, cyN, mtx[i]))
+        if (!BuildMaskMatrix(mr, midY, rotated, angle, cxN, cyN, mtx[units]))
             return false;
     }
+    if (units == 0)
+        return false;
 
     // Infallible tail. Track each push as it lands so a fault mid-sequence
     // never pops something that wasn't pushed.
@@ -344,7 +327,7 @@ bool MaskedRegionDrawImpl(void *base, void *const *masks, int maskCount, int cou
     auto rsPtr = reinterpret_cast<GxRsSetPtr_t>(Offsets::FUN_GX_RS_SET_PTR);
     reinterpret_cast<void(__fastcall *)()>(Offsets::FUN_GX_STATE_PUSH)();
     g_pendingRestore = 1u;
-    for (int i = 0; i < maskCount; ++i) {
+    for (int i = 0; i < units; ++i) {
         const int unit = 1 + i;
         rsPtr(Offsets::GXRS_TEXTURE0 + unit, cgx[i]);
         rs(Offsets::GXRS_COMBINER0 + unit, Offsets::GXRS_COMBINE_MODULATE);
@@ -358,13 +341,13 @@ bool MaskedRegionDrawImpl(void *base, void *const *masks, int maskCount, int cou
     return true;
 }
 
-bool SafeMaskedRegionDraw(void *base, void *const *masks, int maskCount, int count,
-                          const void *pos, int posStride, const void *s3, int s3Stride,
-                          const void *colors, int colorStride, int drop8, int drop9,
-                          const void *uv0, int uv0Stride) {
+bool SafeMaskedRegionDraw(void *base, void *pathMaskH, void *const *masks, int maskCount,
+                          int count, const void *pos, int posStride, const void *s3,
+                          int s3Stride, const void *colors, int colorStride, int drop8,
+                          int drop9, const void *uv0, int uv0Stride) {
     __try {
-        return MaskedRegionDrawImpl(base, masks, maskCount, count, pos, posStride, s3, s3Stride,
-                                    colors, colorStride, drop8, drop9, uv0, uv0Stride);
+        return MaskedRegionDrawImpl(base, pathMaskH, masks, maskCount, count, pos, posStride, s3,
+                                    s3Stride, colors, colorStride, drop8, drop9, uv0, uv0Stride);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         RestoreAfterDraw(); // pop exactly what was pushed before the fault
         g_enabled = false;
@@ -386,23 +369,27 @@ void __fastcall PrimStreams_h(int count, const void *pos, int posStride, const v
         // effectively impossible.
         void *region = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pos) -
                                                 Offsets::OFF_SIMPLETEXTURE_CORNERS);
-        // Positioned mask regions (AddMaskTexture) win over a path mask.
+        // A path mask (SetMask) and positioned mask regions (AddMaskTexture)
+        // compose — every mask MODULATEs into the same draw.
+        void *pathMaskH = nullptr;
+        if (!g_regionMask.empty()) {
+            auto it = g_regionMask.find(region);
+            if (it != g_regionMask.end())
+                pathMaskH = it->second.handle;
+        }
+        void *const *masks = nullptr;
+        int maskCount = 0;
         if (!g_baseMasks.empty()) {
             auto mit = g_baseMasks.find(region);
             if (mit != g_baseMasks.end() && !mit->second.empty()) {
-                if (SafeMaskedRegionDraw(region, mit->second.data(),
-                                         static_cast<int>(mit->second.size()), count, pos,
-                                         posStride, s3, s3Stride, colors, colorStride, drop8,
-                                         drop9, uv0, uv0Stride))
-                    return;
+                masks = mit->second.data();
+                maskCount = static_cast<int>(mit->second.size());
             }
         }
-        auto it = g_regionMask.find(region);
-        if (it != g_regionMask.end() && it->second.handle != nullptr) {
-            if (SafeMaskedDraw(it->second.handle, count, pos, posStride, s3, s3Stride, colors,
-                               colorStride, drop8, drop9, uv0, uv0Stride))
-                return;
-        }
+        if ((pathMaskH != nullptr || maskCount > 0) &&
+            SafeMaskedRegionDraw(region, pathMaskH, masks, maskCount, count, pos, posStride, s3,
+                                 s3Stride, colors, colorStride, drop8, drop9, uv0, uv0Stride))
+            return;
     }
     g_primStreamsOriginal(count, pos, posStride, s3, s3Stride, colors, colorStride, drop8, drop9,
                           uv0, uv0Stride, uv1, uv1Stride);

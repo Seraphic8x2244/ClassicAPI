@@ -4467,7 +4467,7 @@ masking — only the special-cased minimap.
 
 `path` is a mask texture. The mask's ALPHA channel is the shape: where the mask
 is opaque the texture shows, where the mask is transparent the texture is
-hidden. The mask is sampled across the texture's own texture coordinates, so it
+hidden. The mask stretches across the texture's full display area, so it always
 lines up with the texture. Pass `nil` or `""` to remove the mask; the texture
 returns to its full rectangle.
 
@@ -4493,10 +4493,12 @@ t:SetMask("Interface\\AddOns\\MyAddon\\round")   -- or your own mask texture
 t:SetMask(nil)                                    -- remove the mask
 ```
 
-> One difference from later clients: the mask follows the texture's own
-> coordinates. If you crop the texture with `SetTexCoord`, the mask follows the
-> cropped region rather than the full display area. For a normal, uncropped
-> texture the two are the same.
+> The mask ignores `SetTexCoord`, the same as later clients. If you crop the
+> texture to one sprite of a sprite sheet, the full mask shape still clips that
+> sprite. The mask follows
+> [`texture:SetRotation`](#texturesetrotationangle--cx-cy). It also combines
+> with masks from [`texture:AddMaskTexture`](#textureaddmasktexturemask): the
+> texture shows only where every mask is opaque.
 
 ### `frame:CreateMaskTexture([name, layer, ...])`
 
@@ -4528,8 +4530,9 @@ texture shows; where the mask is transparent the texture is hidden.
 Call it again with a different mask to add another. A texture with several masks
 shows only where ALL of them are opaque — the masks intersect. So two circles
 show their overlapping lens, and a square plus a circle show a square with
-rounded corners. Up to 7 masks apply at once. Masks cannot subtract, so you
-cannot cut a hole with this.
+rounded corners. Up to 7 masks apply at once. A mask set with
+[`texture:SetMask`](#texturesetmaskpath) uses one of the 7 slots. Masks cannot
+subtract, so you cannot cut a hole with this.
 
 A mask honors [`texture:SetRotation`](#texturesetrotationangle--cx-cy): rotate
 the mask and its clip shape turns with it. The mask can also move or resize each
