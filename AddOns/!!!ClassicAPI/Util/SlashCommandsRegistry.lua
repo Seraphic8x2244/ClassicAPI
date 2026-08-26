@@ -32,3 +32,17 @@ SlashCmdList["EQUIP_SET"] = function(msg)
         C_EquipmentSet.UseEquipmentSet(C_EquipmentSet.GetEquipmentSetID(set))
 	end
 end
+
+SlashCmdList["CLICK"] = function(msg)
+	local action = SecureCmdOptionParse(msg);
+	if ( action and action ~= "" ) then
+		local name, mouseButton = string.match(action, "([^%s]+)%s+([^%s]+)");
+		if ( not name ) then
+			name = action;
+		end
+		local button = GetClickFrame(name);
+		if ( button and button:IsObjectType("Button") ) then
+			button:Click(mouseButton);
+		end
+	end
+end
