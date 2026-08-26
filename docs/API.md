@@ -55,6 +55,8 @@ build instructions.
 
 - [Combat](#combat)
   - [`InCombatLockdown()`](#incombatlockdown)
+  - [`StartAttack([target])`](#startattacktarget)
+  - [`StopAttack()`](#stopattack)
 
 - [Console](#console)
   - [`ExportInterfaceFiles art|code` (console command)](#exportinterfacefiles-artcode-console-command)
@@ -1456,6 +1458,26 @@ if UnitAffectingCombat("player") then
     -- this is the real check
 end
 ```
+
+### `StartAttack([target])`
+
+Starts your melee auto-attack. The vanilla `AttackTarget()` turns the attack on
+or off with each call. `StartAttack` only starts it — a call while you attack
+your current target does not toggle the attack off. So a `/startattack` macro
+can use it safely.
+
+With no argument, it attacks your current target. With a unit token (`"target"`,
+`"focus"`, `"party1"`), it attacks that unit. A name or an unknown token uses the
+current target instead. If there is no valid target, nothing happens.
+
+```lua
+StartAttack()            -- attack the current target; never cancels an attack
+StartAttack("focus")     -- attack your focus unit
+```
+
+### `StopAttack()`
+
+Stops your melee auto-attack. If you are not attacking, the call does nothing.
 
 ## Console
 
