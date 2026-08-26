@@ -204,6 +204,7 @@ build instructions.
   - [`RegisterUnitWatch` / `UnregisterUnitWatch` / `UnitWatchRegistered`](#registerunitwatch--unregisterunitwatch--unitwatchregistered)
   - [`SecureButton_GetAttribute` / `SecureButton_GetUnit`](#securebutton_getattribute--securebutton_getunit)
   - [`PreClick` / `PostClick` button scripts](#preclick--postclick-button-scripts)
+  - [`GetClickFrame(name)`](#getclickframename)
 
 - [FriendList](#friendlist)
   - [`C_FriendList.SendWhoQueryByName(name)`](#c_friendlistsendwhoquerybynamename)
@@ -4994,6 +4995,21 @@ fire around `OnClick`. A button with no `OnClick` set fires neither. This serves
 the normal use: run code just before or after a button's click action. (Modern
 WoW fires them even with no `OnClick`; that path is not available on this
 client.)
+
+### `GetClickFrame(name)`
+
+Returns the frame with the given global name. The `/click` command uses it to
+change a frame name into the frame.
+
+The function returns the frame only when `_G[name]` holds a real frame, and the
+`GetName()` of that frame is equal to `name`. If the global holds a different
+value, a plain table, or a frame with a different name, the function returns
+nil. This name test makes sure that a changed global does not return the wrong
+frame.
+
+```lua
+GetClickFrame("MyButton")     -- the frame named "MyButton", or nil
+```
 
 ## FriendList
 
