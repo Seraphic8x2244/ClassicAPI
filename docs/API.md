@@ -15337,7 +15337,8 @@ these functions surface them, exactly as the built-in `UnitBuff` /
 | `sourceGUID` | string | caster's `"0x…"` GUID string from the same cache. **ClassicAPI extension — not a retail `AuraData` field.** Set whenever a caster is known, including when `sourceUnit` is `nil` (caster left token range). Stable for the session, unlike the volatile nameplate token; doubles as a unit token under SuperWoW. `nil` on a cache miss |
 | `charges` / `maxCharges` | number | always `0` — vanilla has stacks, not charges |
 | `timeMod` | number | always `1` — vanilla has no haste-affected auras |
-| `isStealable`, `isBossAura`, `isFromPlayerOrPlayerPet`, `isNameplateOnly`, `nameplateShowAll`, `nameplateShowPersonal`, `canApplyAura`, `shouldConsolidate`, `isRaid` | boolean | always `false` — modern UI concepts vanilla doesn't have |
+| `isFromPlayerOrPlayerPet` | boolean | true when a player — any player, not only you — or a player's pet applied the aura. Read from the cached caster GUID, so it is `false` when the cast was not seen this session. Totem buffs read `false`: a vanilla totem is a creature, not a pet |
+| `isStealable`, `isBossAura`, `isNameplateOnly`, `nameplateShowAll`, `nameplateShowPersonal`, `canApplyAura`, `shouldConsolidate`, `isRaid` | boolean | always `false` — modern UI concepts vanilla doesn't have |
 | `auraInstanceID`, `points` | (absent) | omitted from the table — Lua read yields nil, matching modern semantics for "field doesn't apply" |
 
 ### Filter parsing
@@ -15498,14 +15499,15 @@ nameplateShowAll, timeMod
 Returns a single `nil` when the unit has fewer than `index` matching auras.
 `dispelType` is the dispel-type string (`"Magic"`, `"Curse"`, `"Disease"`,
 `"Poison"`, or `nil`). `source` is the caster's unit token, or `nil` when the cast
-was not seen this session. `castByPlayer` is true when the local player cast the
-aura. `filter` takes the same tokens as `GetAuraDataByIndex`.
+was not seen this session. `castByPlayer` is true when a player — any player, not
+only you — or a player's pet applied the aura, and false when the cast was not
+seen this session. `filter` takes the same tokens as `GetAuraDataByIndex`.
 
 The values are the `GetAuraDataByIndex` fields in the classic `UnitAura` order,
 with two field-name differences from the table: position 12 is `isBossDebuff`
 (the table field is `isBossAura`) and position 13 is `castByPlayer` (the table
-field is `isFromPlayerOrPlayerPet`). On 1.12 the boss field is always false;
-`castByPlayer` is reported truthfully.
+field is `isFromPlayerOrPlayerPet`, the same value). On 1.12 the boss field is
+always false; `castByPlayer` is reported truthfully.
 
 ### `C_UnitAuras.UnitBuff(unit, index [, filter])` / `UnitDebuff(unit, index [, filter])`
 
