@@ -9146,18 +9146,23 @@ removed `setn` entirely; lengths are computed from the table itself.
 ClassicAPI gives you the 5.1 behavior — code written for Lua 5.1 (or
 that detects it) can skip `setn` and still get correct lengths.
 
-When the stored length points at a nil slot
+When the stored length points more than one slot past the last value,
 and the table has no explicit `n` field, `table.getn` — and everything
 built on it: `table.insert`, `table.remove`, `table.concat`,
 `table.sort`, `table.foreachi`, `unpack` — returns the true border, the
-same answer Lua 5.1 gives. Two things deliberately keep their old
+same answer Lua 5.1 gives. Three things deliberately keep their old
 behavior:
 
 - A table with an explicit numeric `n` field (the vararg `arg` contract)
   keeps its stored count, so trailing nils survive
   (`unpack({10, nil, 30, n = 3})` still returns all three slots).
+- A single trailing nil kept on purpose (`table.insert(t, nil)`) is a
+  valid empty slot, not a stale length. The stored length stays as it is,
+  so the next `table.insert` adds after the nil and does not write over it.
+  The heal starts only when the stored length is more than one slot too
+  large — the sign of a table that was cleared but not reset.
 - `table.setn` still works; the heal only changes the answer when the
-  stored length points past the last populated slot.
+  stored length points more than one slot past the last value.
 
 ### `Mixin(object, ...)` / `CreateFromMixins(...)`
 
