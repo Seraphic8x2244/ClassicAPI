@@ -70,6 +70,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "aura/Source.h"
 #include "dbc/Lookup.h"
 #include "net/PacketDispatch.h"
 #include "net/PacketReader.h"
@@ -616,7 +617,11 @@ void ParseChannelStart(Net::CDataStore *packet) {
 // stores the new end nowhere, so re-anchor g_channel.endMs to the server's
 // remaining time so UnitChannelInfo (and the OnWorldTick endMs self-expiry)
 // track pushback; on remaining == 0 clear the channel so CHANNEL_STOP fires
-// promptly (ahead of the ~1 s-lagged +0x228 field).
+// promptly (ahead of the ~1 s-lagged +0x228 field). The pushback also
+// shortened the channel's aura on each hit target server-side
+// (Spell::DelayedChannel → DelaySpellAuraHolder), so re-anchor the cached
+// target-side expirations too — else C_UnitAuras reads a pushed-back channel
+// debuff (Dark Harvest, the drains) late by the accumulated pushback.
 void ParseChannelUpdate(Net::CDataStore *packet) {
     if (g_channel.spellID == 0)
         return;
@@ -626,6 +631,8 @@ void ParseChannelUpdate(Net::CDataStore *packet) {
         g_channel.spellID = 0; // authoritative channel end
     } else {
         g_channel.endMs = NowMs() + static_cast<int>(remaining);
+        Aura::Source::RestampPlayerChannel(static_cast<uint32_t>(spellID),
+                                           remaining);
         Spell::CastEvents::OnPlayerChannelUpdate(spellID);
     }
 }
