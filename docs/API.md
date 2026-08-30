@@ -621,6 +621,7 @@ build instructions.
   - [`UnitIsPet(unit)`](#unitispetunit)
   - [`UnitIsOtherPlayersPet(unit)`](#unitisotherplayerspetunit)
   - [`UnitOwnerGUID(unit)`](#unitownerguidunit)
+  - [`UnitCreatedBySpell(unit)`](#unitcreatedbyspellunit)
   - [`UnitStandState(unit)`](#unitstandstateunit)
   - [`UnitInRange(unit)`](#unitinrangeunit)
   - [`UnitDistanceSquared(unit)`](#unitdistancesquaredunit)
@@ -14875,6 +14876,26 @@ if owner == UnitGUID("player") then ... end  -- is it my minion?
 
 Reads the same owner field the pet predicates use (`CharmedBy`, else
 `CreatedBy` in the unit's `m_objectFields`).
+
+### `UnitCreatedBySpell(unit)`
+
+Returns the spell ID that summoned `unit`: the totem-drop spell for a totem,
+or the summon spell for a pet or guardian. Returns `nil` for an unresolved
+unit, and for a unit that no spell summoned (players and world creatures).
+
+This is the summoning spell, not a spell that the unit casts later. The spell
+that a totem casts stays on the server and never reaches the client. The
+client receives this value for every summoned unit, so it works for any unit
+in range, not only your own summons. Use `GetSpellInfo` to get a readable
+name.
+
+A ClassicAPI extension, not a stock WoW global.
+
+```lua
+UnitCreatedBySpell("pet")                -- your pet's summon spell id
+local id = UnitCreatedBySpell("target")  -- target a totem → its totem spell id
+if id then print(GetSpellInfo(id)) end   -- prints the name, like "Searing Totem"
+```
 
 ### `UnitStandState(unit)`
 

@@ -1089,6 +1089,19 @@ enum Offsets {
     OFF_UNIT_FIELD_CHARMEDBY = 0x10,
     OFF_UNIT_FIELD_CREATEDBY = 0x20,
 
+    // UNIT_CREATED_BY_SPELL — the spell that summoned this unit (descriptor
+    // byte +0x230, field index 0x8C). Set for every spell-summoned unit:
+    // totems (the shaman's totem-drop spell), pets, guardians, wild summons.
+    // Verified two ways: the unit-title builder `FUN_0052FD30` reads
+    // `[desc+0x230]` as the summoning spell (then switches on its Spell.dbc
+    // Effect[0] to pick "Guardian"/"Creation"), and the server stamps it
+    // with `m_spellInfo->Id` (tortoise-wow `EffectSummonTotem`/
+    // `EffectSummonGuardian`/`EffectSummon`). A broadcast field, so it's
+    // readable for any unit in range. `Unit::Pet` exposes it as
+    // `UnitCreatedBySpell`. NB: this is the SUMMONING spell — distinct from
+    // the spell a totem casts (that's server-side only, never broadcast).
+    OFF_UNIT_FIELD_CREATED_BY_SPELL = 0x230,
+
     // Pet-vs-minion discriminator for an owned unit: `int __fastcall(unit)`.
     // `0x00605570` is really the engine's **creature-type resolver** — it's
     // `Script_UnitCreatureType`'s (`0x0051A280`) inner helper and returns the
