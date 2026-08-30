@@ -87,7 +87,6 @@ namespace Spell::Cast {
 
 namespace {
 
-using ResolveUnitToken_t = void *(__fastcall *)(const char *token);
 using GetCastTime_t = uint32_t(__fastcall *)(int spellID, int unit, int flag);
 using GetDuration_t = int(__fastcall *)(const uint8_t *spellRecord, int unit, int skipMod);
 
@@ -220,7 +219,7 @@ void PushMs(void *L, int ms) {
 }
 
 void *Resolve(const char *token) {
-    return reinterpret_cast<ResolveUnitToken_t>(Offsets::FUN_RESOLVE_UNIT_TOKEN)(token);
+    return Game::ResolveUnitToken(token);
 }
 
 // Effective cast time (ms) for the local player, 0 if instant. Uses the
