@@ -11600,7 +11600,7 @@ indirected fields). Cast time is in milliseconds; ranges are floats in
 yards. `isFunnel` is a real boolean (`true`/`false`), matching 3.3.5's
 behavior. Returns `nil` if the spell ID is out of range.
 
-Two input forms are accepted:
+Four input forms are accepted, matching retail:
 
 - **`GetSpellInfo(spellID)`** — direct DBC lookup by ID.
 - **`GetSpellInfo(slot, bookType)`** — same shape as 1.12's
@@ -11608,6 +11608,20 @@ Two input forms are accepted:
   `"spell"` (player) or `"pet"`. The slot is resolved to a spellID via
   the engine's spellbook array, then the same DBC reads run. Returns
   `nil` for empty / out-of-range slots.
+- **`GetSpellInfo("name")`** — looks the name up in the player's, then
+  the pet's, spellbook and returns the highest rank you know. The match
+  is exact and case-sensitive. This is the retail scope: the name must
+  be a spell you have. A name you do not know returns `nil` (it does not
+  raise an error). It is not a database-wide search — a name shared by
+  many ranks or by NPC spells has no single answer, so only your own
+  spellbook is used.
+- **`GetSpellInfo("name(Rank N)")`** — a rank in parentheses pins that
+  exact rank instead of the highest, the same `SpellName(Rank N)` form
+  `CastSpellByName` accepts. A space before the parenthesis is allowed
+  (`"Mind Blast (Rank 8)"`). A rank you do not know returns `nil`.
+- **`GetSpellInfo("|Hspell:ID|h[Name]|h")`** — a spell hyperlink. The
+  `spellID` inside the link is used directly, so this works for any
+  spell, learned or not.
 
 ```lua
 local name, rank, icon, _, _, _, _, _, _, spellID = GetSpellInfo(133)
@@ -11616,7 +11630,15 @@ local name, rank, icon, _, _, _, _, _, _, spellID = GetSpellInfo(133)
 -- spellbook overload
 local _, _, _, _, _, _, _, _, _, id = GetSpellInfo(1, "spell")
 -- id is the spellID at player spellbook slot 1
+
+-- by name (highest rank you know), a specific rank, and a link
+local name = GetSpellInfo("Fireball")
+local _, rank = GetSpellInfo("Mind Blast (Rank 8)")  -- rank="Rank 8"
+local _, _, _, _, _, _, _, _, _, id = GetSpellInfo(GetSpellLink(133))
 ```
+
+The same name and link forms work for `GetSpellLink`, `IsPassiveSpell`,
+`IsHarmfulSpell`, and `IsHelpfulSpell`, which share this resolver.
 
 > **Note on the 10th return.** Modern WoW (5.0+) added the spellID as
 > the 14th return of its slimmer signature. We kept the existing 9
