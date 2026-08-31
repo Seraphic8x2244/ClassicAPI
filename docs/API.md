@@ -257,6 +257,7 @@ build instructions.
 
 - [Globals](#globals)
   - [`CLASSIC_API_VERSION`](#classic_api_version)
+  - [`INTERFACE_VERSION`](#interface_version)
   - [`LE_EXPANSION_*`](#le_expansion_)
   - [`LE_ITEM_QUALITY_*`](#le_item_quality_)
   - [`LE_UNIT_STAT_*`](#le_unit_stat_)
@@ -6035,6 +6036,17 @@ If you specifically want to detect a dev build:
 if CLASSIC_API_VERSION == 99999999 then
     -- running against a locally-built, untagged DLL
 end
+```
+
+### `INTERFACE_VERSION`
+
+The client's interface (TOC) version number — `11200` on this client. This is
+the number the addon loader checks each addon's `## Interface:` line against,
+so it's the right value to compare a required version to. Read from the engine
+and re-published on every `/reload`.
+
+```lua
+if INTERFACE_VERSION >= 11200 then ... end
 ```
 
 ### `LE_EXPANSION_*`

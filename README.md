@@ -225,7 +225,7 @@ when launching with `-console`), not as Lua functions. See the
 
 | Group | Constants |
 |-------|-----------|
-| Version | `CLASSIC_API_VERSION` |
+| Version | `CLASSIC_API_VERSION`, `INTERFACE_VERSION` |
 | Expansion | `LE_EXPANSION_LEVEL_CURRENT`, `LE_EXPANSION_CLASSIC` … `LE_EXPANSION_MIDNIGHT` |
 | Item quality | `LE_ITEM_QUALITY_POOR` … `LE_ITEM_QUALITY_WOWTOKEN` |
 | Unit stat | `LE_UNIT_STAT_STRENGTH` … `LE_UNIT_STAT_SPIRIT` |
