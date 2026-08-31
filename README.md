@@ -22,18 +22,18 @@ The flagship feature: run modern Lua 5.1 addon code on 1.12's Lua 5.0 VM.
 | Feature | Effect |
 |---------|--------|
 | [Syntax](docs/API.md#lua-51-syntax) | Compiles the Lua 5.1 length (`#`), modulo (`%`), `...`-expression, `0x` hex-literal, and leveled long bracket (`[=[ ]=]`) syntax that vanilla's Lua 5.0 rejects, by rewriting addon source before it compiles. Each addon file also receives its `(name, table)` through `...` (`local name, tbl = ...`). |
-| [String methods](docs/API.md#string-methods-supper-sformat) | Every string value accepts method calls — `("asd"):upper()`, `("%d gold"):format(n)`, `msg:match("^!(%w+)")` — resolving through the `string` table, the way Lua 5.1 works. Vanilla's Lua 5.0 errors with `attempt to index a string value`. Works on literals and variables, in-world and on the login screen, and inside coroutines. |
-| [Script-handler arguments](docs/API.md#setmodernscriptargsenable--getmodernscriptargs) | Frame-script handlers receive their values as positional arguments — `OnMouseWheel(self, delta)`, `OnClick(self, button)`, `OnEvent(self, event, ...)`, etc. — the way 5.1+ clients do, so modern addon ports work unmodified. The `this` / `arg1` globals stay set. A handler that declares no parameters is unaffected. A handler that declared a parameter and expected nil now receives its real value. On by default. `SetModernScriptArgs(false)` restores exact vanilla dispatch. |
+| [String methods](docs/API.md#string-methods-supper-sformat) | Every string value accepts method calls — `("asd"):upper()`, `("%d gold"):format(n)`, `msg:match("^!(%w+)")` — resolving through the `string` table, the way Lua 5.1 works. Works on literals and variables, in-world and on the login screen, and inside coroutines. |
+| [Script-handler arguments](docs/API.md#setmodernscriptargsenable--getmodernscriptargs) | Frame-script handlers receive their values as positional arguments — `OnMouseWheel(self, delta)`, `OnClick(self, button)`, `OnEvent(self, event, ...)`, etc. — so modern addon ports work unmodified. The `this` / `arg1` globals stay set. A handler that declares no parameters is unaffected. A handler that declared a parameter and expected nil now receives its real value. On by default. `SetModernScriptArgs(false)` restores exact vanilla dispatch. |
 
 ### Modern client behaviors
 
 | Feature | Effect |
 |---------|--------|
-| Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips, the way 4.3.4+ clients do. Vanilla 1.12 shows the raw escape as literal text instead. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
+| Inline textures | Draws inline texture markup (`\|T…\|t`) as icons in FontStrings, chat, and tooltips. This covers item and spell icons, raid-target markers, and the coin icons in money strings. `GetStringWidth` and `GetStringHeight` count the icons, so measured width and text wrapping stay correct. Done in pure C++ by hooking the engine's text pipeline — no addon. |
 | Tooltip line cap | Lifts `GameTooltip`'s hard 30-line limit to 60 for every `GameTooltipTemplate` frame (`GameTooltip`, `ShoppingTooltip1/2`, `ItemRefTooltip`, AtlasLoot, …). Stat-heavy tooltips and comparison blocks (e.g. pfUI's eqcompare) no longer have their extra lines silently dropped. Done in pure C++ by growing the engine's FontString pool at tooltip-creation time. |
-| [Event-driven nameplates](docs/API.md#nameplate) | The modern `C_NamePlate` API, driven by real events instead of vanilla frame-scraping. `NAME_PLATE_UNIT_ADDED` / `NAME_PLATE_UNIT_REMOVED` fire as plates appear and vanish, `nameplate1`..`nameplateN` tokens resolve with every `UnitX` function (and fire `UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "nameplateN"`), and `C_NamePlate.GetNamePlateForUnit` / `GetNamePlates` hand back the live frames. |
-| [Focus target](docs/API.md#focus) | A sticky focus unit, like later clients. `FocusUnit("target")` pins it and `ClearFocus()` drops it, with `PLAYER_FOCUS_CHANGED` on every change. The `focus` / `focustarget` tokens resolve with every `UnitX` function and fire unit events (`UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "focus"`), and the predefined `FOCUSTARGET` / `TARGETFOCUS` keybinds are ready to set. |
-| [Retail-like `/reload`](docs/API.md#reload-picks-up-new-addons-and-new-files) | `/reload` picks up addon changes made while the game runs, like a modern client. A new folder under `Interface\AddOns\` registers and loads as a normal addon, new files added to an existing addon's TOC load, a newly installed addon's first SavedVariables save survives `/reload`, `##` metadata edits (`## SavedVariables:`, `## Dependencies:`, `## Title:`, …) take effect, and a deleted addon folder drops from the addon list. A stock client needs a full restart for all of these. |
+| [Event-driven nameplates](docs/API.md#nameplate) | The modern `C_NamePlate` API, driven by real events. `NAME_PLATE_UNIT_ADDED` / `NAME_PLATE_UNIT_REMOVED` fire as plates appear and vanish, `nameplate1`..`nameplateN` tokens resolve with every `UnitX` function (and fire `UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "nameplateN"`), and `C_NamePlate.GetNamePlateForUnit` / `GetNamePlates` hand back the live frames. |
+| [Focus target](docs/API.md#focus) | A sticky focus unit. `FocusUnit("target")` pins it and `ClearFocus()` drops it, with `PLAYER_FOCUS_CHANGED` on every change. The `focus` / `focustarget` tokens resolve with every `UnitX` function and fire unit events (`UNIT_HEALTH`, `UNIT_AURA`, … as `arg1 == "focus"`), and the predefined `FOCUSTARGET` / `TARGETFOCUS` keybinds are ready to set. |
+| [Retail-like `/reload`](docs/API.md#reload-picks-up-new-addons-and-new-files) | `/reload` picks up addon changes made while the game runs. A new folder under `Interface\AddOns\` registers and loads as a normal addon, new files added to an existing addon's TOC load, a newly installed addon's first SavedVariables save survives `/reload`, `##` metadata edits (`## SavedVariables:`, `## Dependencies:`, `## Title:`, …) take effect, and a deleted addon folder drops from the addon list. |
 | [Multi-flavor & conditional TOC](docs/API.md#conditional-and-multi-flavor-toc-loading) | Loads modern multi-flavor addons that ship one folder. Selects a version-specific TOC (`<Name>_ClassicAPI.toc` or `<Name>_Turtle.toc`) and the matching keybinding file (`Bindings_ClassicAPI.xml` / `Bindings_Turtle.xml`), accepts a comma-separated `## Interface:` version list (compatible when it includes the client version `11200`), and honors per-line `[AllowLoadGameType]` / `[AllowLoadTextLocale]` conditions and `[Family]` / `[Game]` / `[TextLocale]` path variables inside a TOC. |
 
 ## Full API reference
@@ -116,9 +116,7 @@ reference in **[docs/API.md](docs/API.md)**.
 Registered on the **glue** Lua state (the engine that runs the login,
 realm-select, and character-select screens). The persistence entries
 in the first row are *glue-only* — they exist to support GlueXML
-patches that need a small persistence surface across sessions, since
-vanilla 1.12 glue ships no general-purpose persistence API beyond
-`GetSavedAccountName`/`SetSavedAccountName` (saturated by autologin).
+patches that need a small persistence surface across sessions.
 The rest of the table is in-game calls that we also mirror onto
 the glue state because GlueXML had no way to reach them otherwise.
 
@@ -137,7 +135,7 @@ the glue state because GlueXML had no way to reach them otherwise.
 <summary><b>Macros</b> — engine-level parsing extensions</summary>
 
 Engine-level extensions to macro parsing and dispatch — no new Lua
-functions, just behavior the stock 1.12 engine didn't have. See the
+functions. See the
 [Macros section in the Lua reference](docs/API.md#macros) for details.
 
 | Form | What it does |
@@ -255,7 +253,7 @@ when launching with `-console`), not as Lua functions. See the
 <details>
 <summary><b>Bindings</b> — direct-action and override binding families</summary>
 
-ClassicAPI backports the later-client direct-action and temporary override
+ClassicAPI backports the direct-action and temporary override
 binding families. Permanent bindings use the standard `SPELL`, `ITEM`,
 `MACRO`, and `CLICK` command strings and can be saved normally. Overrides are
 session-only, frame-owned, and support the usual priority flag.
@@ -336,7 +334,7 @@ identically in both cases.
 ## Bundled addon: DebugTools
 
 A 1.12.1 / Lua 5.0 backport of Blizzard's `Blizzard_DebugTools` addon
-(originally shipped with the 3.0 client) lives in [`AddOns/DebugTools/`](AddOns/DebugTools/).
+lives in [`AddOns/DebugTools/`](AddOns/DebugTools/).
 It's an independent addon — it doesn't use anything ClassicAPI adds, and
 ClassicAPI works fine without it. It's bundled here because it's the
 natural companion for testing and debugging anything written against the
@@ -351,12 +349,11 @@ Slash commands provided:
 | `/framestack` (or `/fstack`) | Tooltip showing the frame hierarchy under the mouse cursor. |
 | `/luaerrors` (or `/scripterrors`) | Lua error display window. |
 
-Lua globals provided (backports of 3.3.5 helpers that don't exist in
-1.12):
+Lua globals provided (backports of Blizzard helpers):
 
 | Global | Purpose |
 |--------|---------|
-| `print(...)` | Backport of the 3.3.5 `print` — concats varargs with `" "` and pushes to `DEFAULT_CHAT_FRAME`. Routes through `setprinthandler`'s handler; falls back via `geterrorhandler` if the handler errors. |
+| `print(...)` | Backport of Blizzard's `print` — concats varargs with `" "` and pushes to `DEFAULT_CHAT_FRAME`. Routes through `setprinthandler`'s handler; falls back via `geterrorhandler` if the handler errors. |
 | `setprinthandler(func)` / `getprinthandler()` | Install / query a custom print handler. Useful for redirecting print output in tests. |
 | `tostringall(...)` | Apply `tostring()` to every vararg, preserving the count. Lua 5.0-compatible (uses `arg.n` since `select` doesn't exist in 5.0). |
 
