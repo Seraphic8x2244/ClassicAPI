@@ -22,6 +22,7 @@
 //   HasFocus                                — does this box own keyboard focus
 //   HasText                                 — is the box non-empty
 //   Set/GetHighlightColor                   — the text-selection highlight color
+//   ClearHistory                            — empty the up/down input history
 //
 // The engine already stores and manipulates all of this; we just expose it.
 // Every method is registered on the EditBox method registry, so — like any
@@ -48,6 +49,7 @@ using CollapseSelection_t = void(__thiscall *)(void *editbox);
 using CountChars_t = int(__thiscall *)(void *editbox, int startByte, int byteCount);
 using RegionSetColor_t = void(__thiscall *)(void *region, const uint32_t *colorBGRA);
 using RegionGetColor_t = void(__thiscall *)(void *region, uint32_t *outBGRA);
+using SetHistoryMax_t = void(__thiscall *)(void *editbox, int maxLines);
 
 // A Lua color arg (0..1) clamped and scaled to a 0..255 byte, matching the
 // engine's own float->byte color conversion (truncating, like Texture's
@@ -197,6 +199,27 @@ int __fastcall Script_GetHighlightColor(void *L) {
     return 4;
 }
 
+// Empties the up/down input history, keeping the line limit so the box keeps
+// recording afterward. The engine's SetHistoryLines internal frees the whole
+// ring at max 0, so clear = free (0) then reallocate at the saved max — which
+// drops every entry and resets the write position. No-op when history was
+// never enabled (max 0).
+int __fastcall Script_ClearHistory(void *L) {
+    void *eb = Game::Lua::ResolveObject(L, 1);
+    if (eb == nullptr) {
+        Game::Lua::Error(L, "Usage: EditBox:ClearHistory()");
+        return 0;
+    }
+    const int max = Game::Read<int>(eb, Offsets::OFF_EDITBOX_HISTORY_MAX);
+    if (max > 0) {
+        auto setMax = reinterpret_cast<SetHistoryMax_t>(
+            Offsets::FUN_EDITBOX_SET_HISTORY_MAX);
+        setMax(eb, 0);
+        setMax(eb, max);
+    }
+    return 0;
+}
+
 const Game::Lua::FrameMethodEntry g_methods[] = {
     {"SetCursorPosition", &Script_SetCursorPosition},
     {"GetCursorPosition", &Script_GetCursorPosition},
@@ -206,6 +229,7 @@ const Game::Lua::FrameMethodEntry g_methods[] = {
     {"HasText", &Script_HasText},
     {"SetHighlightColor", &Script_SetHighlightColor},
     {"GetHighlightColor", &Script_GetHighlightColor},
+    {"ClearHistory", &Script_ClearHistory},
 };
 
 void RegisterLuaFunctions() {

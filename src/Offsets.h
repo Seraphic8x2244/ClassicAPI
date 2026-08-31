@@ -7621,6 +7621,17 @@ enum Offsets {
     // the generic region color accessors. The blinking caret is a SEPARATE
     // region at +0x3d4, deliberately left alone.
     OFF_EDITBOX_HIGHLIGHT_REGION = 0x350,
+    // Input-history ring buffer: max lines (ring capacity) at +0x388 (what
+    // GetHistoryLines reads), write position at +0x38c, container
+    // {size@+0x390, alloc@+0x394, data@+0x398} of {char* text, int exec}
+    // entries. AddHistoryLine writes at +0x38c and advances modulo +0x388.
+    OFF_EDITBOX_HISTORY_MAX = 0x388,
+    // `void __thiscall(editbox, int maxLines)` — the SetHistoryLines internal
+    // (FUN_0077cd90). Reallocates the history ring to maxLines; maxLines == 0
+    // frees the whole buffer and zeroes the container. ClearHistory calls it
+    // with 0 then the saved max — empties every entry and resets the write
+    // position while keeping the limit (so recording still works after).
+    FUN_EDITBOX_SET_HISTORY_MAX = 0x0077cd90,
 
     // --- FontString measure internals (GetStringWidth icon fix + GetStringHeight) ---
     // CSimpleFontString::GetStringWidthInternal — `float(__fastcall)(fs /*ecx*/)`,

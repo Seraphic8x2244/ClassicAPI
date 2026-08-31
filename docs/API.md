@@ -202,6 +202,7 @@ build instructions.
   - [`editBox:HasText()`](#editboxhastext)
   - [`editBox:SetHighlightColor(r, g, b [, a])`](#editboxsethighlightcolorr-g-b--a)
   - [`editBox:GetHighlightColor()`](#editboxgethighlightcolor)
+  - [`editBox:ClearHistory()`](#editboxclearhistory)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -4698,6 +4699,12 @@ ChatFrameEditBox:SetHighlightColor(1, 0, 0)   -- red selection
 
 Returns the selection-highlight color as four numbers: `r, g, b, a`, each `0`
 to `1`.
+
+### `editBox:ClearHistory()`
+
+Removes every line from the up/down input history. The history line limit
+(`SetHistoryLines`) stays, so the box keeps recording new lines afterward.
+Does nothing when the box has no history.
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`
 
