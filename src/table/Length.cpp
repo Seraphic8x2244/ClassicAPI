@@ -49,31 +49,49 @@
 //      `n` field is the 5.0 vararg-table contract (`arg` = {n=3, holes}),
 //      where trailing nils are intentional — healing it would corrupt
 //      vararg counts.
-//   3. `t[n]` nil, no `t.n`: scan down for the true border `b`. Heal to `b`
-//      ONLY when the stored length overshoots it by more than one slot
-//      (`n - b > 1`) — a cleared-and-reused table (Dewdrop's menus) is stale
-//      by many slots. When it overshoots by exactly one (`n - b == 1`), the
-//      nil at slot `n` is a legitimate 5.0 append slot — `table.insert(t, nil)`
-//      writes `t[n]=nil` and `setn(n)` — so keep the stored length; healing it
-//      would make the NEXT append overwrite that slot and shift every element
-//      after it down by one (issue #36: Ace2/Waterfall's `{key,val,…}` builders
-//      that append a nil value corrupt silently). Read-only — no write-back,
-//      so a length read never mutates state; the engine's own `table.insert`
-//      calls `luaL_setn(n+1)` on the next append, which re-syncs the stored
-//      length by itself.
+//   3. `t[n]` nil, no `t.n`: scan down for the true border `b` and heal to
+//      it (the 5.1 answer) — UNLESS the nil at slot `n` is a deliberate
+//      `table.insert(t, nil)` append slot, detected by the writer-side mark
+//      below, in which case keep the stored length. Read-only — no
+//      write-back, so a length read never mutates state; the engine's own
+//      `table.insert` calls `luaL_setn(n+1)` on the next append, which
+//      re-syncs the stored length by itself.
 //
-// Why the gap test and not caller-gating: both Dewdrop (clear + rebuild via
-// `table.insert`, Length.cpp's raison d'être) and Waterfall reach here THROUGH
-// `table.insert`, so the caller can't tell them apart — only the staleness gap
-// can. A cleared table is empty below `n` (large gap); a deliberate nil append
-// is dense below `n` (gap 1). The gap is a heuristic (two consecutive nil
-// appends would read as a cleared table), but consecutive nil appends are
-// pathological, while single nil appends between real values are the common
-// Ace2 idiom.
+// Why a writer-side mark (the tinsert co-hook) and not a state heuristic: a
+// deliberate 5.0 nil append (`table.insert(t, nil)` — writes `t[n]=nil` +
+// `setn(n)`; issue #36: Waterfall's `{key,val,…}` builders append a nil for
+// every option without a passValue, and the next insert must land AFTER the
+// reserved slot) and a cleared-and-reused table that happens to be stale by
+// exactly one (a one-element table pairs-cleared, or a recycled table whose
+// previous life was one slot longer — Tablet-2.0's `del()`/`copy()` pool
+// recycles per tooltip refresh, so this is everyday traffic) leave the table
+// in BYTE-IDENTICAL states: stored `n`, dense below, `t[n]` nil, no `t.n`.
+// No inspection of the table can split them, and caller-gating can't either
+// (both reach here through `table.insert`). v1.12.8 tried a staleness-gap
+// heuristic (keep when `n - b == 1`) and it corrupted the second group —
+// issue #39, FuBar/Tablet/Dewdrop menus and tooltips shifting by one with a
+// nil hole at slot 1. Only the WRITER knows which dialect the table speaks,
+// and the write is observable: a co-hook on `table.insert`
+// (FUN_LUA_TABLE_INSERT) records `t → storedN` in a weak-keyed registry
+// table whenever the two-arg form appends a literal nil. Rule 3 keeps the
+// stored length only for a marked table whose mark still equals `n`; every
+// unmarked off-by-one table heals. A stale mark dies on its own: any later
+// append/remove moves the stored length away from the recorded value, and
+// the weak key lets a dead table's entry be collected.
+//
+// Note real Lua 5.1 gives the HEAL answer even for the deliberate append
+// (`#`-based tinsert drops a trailing nil and the next insert overwrites
+// it), so keeping the slot is deliberately 5.0-native behavior for
+// 5.0-dialect writers — Waterfall's builder runs on the 5.0 `arg` vararg
+// table and predates 5.1. 5.1-dialect code never relies on insert(t, nil)
+// reserving a slot, because on real 5.1 it doesn't.
+//
+// Positional nil insertion (`table.insert(t, pos, nil)`) is not marked and
+// heals; no consumer is known, and 5.0 itself makes it a shifted no-op.
 //
 // `table.setn` itself still works for code that calls it — the heal only
-// changes the answer when the stored length points more than one slot past
-// the border, which is the same answer real 5.1 would give.
+// changes the answer when the stored length points past the border and no
+// mark vouches for it, which is the same answer real 5.1 would give.
 
 #include "Game.h"
 #include "Offsets.h"
@@ -86,6 +104,11 @@ using LuaLGetN_t = int(__fastcall *)(void *L, int idx);
 using RawGetI_t = void(__fastcall *)(void *L, int idx, int n);
 
 LuaLGetN_t g_getnOriginal = nullptr;
+Game::Lua::CFunction g_tinsertOriginal = nullptr;
+
+// Registry key of the weak-keyed mark table: `marks[t] = storedN` recorded
+// at the moment `table.insert(t, nil)` reserved slot `storedN`.
+constexpr char kMarkKey[] = "ClassicAPI_TrailingNilMark";
 
 // True if t[k] (rawgeti) is nil. Balances the stack.
 bool SlotIsNil(void *L, int absIdx, int k) {
@@ -93,6 +116,64 @@ bool SlotIsNil(void *L, int absIdx, int k) {
     const bool isNil = Game::Lua::Type(L, -1) == Game::Lua::TYPE_NIL;
     Game::Lua::SetTop(L, -2);
     return isNil;
+}
+
+// Pushes the mark table, creating `registry[kMarkKey] = setmetatable({},
+// {__mode = "k"})` on first use (per Lua state — the registry survives
+// `/reload` because the state is reused, and the marked tables survive with
+// it). Leaves exactly one value on the stack.
+void PushMarkTable(void *L) {
+    Game::Lua::PushString(L, kMarkKey);
+    Game::Lua::RawGet(L, Game::Lua::REGISTRY_INDEX);
+    if (Game::Lua::Type(L, -1) == Game::Lua::TYPE_TABLE)
+        return;
+    Game::Lua::SetTop(L, -2);      // pop the nil.            []
+    Game::Lua::NewTable(L);        //                         [marks]
+    Game::Lua::NewTable(L);        //                         [marks, meta]
+    Game::Lua::PushString(L, "__mode");
+    Game::Lua::PushString(L, "k");
+    Game::Lua::RawSet(L, -3);      // meta.__mode = "k".      [marks, meta]
+    Game::Lua::SetMetatable(L, -2);// pops meta.              [marks]
+    Game::Lua::PushString(L, kMarkKey);
+    Game::Lua::PushValue(L, -2);   //                         [marks, key, marks]
+    Game::Lua::RawSet(L, Game::Lua::REGISTRY_INDEX); //       [marks]
+}
+
+// True when `marks[t] == n` — the nil at slot `n` was written by a
+// deliberate `table.insert(t, nil)` and nothing has moved the stored
+// length since. Balances the stack.
+bool HasTrailingNilMark(void *L, int absIdx, int n) {
+    PushMarkTable(L);                 // [marks]
+    Game::Lua::PushValue(L, absIdx);  // [marks, t]
+    Game::Lua::RawGet(L, -2);         // [marks, marks[t]]
+    const bool match =
+        Game::Lua::Type(L, -1) == Game::Lua::TYPE_NUMBER &&
+        static_cast<int>(Game::Lua::ToNumber(L, -1)) == n;
+    Game::Lua::SetTop(L, -3);         // pop both
+    return match;
+}
+
+// Co-hook on the engine's `table.insert` (both `table.insert` and the
+// `tinsert` alias are this one C function). The two-arg form appending a
+// literal nil is the 5.0 idiom that must keep its reserved slot; record it
+// so rule 3 can tell it apart from an identically-shaped stale table. The
+// detection runs before the original (the arg stack is caller-owned, so
+// index 1 still holds the table afterwards); the mark reads the raw stored
+// length the original's `luaL_setn` just wrote.
+int __fastcall TableInsert_h(void *L) {
+    const bool nilAppend = Game::Lua::GetTop(L) == 2 &&
+                           Game::Lua::Type(L, 1) == Game::Lua::TYPE_TABLE &&
+                           Game::Lua::Type(L, 2) == Game::Lua::TYPE_NIL;
+    const int ret = g_tinsertOriginal(L);
+    if (nilAppend) {
+        const int storedN = g_getnOriginal(L, 1);
+        PushMarkTable(L);              // [marks]
+        Game::Lua::PushValue(L, 1);    // [marks, t]
+        Game::Lua::PushNumber(L, storedN);
+        Game::Lua::RawSet(L, -3);      // marks[t] = storedN.  [marks]
+        Game::Lua::SetTop(L, -2);      // pop marks
+    }
+    return ret;
 }
 
 int __fastcall LuaLGetN_h(void *L, int idx) {
@@ -125,20 +206,24 @@ int __fastcall LuaLGetN_h(void *L, int idx) {
     while (b > 0 && SlotIsNil(L, absIdx, b))
         --b;
 
-    // Overshoots the border by exactly one slot: a legitimate 5.0 nil append
-    // (`table.insert(t, nil)`) sits in a dense array, not a cleared table.
-    // Keep the stored length so the next append lands after the nil, not on it.
-    if (n - b <= 1)
+    // Stored length exactly one past the border: either a deliberate
+    // `table.insert(t, nil)` reserved slot (keep — issue #36) or a cleared /
+    // recycled table stale by one (heal — issue #39). The states are
+    // identical; only the writer-side mark recorded by `TableInsert_h` can
+    // tell them apart.
+    if (n - b == 1 && HasTrailingNilMark(L, absIdx, n))
         return n;
 
-    // Stale by more than one slot — a cleared-and-reused table. Heal to the
-    // border, the 5.1 answer.
+    // Stale — heal to the border, the 5.1 answer.
     return b;
 }
 
 const Game::HookAutoRegister _hook{Offsets::LUAL_GETN,
                                    reinterpret_cast<void *>(&LuaLGetN_h),
                                    reinterpret_cast<void **>(&g_getnOriginal)};
+const Game::HookAutoRegister _hookInsert{
+    Offsets::FUN_LUA_TABLE_INSERT, reinterpret_cast<void *>(&TableInsert_h),
+    reinterpret_cast<void **>(&g_tinsertOriginal)};
 
 } // namespace
 

@@ -4866,6 +4866,11 @@ enum Offsets {
     // Verified in docs/LuaCAPI.md and by the getfenv/getmetatable base-lib
     // functions that call it. Used by the `__environment` env-protection hook.
     LUA_GET_METATABLE = 0x6F3CF0,
+    // `lua_setmetatable(L, objindex)` — pops the table at the top of the
+    // stack and installs it as the metatable of the value at objindex;
+    // returns 1. Catalogued (★-verified) in docs/LuaCAPI.md. Used by
+    // Table::Length to build its weak-keyed mark table from C.
+    LUA_SET_METATABLE = 0x6F4020,
     // `lua_getfenv(L, idx)` — pushes the environment table of the function
     // (or userdata/thread) at `idx`. The getfenv/setfenv base-lib code calls
     // it to read a function's environment before the protection check.
@@ -4945,6 +4950,16 @@ enum Offsets {
     // (named there since the table.insert trace). Used by the 5.1
     // `unpack(list, i, j)` upgrade for the default range end.
     LUAL_GETN = 0x6F5050,
+    // `table.insert` (5.0 `luaB_tinsert`), `int __fastcall(L)`. Found two
+    // independent ways: the table-lib luaL_reg pair in .data (entry
+    // {name 0x008821B4 "insert", func} at 0x00822D70) and the LUAL_SETN
+    // caller trace above. Decompile matches 5.0.2 tinsert exactly:
+    // lua_gettop → luaL_checktype(1, TABLE) → n = luaL_getn(1)+1 →
+    // optional-pos shift-up loop (rawgeti/rawseti) → luaL_setn(1, n) →
+    // lua_pushvalue(value) → lua_rawseti(1, pos). Both `table.insert` and
+    // the FrameXML `tinsert` alias resolve to this one C function. Hooked
+    // by Table::Length to mark deliberate trailing-nil appends (#36/#39).
+    FUN_LUA_TABLE_INSERT = 0x7FB6B0,
     // `luaV_gettable(L, t, key, loop)` — the VM's generic index resolver.
     // __fastcall(L /*ecx*/, t /*edx*/, key /*stack*/, loop /*stack*/),
     // RET 8. Returns the result TValue* in eax (Ghidra types it void; the

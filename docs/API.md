@@ -9173,23 +9173,27 @@ removed `setn` entirely; lengths are computed from the table itself.
 ClassicAPI gives you the 5.1 behavior — code written for Lua 5.1 (or
 that detects it) can skip `setn` and still get correct lengths.
 
-When the stored length points more than one slot past the last value,
-and the table has no explicit `n` field, `table.getn` — and everything
-built on it: `table.insert`, `table.remove`, `table.concat`,
-`table.sort`, `table.foreachi`, `unpack` — returns the true border, the
-same answer Lua 5.1 gives. Three things deliberately keep their old
-behavior:
+When the stored length points past the last value, and the table has no
+explicit `n` field, `table.getn` — and everything built on it:
+`table.insert`, `table.remove`, `table.concat`, `table.sort`,
+`table.foreachi`, `unpack` — returns the true border, the same answer
+Lua 5.1 gives. This includes a table that is stale by exactly one slot
+(a one-element table that was cleared, or a recycled table whose
+previous use was one slot longer). Three things deliberately keep their
+old behavior:
 
 - A table with an explicit numeric `n` field (the vararg `arg` contract)
   keeps its stored count, so trailing nils survive
   (`unpack({10, nil, 30, n = 3})` still returns all three slots).
-- A single trailing nil kept on purpose (`table.insert(t, nil)`) is a
-  valid empty slot, not a stale length. The stored length stays as it is,
-  so the next `table.insert` adds after the nil and does not write over it.
-  The heal starts only when the stored length is more than one slot too
-  large — the sign of a table that was cleared but not reset.
+- A trailing nil appended by `table.insert(t, nil)` is a valid empty
+  slot, not a stale length. ClassicAPI remembers the append itself, so
+  the stored length stays as it is and the next `table.insert` adds
+  after the nil rather than writing over it. This is the Lua 5.0
+  behavior that Ace2-era argument builders depend on. Only the two-arg
+  append form is remembered; `table.insert(t, pos, nil)` is not.
 - `table.setn` still works; the heal only changes the answer when the
-  stored length points more than one slot past the last value.
+  stored length points past the last value and the nil was not put
+  there by `table.insert`.
 
 ### `Mixin(object, ...)` / `CreateFromMixins(...)`
 
