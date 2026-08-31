@@ -1901,6 +1901,11 @@ enum Offsets {
     VAR_FRAME_METHOD_REGISTRY = 0x00CF4D38,
     VAR_TEXTURE_METHOD_REGISTRY = 0x00CF5434,
     VAR_FONTSTRING_METHOD_REGISTRY = 0x00CF5400,
+    // EditBox — 48 methods (table 0x0087BB68), ctx per
+    // docs/BlizzardScriptAPI.md. Backs `EditBox:SetCursorPosition` /
+    // `GetCursorPosition` (`EditBox::Cursor`), the modern cursor methods
+    // vanilla's EditBox lacks.
+    VAR_EDITBOX_METHOD_REGISTRY = 0x00CF5378,
 
     // Model frame — backs `Model:SetDisplayInfo(creatureDisplayID)`
     // (`Model::DisplayInfo`). Registry ctx per docs/raw_methods.txt (table
@@ -7573,6 +7578,29 @@ enum Offsets {
     // buffers. Verified: FUN_00771d80 (FontString SetText) writes the copy to
     // *(this+0xF0) via SStrDup.
     OFF_EDITBOX_TEXT_FONTSTRING = 0x328, // CSimpleFontString* — the display text object
+
+    // CSimpleEditBox cursor / selection internals (backs EditBox::Cursor's
+    // SetCursorPosition / GetCursorPosition). Verified from the engine's own
+    // HighlightText (FUN_00798870 → FUN_0077cca0) and Insert (FUN_00798400 →
+    // FUN_0077bee0) paths:
+    //   +0x31c dirty-flag dword — bit 2 = selection/highlight changed, bit 4 =
+    //          cursor changed (both trigger the next-paint relayout).
+    //   +0x338 text length in BYTES (the clamp bound below).
+    //   +0x35c / +0x360 selection start / end (byte offsets).
+    //   +0x36c cursor insertion point, a BYTE offset — matches modern WoW's
+    //          byte-based EditBox cursor (GetCursorPosition returns bytes; for
+    //          ASCII text byte == character).
+    OFF_EDITBOX_FLAGS = 0x31c,
+    OFF_EDITBOX_CURSOR_BYTE = 0x36c,
+    // `void __thiscall(editbox, byteOffset)` — sets the cursor to a byte
+    // offset, clamping to [0, textByteLen] and OR-ing the +0x31c cursor-dirty
+    // bit. The engine's own "restore cursor" primitive (called from the insert
+    // path FUN_0077bee0 to put the caret back after splicing text).
+    FUN_EDITBOX_SET_CURSOR_BYTE = 0x0077e360,
+    // `void __thiscall(editbox)` — collapses the selection onto the cursor
+    // (selStart = selEnd = +0x36c). The engine's own "clear selection to the
+    // caret" helper (FUN_0077ccf0), used before extending a shift-selection.
+    FUN_EDITBOX_COLLAPSE_SELECTION = 0x0077ccf0,
 
     // --- FontString measure internals (GetStringWidth icon fix + GetStringHeight) ---
     // CSimpleFontString::GetStringWidthInternal — `float(__fastcall)(fs /*ecx*/)`,

@@ -194,6 +194,8 @@ build instructions.
   - [`texture:GetMaskTexture(index)`](#texturegetmasktextureindex)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
+  - [`editBox:SetCursorPosition(position)`](#editboxsetcursorpositionposition)
+  - [`editBox:GetCursorPosition()`](#editboxgetcursorposition)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -4630,6 +4632,29 @@ fs:SetPoint("CENTER")
 fs:SetText("Rotate me")
 fs:SetRotation(math.rad(45))     -- 45 degrees counter-clockwise
 fs:SetRotation(0)                -- back to upright
+```
+
+### `editBox:SetCursorPosition(position)`
+
+Moves the text cursor to `position` in the edit box, and clears any selected
+text. `position` is a 0-based offset in bytes. For plain ASCII text a byte
+offset is the same as a character index. The engine limits an out-of-range
+value to the text length, so `editBox:SetCursorPosition(string.len(text))`
+always lands at the end.
+
+Vanilla's edit box has `HighlightText` but no cursor accessor. Modern addons
+that set the text and then place the cursor — autocomplete popups, chat
+helpers — call this method.
+
+### `editBox:GetCursorPosition()`
+
+Returns the cursor's current offset in the edit box, in bytes.
+
+```lua
+local box = ChatFrameEditBox
+box:SetText("hello world")
+box:SetCursorPosition(5)          -- cursor after "hello"
+print(box:GetCursorPosition())    -- 5
 ```
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`
