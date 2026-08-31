@@ -196,6 +196,10 @@ build instructions.
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`editBox:SetCursorPosition(position)`](#editboxsetcursorpositionposition)
   - [`editBox:GetCursorPosition()`](#editboxgetcursorposition)
+  - [`editBox:GetUTF8CursorPosition()`](#editboxgetutf8cursorposition)
+  - [`editBox:ClearHighlightText()`](#editboxclearhighlighttext)
+  - [`editBox:HasFocus()`](#editboxhasfocus)
+  - [`editBox:HasText()`](#editboxhastext)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -4656,6 +4660,27 @@ box:SetText("hello world")
 box:SetCursorPosition(5)          -- cursor after "hello"
 print(box:GetCursorPosition())    -- 5
 ```
+
+### `editBox:GetUTF8CursorPosition()`
+
+Returns the cursor position as a character count, not a byte count. For text
+with only ASCII characters this equals `GetCursorPosition`. For text with
+multibyte characters it counts characters, so the two values differ.
+
+### `editBox:ClearHighlightText()`
+
+Clears the selected text. The cursor stays where it is. Vanilla can clear a
+selection only with `HighlightText(0, 0)`, which moves the selection to the
+start. This method leaves the cursor in place.
+
+### `editBox:HasFocus()`
+
+Returns `true` if this edit box has keyboard focus. Vanilla has `SetFocus`
+and `ClearFocus` but no way to read the focus state.
+
+### `editBox:HasText()`
+
+Returns `true` if the edit box holds any text.
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`
 

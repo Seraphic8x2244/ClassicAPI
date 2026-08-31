@@ -1903,8 +1903,8 @@ enum Offsets {
     VAR_FONTSTRING_METHOD_REGISTRY = 0x00CF5400,
     // EditBox — 48 methods (table 0x0087BB68), ctx per
     // docs/BlizzardScriptAPI.md. Backs `EditBox:SetCursorPosition` /
-    // `GetCursorPosition` (`EditBox::Cursor`), the modern cursor methods
-    // vanilla's EditBox lacks.
+    // `GetCursorPosition` (`EditBox::Methods`), the modern cursor / focus /
+    // text-state methods vanilla's EditBox lacks.
     VAR_EDITBOX_METHOD_REGISTRY = 0x00CF5378,
 
     // Model frame — backs `Model:SetDisplayInfo(creatureDisplayID)`
@@ -7579,7 +7579,7 @@ enum Offsets {
     // *(this+0xF0) via SStrDup.
     OFF_EDITBOX_TEXT_FONTSTRING = 0x328, // CSimpleFontString* — the display text object
 
-    // CSimpleEditBox cursor / selection internals (backs EditBox::Cursor's
+    // CSimpleEditBox cursor / selection internals (backs EditBox::Methods'
     // SetCursorPosition / GetCursorPosition). Verified from the engine's own
     // HighlightText (FUN_00798870 → FUN_0077cca0) and Insert (FUN_00798400 →
     // FUN_0077bee0) paths:
@@ -7591,6 +7591,7 @@ enum Offsets {
     //          byte-based EditBox cursor (GetCursorPosition returns bytes; for
     //          ASCII text byte == character).
     OFF_EDITBOX_FLAGS = 0x31c,
+    OFF_EDITBOX_TEXT_LENGTH = 0x338,   // current text length in bytes
     OFF_EDITBOX_CURSOR_BYTE = 0x36c,
     // `void __thiscall(editbox, byteOffset)` — sets the cursor to a byte
     // offset, clamping to [0, textByteLen] and OR-ing the +0x31c cursor-dirty
@@ -7601,6 +7602,13 @@ enum Offsets {
     // (selStart = selEnd = +0x36c). The engine's own "clear selection to the
     // caret" helper (FUN_0077ccf0), used before extending a shift-selection.
     FUN_EDITBOX_COLLAPSE_SELECTION = 0x0077ccf0,
+    // `int __thiscall(editbox, startByteIndex, byteCount)` — counts CHARACTERS
+    // (UTF-8 codepoints) in a byte range, walking the per-byte char-class table
+    // at +0x330 (a byte begins a codepoint when its class is 2/3/6). So
+    // `COUNT_CHARS(eb, 0, cursorByteOffset)` is the cursor's character index —
+    // backs GetUTF8CursorPosition. Verified from the arrow-key mover
+    // FUN_0077cb20's own `FUN_0077bc80(this, byteOff, cursorByte - byteOff)`.
+    FUN_EDITBOX_COUNT_CHARS = 0x0077bc80,
 
     // --- FontString measure internals (GetStringWidth icon fix + GetStringHeight) ---
     // CSimpleFontString::GetStringWidthInternal — `float(__fastcall)(fs /*ecx*/)`,
