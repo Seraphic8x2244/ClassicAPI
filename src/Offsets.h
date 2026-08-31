@@ -299,7 +299,12 @@ enum Offsets {
     // the pointer at +0xB8 (both verified from the setters below). We read a
     // line's text/color and re-apply them one slot down, then set line 0.
     FUN_FONTSTRING_SET_TEXT = 0x00771D80,         // __thiscall(fs, text, flag=0)
-    FUN_FONTSTRING_SET_COLOR = 0x0077F750,        // __thiscall(fs, colorBGRA*)
+    FUN_FONTSTRING_SET_COLOR = 0x0077F750,        // __thiscall(region, colorBGRA*) — generic region color setter (fontstrings + textures)
+    // Generic region color GETTER — `void __thiscall(region, uint32* outBGRA)`,
+    // writes the packed {b,g,r,a} (0xFFFFFFFF when the region has no explicit
+    // color). The read half of Texture:GetVertexColor (FUN_0079aa50); paired
+    // with FUN_FONTSTRING_SET_COLOR above. Backs EditBox:GetHighlightColor.
+    FUN_REGION_GET_COLOR = 0x0077F8C0,
     OFF_FONTSTRING_TEXT = 0xF0,                   // char* — current text buffer
     OFF_FONTSTRING_COLOR_PTR = 0xB8,              // ptr → 4-byte {b,g,r,a} color storage
     // A line's FontString is only positioned once shown: set the desired
@@ -7609,6 +7614,13 @@ enum Offsets {
     // backs GetUTF8CursorPosition. Verified from the arrow-key mover
     // FUN_0077cb20's own `FUN_0077bc80(this, byteOff, cursorByte - byteOff)`.
     FUN_EDITBOX_COUNT_CHARS = 0x0077bc80,
+    // Selection-highlight regions — three consecutive CSimpleTexture pointers
+    // (start-line +0x350, middle-block +0x354, end-line +0x358) the editbox
+    // shows/positions to paint the selection (FUN_0077d950). Their vertex
+    // color IS the highlight color — Set/GetHighlightColor read/write it via
+    // the generic region color accessors. The blinking caret is a SEPARATE
+    // region at +0x3d4, deliberately left alone.
+    OFF_EDITBOX_HIGHLIGHT_REGION = 0x350,
 
     // --- FontString measure internals (GetStringWidth icon fix + GetStringHeight) ---
     // CSimpleFontString::GetStringWidthInternal — `float(__fastcall)(fs /*ecx*/)`,

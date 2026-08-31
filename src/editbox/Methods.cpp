@@ -21,6 +21,7 @@
 //   ClearHighlightText                      — drop the selection, keep the caret
 //   HasFocus                                — does this box own keyboard focus
 //   HasText                                 — is the box non-empty
+//   Set/GetHighlightColor                   — the text-selection highlight color
 //
 // The engine already stores and manipulates all of this; we just expose it.
 // Every method is registered on the EditBox method registry, so — like any
@@ -45,6 +46,20 @@ namespace {
 using SetCursorByte_t = void(__thiscall *)(void *editbox, int byteOffset);
 using CollapseSelection_t = void(__thiscall *)(void *editbox);
 using CountChars_t = int(__thiscall *)(void *editbox, int startByte, int byteCount);
+using RegionSetColor_t = void(__thiscall *)(void *region, const uint32_t *colorBGRA);
+using RegionGetColor_t = void(__thiscall *)(void *region, uint32_t *outBGRA);
+
+// A Lua color arg (0..1) clamped and scaled to a 0..255 byte, matching the
+// engine's own float->byte color conversion (truncating, like Texture's
+// SetVertexColor). `dflt` is used when the arg is absent.
+uint32_t ColorByte(void *L, int idx, double dflt) {
+    double v = Game::Lua::IsNumber(L, idx) ? Game::Lua::ToNumber(L, idx) : dflt;
+    if (v < 0.0)
+        v = 0.0;
+    else if (v > 1.0)
+        v = 1.0;
+    return static_cast<uint32_t>(v * 255.0);
+}
 
 int __fastcall Script_SetCursorPosition(void *L) {
     void *eb = Game::Lua::ResolveObject(L, 1);
@@ -133,6 +148,55 @@ int __fastcall Script_HasText(void *L) {
     return 1;
 }
 
+// SetHighlightColor(r, g, b [, a]) — the color of the text-selection highlight.
+// The engine paints the selection with three Texture regions (start-line,
+// middle-block, end-line); their vertex color is the highlight color, so set
+// it on all three via the engine's own region color setter. Colors are 0..1;
+// alpha defaults to 1. Takes effect on the next selection paint.
+int __fastcall Script_SetHighlightColor(void *L) {
+    void *eb = Game::Lua::ResolveObject(L, 1);
+    if (eb == nullptr || !Game::Lua::IsNumber(L, 2) ||
+        !Game::Lua::IsNumber(L, 3) || !Game::Lua::IsNumber(L, 4)) {
+        Game::Lua::Error(L, "Usage: EditBox:SetHighlightColor(r, g, b [, a])");
+        return 0;
+    }
+    const uint32_t r = ColorByte(L, 2, 1.0);
+    const uint32_t g = ColorByte(L, 3, 1.0);
+    const uint32_t b = ColorByte(L, 4, 1.0);
+    const uint32_t a = ColorByte(L, 5, 1.0);
+    const uint32_t packed = b | (g << 8) | (r << 16) | (a << 24); // {b,g,r,a}
+    auto setColor = reinterpret_cast<RegionSetColor_t>(
+        Offsets::FUN_FONTSTRING_SET_COLOR);
+    for (int off = Offsets::OFF_EDITBOX_HIGHLIGHT_REGION;
+         off <= Offsets::OFF_EDITBOX_HIGHLIGHT_REGION + 8; off += 4) {
+        void *region = Game::Read<void *>(eb, off);
+        if (region != nullptr)
+            setColor(region, &packed);
+    }
+    return 0;
+}
+
+// GetHighlightColor() -> r, g, b, a (each 0..1). Reads the color off the first
+// highlight region; a region with no explicit color reads back white (opaque).
+int __fastcall Script_GetHighlightColor(void *L) {
+    void *eb = Game::Lua::ResolveObject(L, 1);
+    if (eb == nullptr) {
+        Game::Lua::Error(L, "Usage: EditBox:GetHighlightColor()");
+        return 0;
+    }
+    uint32_t packed = 0xFFFFFFFF;
+    void *region = Game::Read<void *>(eb, Offsets::OFF_EDITBOX_HIGHLIGHT_REGION);
+    if (region != nullptr)
+        reinterpret_cast<RegionGetColor_t>(Offsets::FUN_REGION_GET_COLOR)(
+            region, &packed);
+    const double inv = 1.0 / 255.0;
+    Game::Lua::PushNumber(L, ((packed >> 16) & 0xff) * inv); // r
+    Game::Lua::PushNumber(L, ((packed >> 8) & 0xff) * inv);  // g
+    Game::Lua::PushNumber(L, (packed & 0xff) * inv);         // b
+    Game::Lua::PushNumber(L, ((packed >> 24) & 0xff) * inv); // a
+    return 4;
+}
+
 const Game::Lua::FrameMethodEntry g_methods[] = {
     {"SetCursorPosition", &Script_SetCursorPosition},
     {"GetCursorPosition", &Script_GetCursorPosition},
@@ -140,6 +204,8 @@ const Game::Lua::FrameMethodEntry g_methods[] = {
     {"ClearHighlightText", &Script_ClearHighlightText},
     {"HasFocus", &Script_HasFocus},
     {"HasText", &Script_HasText},
+    {"SetHighlightColor", &Script_SetHighlightColor},
+    {"GetHighlightColor", &Script_GetHighlightColor},
 };
 
 void RegisterLuaFunctions() {

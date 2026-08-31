@@ -200,6 +200,8 @@ build instructions.
   - [`editBox:ClearHighlightText()`](#editboxclearhighlighttext)
   - [`editBox:HasFocus()`](#editboxhasfocus)
   - [`editBox:HasText()`](#editboxhastext)
+  - [`editBox:SetHighlightColor(r, g, b [, a])`](#editboxsethighlightcolorr-g-b--a)
+  - [`editBox:GetHighlightColor()`](#editboxgethighlightcolor)
   - [`frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`](#framesetresizeboundsminwidth-minheight--maxwidth-maxheight)
   - [`frame:HookScript(scriptType, handler)`](#framehookscriptscripttype-handler)
   - [`frame:IsEventRegistered(event)`](#frameiseventregisteredevent)
@@ -4681,6 +4683,21 @@ and `ClearFocus` but no way to read the focus state.
 ### `editBox:HasText()`
 
 Returns `true` if the edit box holds any text.
+
+### `editBox:SetHighlightColor(r, g, b [, a])`
+
+Sets the color of the text-selection highlight. Each value is `0` to `1`.
+Alpha is optional and defaults to `1`. The new color shows the next time the
+box paints a selection.
+
+```lua
+ChatFrameEditBox:SetHighlightColor(1, 0, 0)   -- red selection
+```
+
+### `editBox:GetHighlightColor()`
+
+Returns the selection-highlight color as four numbers: `r, g, b, a`, each `0`
+to `1`.
 
 ### `frame:SetResizeBounds(minWidth, minHeight [, maxWidth, maxHeight])`
 
