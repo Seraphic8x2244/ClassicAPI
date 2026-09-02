@@ -180,6 +180,7 @@ constexpr int kInterruptDedupMs = 1000;
 
 int g_chanSpell = 0;
 int g_chanGuid = 0;
+int g_chanStart = 0; // startMs we last fired CHANNEL_START for (detects a recast)
 
 // castGUID minted at SENT, pending until the matching downstream event
 // (START / SUCCEEDED / FAILED for the same spell) consumes it — so all of
@@ -478,14 +479,28 @@ void PollPlayer(int castSpellID, int castStartMs, int castEndMs,
     }
 
     // ---- Channel ------------------------------------------------------
-    // Detect a new channel by spellID ONLY (not startMs): a channel is
-    // stamped twice at start — SMSG_SPELL_START, then MSG_CHANNEL_START
-    // re-stamps with the server duration — which changes startMs but is the
-    // SAME channel. A startMs check would spuriously fire STOP+START on the
-    // re-stamp. A genuine re-channel of the same spell passes through
-    // g_chanSpell==0 (CHANNEL_STOP) first, so spellID alone still catches it.
-    (void)channelStartMs;
-    const bool newChan = channelSpellID != 0 && channelSpellID != g_chanSpell;
+    // A DIFFERENT channel spell is trivially a new channel. A SAME-spell
+    // re-channel (recasting Fishing while already fishing) is ALSO a new
+    // channel and must fire CHANNEL_STOP + CHANNEL_START, but it keeps
+    // channelSpellID == g_chanSpell (the channel never returns to 0 between the
+    // two — +0x228 stays set for a continuous channel), so spellID alone can't
+    // see it. Two independent tells together identify it without a timing
+    // heuristic — BOTH required:
+    //   - the channel was RE-STAMPED: channelStartMs advanced past the value we
+    //     fired CHANNEL_START for, AND
+    //   - a fresh CMSG_CAST_SPELL is pending for this spell (g_pendingGuid — the
+    //     recast's SENT, not yet consumed).
+    // Each start stamps the channel TWICE (SMSG_SPELL_START then
+    // MSG_CHANNEL_START), which advances startMs on the SAME start — but the
+    // first CHANNEL_START already consumed g_pendingGuid, so the second stamp
+    // fails the pending test → no spurious restart. A REJECTED recast
+    // (SPELL_IN_PROGRESS) sends a CMSG (guid pending) but the server never
+    // re-stamps the channel, so startMs is unchanged → also no restart.
+    const bool reChannel = channelSpellID != 0 && channelSpellID == g_chanSpell &&
+                           channelStartMs != g_chanStart && g_pendingGuid != 0 &&
+                           g_pendingSpell == channelSpellID;
+    const bool newChan = channelSpellID != 0 &&
+                         (channelSpellID != g_chanSpell || reChannel);
     if (g_chanSpell != 0 && (channelSpellID == 0 || newChan)) {
         // Channels only ever fire CHANNEL_STOP — never INTERRUPTED — whether
         // they end naturally or are cut short (retail behavior, verified).
@@ -499,6 +514,7 @@ void PollPlayer(int castSpellID, int castStartMs, int castEndMs,
         // SUCCEEDED / CHANNEL_STOP on one castGUID.
         g_chanGuid = NextCastGuid(channelSpellID);
         g_chanSpell = channelSpellID;
+        g_chanStart = channelStartMs;
         Fire(kChannelStart, channelSpellID, g_chanGuid);
         // Modern fires SUCCEEDED right after CHANNEL_START. SPELL_GO deferred
         // it to here so it lands after START, sharing the channel's guid.
