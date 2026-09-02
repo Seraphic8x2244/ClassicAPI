@@ -352,6 +352,126 @@ int __fastcall Script_GetPlayerAuraBySpellID(void *L) {
     return 1;
 }
 
+// C_UnitAuras.GetAuraSlots(unit [, filter [, maxSlots [, continuationToken]]])
+//   -> continuationToken, slot1, slot2, ...
+//
+// Enumerates the opaque slot ids of every aura on `unit` matching `filter`, in
+// the order the by-index getters visit them, `maxSlots` at a time (nil / 0 =
+// all). The first return is the token to pass back for the next batch, or nil
+// when this batch reached the end — retail's batching contract, and what makes
+// AuraUtil.ForEachAura linear: one enumeration per batch plus a direct by-slot
+// fetch per aura, instead of a fresh from-slot-0 walk per index. The token is
+// the 1-based ordinal to resume at; opaque to callers. Encoding of the slot ids
+// is documented at `Data::OPAQUE_STRIDE`.
+int __fastcall Script_GetAuraSlots(void *L) {
+    const char *unitToken = ArgUnit(L, 1);
+    const char *filterStr = ArgOptString(L, 2);
+    const int maxSlots = ArgInt(L, 3);
+    const int token = ArgInt(L, 4);
+    // ClassicAPI extension: a table as the 5th argument selects FILL mode —
+    // the slot ids are written into it (t[1..n], stale tail cleared, t.n = n)
+    // and the call returns `continuationToken, n` instead of the vararg list.
+    // Lua 5.0 builds an `arg` table for every vararg CALL, so a Lua helper
+    // that receives the retail multi-return allocates one table per batch;
+    // filling the caller's table here is what keeps a per-frame scan
+    // allocation-free (AuraUtil and pfUI's ScanAuraSlots use this form).
+    const bool fill = Game::Lua::Type(L, 5) == Game::Lua::TYPE_TABLE;
+
+    int slots[Data::OPAQUE_SLOTS_MAX];
+    int total = 0;
+    if (unitToken != nullptr) {
+        const uint8_t *unit = ResolveUnit(unitToken);
+        const uint64_t guid = (unit == nullptr) ? GuidForOutOfRange(unitToken) : 0;
+        const ParsedFilter pf = ParseFilters(filterStr);
+        total = Data::CollectSlots(unit, guid, RangeFilter(pf), pf.ToMatch(), slots,
+                                   Data::OPAQUE_SLOTS_MAX);
+    }
+    int start = (token > 0) ? token - 1 : 0;
+    if (start > total)
+        start = total;
+    int n = total - start;
+    if (maxSlots > 0 && n > maxSlots)
+        n = maxSlots;
+    const bool more = start + n < total;
+
+    if (fill) {
+        for (int i = 0; i < n; ++i) {
+            Game::Lua::PushNumber(L, static_cast<double>(i + 1));
+            Game::Lua::PushNumber(L, static_cast<double>(slots[start + i]));
+            Game::Lua::RawSet(L, 5);
+        }
+        // Clear what a previous, longer fill left past n. The array is dense
+        // by construction, so stop at the first hole.
+        for (int k = n + 1;; ++k) {
+            Game::Lua::PushNumber(L, static_cast<double>(k));
+            Game::Lua::RawGet(L, 5);
+            const bool hole = Game::Lua::Type(L, -1) == Game::Lua::TYPE_NIL;
+            Game::Lua::SetTop(L, -2);
+            if (hole)
+                break;
+            Game::Lua::PushNumber(L, static_cast<double>(k));
+            Game::Lua::PushNil(L);
+            Game::Lua::RawSet(L, 5);
+        }
+        Game::Lua::PushString(L, "n");
+        Game::Lua::PushNumber(L, static_cast<double>(n));
+        Game::Lua::RawSet(L, 5);
+        Game::Lua::SetTop(L, 0);
+        if (more)
+            Game::Lua::PushNumber(L, static_cast<double>(start + n + 1));
+        else
+            Game::Lua::PushNil(L);
+        Game::Lua::PushNumber(L, static_cast<double>(n));
+        return 2;
+    }
+
+    // Vararg form. Everything below only pushes, so the args can go; a full
+    // batch is up to OPAQUE_SLOTS_MAX + 1 values, past Lua's guaranteed C-call
+    // headroom.
+    Game::Lua::SetTop(L, 0);
+    if (Game::Lua::CheckStack(L, n + 1) == 0) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    if (more)
+        Game::Lua::PushNumber(L, static_cast<double>(start + n + 1));
+    else
+        Game::Lua::PushNil(L);
+    for (int i = 0; i < n; ++i)
+        Game::Lua::PushNumber(L, static_cast<double>(slots[start + i]));
+    return 1 + n;
+}
+
+// Shared body of GetAuraDataBySlot (table) / UnitAuraBySlot (positional):
+// pushes the aura an opaque slot id from GetAuraSlots names, or a single nil
+// for an id that no longer names one.
+int PushAuraBySlot(void *L, Data::Emit emit) {
+    const char *unitToken = ArgUnit(L, 1);
+    if (unitToken == nullptr || !Game::Lua::IsNumber(L, 2)) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    const int slot = ArgInt(L, 2);
+    const uint8_t *unit = ResolveUnit(unitToken);
+    const uint64_t guid = (unit == nullptr) ? GuidForOutOfRange(unitToken) : 0;
+    if (Data::PushBySlot(L, unit, guid, slot, emit))
+        return (emit == Data::Emit::Positional) ? 15 : 1;
+    Game::Lua::PushNil(L);
+    return 1;
+}
+
+// C_UnitAuras.GetAuraDataBySlot(unit, slot) -> AuraData | nil
+int __fastcall Script_GetAuraDataBySlot(void *L) {
+    return PushAuraBySlot(L, Data::Emit::Table);
+}
+
+// C_UnitAuras.UnitAuraBySlot(unit, slot) -> the 15 positional UnitAura values | nil
+// Zero-allocation sibling of GetAuraDataBySlot, namespaced under C_UnitAuras
+// like C_UnitAuras.UnitAura. What AuraUtil's non-packed iteration reads.
+int __fastcall Script_UnitAuraBySlot(void *L) {
+    return PushAuraBySlot(L, Data::Emit::Positional);
+}
+
 // Iterates one slot range and pushes AuraData tables into `outer` at
 // sequential keys starting from `nextKey`. Updates `nextKey` so a
 // follow-up call can append to the same outer table.
@@ -364,10 +484,7 @@ void AppendRangeToArray(void *L, const uint8_t *unit, int outerIdx,
                         ? Offsets::UNIT_AURA_TOTAL
                         : Offsets::UNIT_AURA_BUFF_COUNT;
     for (int slot = start; slot < end; ++slot) {
-        if (!Data::IsSlotPopulated(unit, slot))
-            continue;
-        if (!Data::MatchesAura(match, Data::IsPlayerCast(unit, slot),
-                               Data::ReadSpellID(unit, slot)))
+        if (!Data::SlotMatches(unit, slot, match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         Data::Push(L, unit, slot);
@@ -497,6 +614,12 @@ static void RegisterLuaFunctions() {
                                      &Script_UnitBuff);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "UnitDebuff",
                                      &Script_UnitDebuff);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "GetAuraSlots",
+                                     &Script_GetAuraSlots);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "GetAuraDataBySlot",
+                                     &Script_GetAuraDataBySlot);
+    Game::Lua::RegisterTableFunction("C_UnitAuras", "UnitAuraBySlot",
+                                     &Script_UnitAuraBySlot);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "GetUnitAuraBySpellID",
                                      &Script_GetUnitAuraBySpellID);
     Game::Lua::RegisterTableFunction("C_UnitAuras", "GetPlayerAuraBySpellID",

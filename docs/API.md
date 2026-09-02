@@ -650,6 +650,8 @@ build instructions.
   - [`C_UnitAuras.GetBuffDataByIndex(unit, index)` / `GetDebuffDataByIndex(unit, index)`](#c_unitaurasgetbuffdatabyindexunit-index--getdebuffdatabyindexunit-index)
   - [`C_UnitAuras.UnitAura(unit, index [, filter])`](#c_unitaurasunitauraunit-index--filter)
   - [`C_UnitAuras.UnitBuff(unit, index [, filter])` / `UnitDebuff(unit, index [, filter])`](#c_unitaurasunitbuffunit-index--filter--unitdebuffunit-index--filter)
+  - [`C_UnitAuras.GetAuraSlots(unit [, filter [, maxSlots [, continuationToken]]])`](#c_unitaurasgetauraslotsunit--filter--maxslots--continuationtoken)
+  - [`C_UnitAuras.GetAuraDataBySlot(unit, slot)` / `UnitAuraBySlot(unit, slot)`](#c_unitaurasgetauradatabyslotunit-slot--unitaurabyslotunit-slot)
   - [`C_UnitAuras.GetUnitAuraBySpellID(unit, spellID [, filter])`](#c_unitaurasgetunitaurabyspellidunit-spellid--filter)
   - [`C_UnitAuras.GetPlayerAuraBySpellID(spellID)`](#c_unitaurasgetplayeraurabyspellidspellid)
   - [`C_UnitAuras.GetAuraDataBySpellName(unit, spellName [, filter])`](#c_unitaurasgetauradatabyspellnameunit-spellname--filter)
@@ -1207,13 +1209,17 @@ units each frame.
 truthy value or the auras run out.
 
 - Non-packed (default): `func` receives the 15 positional values of
-  [`C_UnitAuras.UnitAura`](#c_unitaurasunitauraunit-index--filter) — no table is
-  built per aura.
+  [`C_UnitAuras.UnitAuraBySlot`](#c_unitaurasgetauradatabyslotunit-slot--unitaurabyslotunit-slot).
+  No table is built per aura.
 - `usePackedAura` true: `func` receives the `AuraData` table from
-  `GetAuraDataByIndex`.
+  `GetAuraDataBySlot`.
 
-`batchSize` of `0` or less does nothing; any other value (or `nil`) visits every
-matching aura — `batchSize` is a slot-batch hint, not a cap on the count.
+The scan fetches slot ids in batches through
+[`C_UnitAuras.GetAuraSlots`](#c_unitaurasgetauraslotsunit--filter--maxslots--continuationtoken),
+then reads each aura by slot id. So the cost grows with the aura count, not
+with its square. `batchSize` sets how many slot ids one batch fetches. With
+`nil`, one batch fetches all of them. The value never caps how many auras
+`func` visits. A `batchSize` of `0` or less does nothing.
 
 ```lua
 AuraUtil.ForEachAura("target", "HARMFUL", nil, function(name, icon, count)
@@ -15469,6 +15475,64 @@ The `UnitAura` positional form with the range locked to `HELPFUL` or `HARMFUL`.
 The `filter` still honors the `PLAYER`, `DISPELLABLE`, and `CROWD_CONTROL`
 predicates. Namespaced under `C_UnitAuras` so they never clash with the native
 global `UnitBuff` / `UnitDebuff` (which keep their texture-first return).
+
+### `C_UnitAuras.GetAuraSlots(unit [, filter [, maxSlots [, continuationToken]]])`
+
+Returns a continuation token, then the slot ids of the auras on `unit` that
+match `filter`. A slot id is an opaque number. Pass it to `GetAuraDataBySlot`
+or `UnitAuraBySlot` to read that aura.
+
+```lua
+local token, slot1, slot2 = C_UnitAuras.GetAuraSlots("target", "HARMFUL", 2)
+```
+
+The slot ids come in the order that the by-index getters visit the auras.
+`maxSlots` limits how many ids one call returns. With `nil` or `0`, one call
+returns all of them. When more auras remain, the first return value is a
+token. Pass this token back as `continuationToken` to get the next batch. When
+the batch reaches the last aura, the first return value is `nil`.
+
+Use this function instead of a loop over `GetAuraDataByIndex`. The by-index
+getters walk the aura array from the start on every call, so a loop over them
+repeats that walk for each index. One `GetAuraSlots` call plus one by-slot
+fetch per aura walks the array once.
+[`AuraUtil.ForEachAura`](#aurautilforeachaura) uses this path.
+
+A slot id is valid in the frame that returned it. Do not store slot ids
+across frames. `filter` takes the same tokens as `GetAuraDataByIndex`. The
+range is `HELPFUL` unless the filter has `HARMFUL`.
+
+**Fill a table instead (ClassicAPI extension).** Pass a table as the fifth
+argument. The function writes the slot ids into it as `t[1]` to `t[n]`,
+clears old entries after `n`, sets `t.n`, and returns `continuationToken, n`.
+Use this form in code that runs every frame. On this client's Lua, a call to
+a function with `...` in its parameter list allocates a table. So a Lua helper
+that receives the normal return list allocates once per call, and the fill
+form does not.
+
+```lua
+local slots = {}
+local token, n = C_UnitAuras.GetAuraSlots("target", "HARMFUL", nil, nil, slots)
+for i = 1, n do
+    local name = C_UnitAuras.UnitAuraBySlot("target", slots[i])
+end
+```
+
+### `C_UnitAuras.GetAuraDataBySlot(unit, slot)` / `UnitAuraBySlot(unit, slot)`
+
+`GetAuraDataBySlot` returns the `AuraData` table for the aura that slot id
+`slot` names on `unit`. It returns `nil` when the slot id no longer names an
+aura. `UnitAuraBySlot` returns the same aura as the 15 positional values of
+[`C_UnitAuras.UnitAura`](#c_unitaurasunitauraunit-index--filter), so it
+allocates nothing. Get slot ids from `GetAuraSlots`.
+
+```lua
+local token, slot = C_UnitAuras.GetAuraSlots("player", "HELPFUL", 1)
+if slot then
+    local d = C_UnitAuras.GetAuraDataBySlot("player", slot)
+    print(d.name, d.applications)
+end
+```
 
 ### `C_UnitAuras.GetUnitAuraBySpellID(unit, spellID [, filter])`
 

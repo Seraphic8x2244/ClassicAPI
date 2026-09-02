@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "Offsets.h"
+
 #include <cstdint>
 
 // Shared aura-table primitives consumed by `C_UnitAuras.*` (and any
@@ -124,6 +126,12 @@ bool IsDispellable(uint32_t spellID);
 // per-aura "was cast by the local player" answer and its spell ID.
 bool MatchesAura(const Match &match, bool isPlayerCast, uint32_t spellID);
 
+// True iff descriptor `slot` on `unit` is populated (per `IsSlotPopulated`) AND
+// passes `match`. The caster answer (`IsPlayerCast` — a scan of the
+// `Aura::Source` cache, ~1000 entries in a raid) is computed ONLY when `match`
+// restricts on caster, so the common filter-less walk never pays for it.
+bool SlotMatches(const uint8_t *unit, int slot, const Match &match);
+
 // Display stack count for the given slot (engine stores stacks-1,
 // we add 1). Returns 0 if the unit is null.
 int ReadStacks(const uint8_t *unit, int slot);
@@ -229,5 +237,47 @@ bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
 // bulk-enumeration analog of `PushNthGroupAura`, for `GetUnitAuras`.
 void AppendGroupAuras(void *L, uint64_t guid, Filter filter, Match match,
                       int outerIdx, int &nextKey);
+
+// ── Opaque aura slots (GetAuraSlots / GetAuraDataBySlot) ────────────────────
+//
+// The by-index getters re-walk the descriptor from slot 0 on every call, so a
+// full scan through them is quadratic in the aura count. `CollectSlots`
+// enumerates once into opaque slot ids and `PushBySlot` fetches one aura by id
+// with no walk — the modern `C_UnitAuras.GetAuraSlots` / `GetAuraDataBySlot`
+// batching contract. An id is valid for the frame it was enumerated in.
+//
+// Encoding (kind = id / OPAQUE_STRIDE, k = id % OPAQUE_STRIDE):
+//   kind 0  live descriptor slot k (0..UNIT_AURA_TOTAL-1)
+//   kind 1  k-th eligible helpful cache-fallback entry   (OPAQUE_CACHE_HELPFUL)
+//   kind 2  k-th eligible harmful cache-fallback entry   (OPAQUE_CACHE_HARMFUL)
+//   kind 3  out-of-range group-array slot k (0..47)      (OPAQUE_GROUP)
+//   kind 4  k-th helpful group cache-fallback entry      (OPAQUE_GROUP_CACHE_HELPFUL)
+//   kind 5  k-th harmful group cache-fallback entry      (OPAQUE_GROUP_CACHE_HARMFUL)
+// Fallback ordinals count the UNFILTERED eligible sequence (visible, not
+// already in the live array), so `PushBySlot` needs no filter; `CollectSlots`
+// applies the caller's `match` only when choosing which ids to emit.
+constexpr int OPAQUE_STRIDE = 0x100;
+constexpr int OPAQUE_CACHE_HELPFUL = 1 * OPAQUE_STRIDE;
+constexpr int OPAQUE_CACHE_HARMFUL = 2 * OPAQUE_STRIDE;
+constexpr int OPAQUE_GROUP = 3 * OPAQUE_STRIDE;
+constexpr int OPAQUE_GROUP_CACHE_HELPFUL = 4 * OPAQUE_STRIDE;
+constexpr int OPAQUE_GROUP_CACHE_HARMFUL = 5 * OPAQUE_STRIDE;
+
+// Upper bound on ids one `CollectSlots` call can yield: the live array (or the
+// group array) plus its cache fallback, each at most UNIT_AURA_TOTAL entries.
+constexpr int OPAQUE_SLOTS_MAX = 2 * Offsets::UNIT_AURA_TOTAL;
+
+// Writes the opaque ids of every aura on the unit matching `filter` + `match`
+// into `out` (at most `cap`), in the order the by-index getters visit them:
+// live slots (or, with no live CGUnit, the group array) first, then the cache
+// fallback. `unit` null selects the out-of-range group path for `guid`. Returns
+// the count written.
+int CollectSlots(const uint8_t *unit, uint64_t guid, Filter filter, Match match,
+                 int *out, int cap);
+
+// Pushes the aura an opaque id names — table or positional per `emit` — and
+// returns true; pushes nothing and returns false for an id that names nothing
+// (stale, malformed, or the wrong path for the unit's current state).
+bool PushBySlot(void *L, const uint8_t *unit, uint64_t guid, int slot, Emit emit);
 
 } // namespace Aura::Data

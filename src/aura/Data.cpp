@@ -327,6 +327,21 @@ bool MatchesAura(const Match &match, bool isPlayerCast, uint32_t spellID) {
            CcMatches(match.cc, spellID);
 }
 
+// `MatchesAura` for a descriptor slot the caller has ALREADY established is
+// populated. The caster lookup is the expensive predicate (a scan of the
+// Aura::Source cache per slot), and `CasterMatches` ignores its answer when the
+// match has no caster restriction — so skip the lookup entirely in that case.
+static bool PopulatedSlotMatches(const uint8_t *unit, int slot,
+                                 const Match &match) {
+    const bool castByPlayer =
+        match.caster != CasterMode::Any && IsPlayerCast(unit, slot);
+    return MatchesAura(match, castByPlayer, ReadSpellID(unit, slot));
+}
+
+bool SlotMatches(const uint8_t *unit, int slot, const Match &match) {
+    return IsSlotPopulated(unit, slot) && PopulatedSlotMatches(unit, slot, match);
+}
+
 // Group-array analog of IsPlayerCast: the member has no descriptor, so there is
 // no slot to attribute by and the cache is consulted by (guid, spellID) alone.
 // A miss counts as "not the player" (same as IsPlayerCast).
@@ -348,9 +363,7 @@ int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
                         : Offsets::UNIT_AURA_BUFF_COUNT;
     int matches = 0;
     for (int slot = start; slot < end; ++slot) {
-        if (!IsSlotPopulated(unit, slot))
-            continue;
-        if (!MatchesAura(match, IsPlayerCast(unit, slot), ReadSpellID(unit, slot)))
+        if (!SlotMatches(unit, slot, match))
             continue;
         if (++matches == oneBasedIndex)
             return slot;
@@ -373,7 +386,7 @@ int FindSlotBySpellID(const uint8_t *unit, uint32_t spellID,
             continue;
         if (ReadSpellID(unit, slot) != spellID)
             continue;
-        if (!MatchesAura(match, IsPlayerCast(unit, slot), ReadSpellID(unit, slot)))
+        if (!PopulatedSlotMatches(unit, slot, match))
             continue;
         return slot;
     }
@@ -396,7 +409,7 @@ int FindSlotBySpellName(const uint8_t *unit, const char *spellName,
         const char *name = LocalizedSpellName(SpellRecord(ReadSpellID(unit, slot)));
         if (name == nullptr || std::strcmp(name, spellName) != 0)
             continue;
-        if (!MatchesAura(match, IsPlayerCast(unit, slot), ReadSpellID(unit, slot)))
+        if (!PopulatedSlotMatches(unit, slot, match))
             continue;
         return slot;
     }
@@ -722,36 +735,16 @@ bool DescriptorHasVisibleAura(const uint8_t *unit) {
     return false;
 }
 
-// Counts populated descriptor slots matching `filter` (and `caster`).
-int CountSlots(const uint8_t *unit, Filter filter, Match match) {
-    if (unit == nullptr)
-        return 0;
-    const int start = (filter == Filter::Harmful)
-                          ? Offsets::UNIT_AURA_BUFF_COUNT
-                          : 0;
-    const int end = (filter == Filter::Harmful) ? Offsets::UNIT_AURA_TOTAL
-                                                 : Offsets::UNIT_AURA_BUFF_COUNT;
-    int n = 0;
-    for (int slot = start; slot < end; ++slot) {
-        if (!IsSlotPopulated(unit, slot))
-            continue;
-        if (!MatchesAura(match, IsPlayerCast(unit, slot), ReadSpellID(unit, slot)))
-            continue;
-        ++n;
-    }
-    return n;
-}
-
 constexpr int kFallbackMax = Offsets::UNIT_AURA_TOTAL;
 
-// Whether cache entry `c` should be surfaced as a fallback for `unit` under
-// `filter`/`caster`: the spell must be a user-visible aura, it must not
-// already be in a populated descriptor slot (no double-listing the same live
-// aura) and, when player-filtered, must have been cast by us. Superseded /
-// dispelled auras are kept out of the cache by `Aura::Source`'s removal
-// eviction, not filtered here.
+// Whether cache entry `c` may surface as a fallback for `unit` under `filter`:
+// the spell must be a user-visible aura and must not already be in a populated
+// descriptor slot (no double-listing the same live aura). The caller's
+// caster/dispel/CC predicates are applied separately by `CachedMatches`.
+// Superseded / dispelled auras are kept out of the cache by `Aura::Source`'s
+// removal eviction, not filtered here.
 bool FallbackEligible(const uint8_t *unit, const Aura::Source::CachedAura &c,
-                      Filter filter, Match match) {
+                      Filter filter) {
     if (!IsVisible(SpellRecord(c.spellId)))
         return false; // hidden/internal aura (e.g. SPELL_ATTR_HIDDEN_CLIENTSIDE):
                       // the descriptor path drops these via IsSlotPopulated, so
@@ -759,37 +752,58 @@ bool FallbackEligible(const uint8_t *unit, const Aura::Source::CachedAura &c,
                       // they leak through as tooltip-less phantom buffs.
     if (FindSlotBySpellID(unit, c.spellId, &filter, Match{}) >= 0)
         return false; // still in the descriptor — returned via the slot path
-    if (!MatchesAura(match, c.casterGuid == Unit::Identity::PlayerGuid(), c.spellId))
-        return false;
     return true;
+}
+
+// Applies `match` to a cache entry. The entry carries its caster, so the caster
+// test is a plain GUID compare — no scan, nothing to defer.
+bool CachedMatches(const Aura::Source::CachedAura &c, const Match &match) {
+    return MatchesAura(match, c.casterGuid == Unit::Identity::PlayerGuid(),
+                       c.spellId);
+}
+
+// The eligible cache-fallback entries for `unit` under `filter`, in `Enumerate`
+// order, unfiltered by any `Match` (callers apply `CachedMatches`). Applies the
+// fallback gates: reconcile the cache against the descriptor, then yield nothing
+// while the descriptor shows any visible aura (it is authoritative then — see
+// DescriptorHasVisibleAura). `buf` must hold kFallbackMax entries. Returns the
+// count. An entry's ordinal here is what an opaque cache slot id encodes, which
+// is why the sequence must not depend on the caller's match.
+int EligibleFallbacks(const uint8_t *unit, Filter filter,
+                      Aura::Source::CachedAura *buf) {
+    if (unit == nullptr)
+        return 0;
+    ReconcileCache(unit); // drop entries the (synced) descriptor contradicts
+    if (DescriptorHasVisibleAura(unit))
+        return 0; // descriptor authoritative — see DescriptorHasVisibleAura
+    const uint64_t guid = UnitGuid(unit);
+    if (guid == 0)
+        return 0;
+    Aura::Source::CachedAura raw[kFallbackMax];
+    const int n = Aura::Source::Enumerate(
+        guid, filter == Filter::Harmful, raw, kFallbackMax);
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        if (FallbackEligible(unit, raw[i], filter))
+            buf[m++] = raw[i];
+    }
+    return m;
 }
 
 } // namespace
 
 bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
                           Filter filter, Match match, Emit emit) {
-    if (unit == nullptr)
-        return false;
-    ReconcileCache(unit); // drop entries the (synced) descriptor contradicts
-    if (DescriptorHasVisibleAura(unit))
-        return false; // descriptor authoritative — see DescriptorHasVisibleAura
-    // The descriptor held `descCount` matches; the caller already found fewer
-    // than `oneBasedIndex` there, so the cache supplies index
-    // `oneBasedIndex - descCount` (1-based) of the entries it didn't.
-    const int target = oneBasedIndex - CountSlots(unit, filter, match);
-    if (target < 1)
-        return false;
-    const uint64_t guid = UnitGuid(unit);
-    if (guid == 0)
-        return false;
+    // The fallback yields only while the descriptor shows no visible aura, so
+    // the descriptor held none of the caller's matches: the cache supplies index
+    // `oneBasedIndex` (1-based) of the entries passing `match` directly.
     Aura::Source::CachedAura buf[kFallbackMax];
-    const int n = Aura::Source::Enumerate(
-        guid, filter == Filter::Harmful, buf, kFallbackMax);
+    const int n = EligibleFallbacks(unit, filter, buf);
     int seen = 0;
     for (int i = 0; i < n; ++i) {
-        if (!FallbackEligible(unit, buf[i], filter, match))
+        if (!CachedMatches(buf[i], match))
             continue;
-        if (++seen == target) {
+        if (++seen == oneBasedIndex) {
             PushFromCache(L, unit, buf[i], filter == Filter::Helpful, emit);
             return true;
         }
@@ -799,19 +813,10 @@ bool PushNthCacheFallback(void *L, const uint8_t *unit, int oneBasedIndex,
 
 void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
                           Match match, int outerIdx, int &nextKey) {
-    if (unit == nullptr)
-        return;
-    ReconcileCache(unit); // drop entries the (synced) descriptor contradicts
-    if (DescriptorHasVisibleAura(unit))
-        return; // descriptor authoritative — see DescriptorHasVisibleAura
-    const uint64_t guid = UnitGuid(unit);
-    if (guid == 0)
-        return;
     Aura::Source::CachedAura buf[kFallbackMax];
-    const int n = Aura::Source::Enumerate(
-        guid, filter == Filter::Harmful, buf, kFallbackMax);
+    const int n = EligibleFallbacks(unit, filter, buf);
     for (int i = 0; i < n; ++i) {
-        if (!FallbackEligible(unit, buf[i], filter, match))
+        if (!CachedMatches(buf[i], match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         PushFromCache(L, unit, buf[i], filter == Filter::Helpful);
@@ -838,21 +843,27 @@ uint32_t GroupSpellID(const uint16_t *arr, int slot) {
     return arr[slot];
 }
 
-// Whether the group-array slot holds a surfacable aura for this query. Mirrors
-// the engine's per-slot test in Script_UnitBuff/UnitDebuff — a non-zero spell
-// ID with a real Spell.dbc record that passes the visibility predicate (the
-// server only transmits *applied* auras, so there is no flag nibble to check).
-// `caster` additionally requires the `Aura::Source` cache to attribute the
-// cast to the local player (a miss excludes it — we can't confirm the caster
-// from the group array alone).
-bool GroupSlotEligible(uint64_t guid, const uint16_t *arr, int slot,
-                       Match match) {
+// Whether the group-array slot holds a surfacable aura. Mirrors the engine's
+// per-slot test in Script_UnitBuff/UnitDebuff — a non-zero spell ID with a real
+// Spell.dbc record that passes the visibility predicate (the server only
+// transmits *applied* auras, so there is no flag nibble to check).
+bool GroupSlotVisible(const uint16_t *arr, int slot) {
     const uint32_t id = GroupSpellID(arr, slot);
-    if (id == 0 || !IsVisible(SpellRecord(id)))
+    return id != 0 && IsVisible(SpellRecord(id));
+}
+
+// `GroupSlotVisible` plus the caller's `match` predicates. The caster answer
+// (`GroupIsPlayerCast` — a cache scan; a miss counts as not-player, since the
+// array alone can't confirm the caster) is computed only when `match` restricts
+// on caster.
+bool GroupSlotMatches(uint64_t guid, const uint16_t *arr, int slot,
+                      const Match &match) {
+    if (!GroupSlotVisible(arr, slot))
         return false;
-    if (!MatchesAura(match, GroupIsPlayerCast(guid, id), id))
-        return false;
-    return true;
+    const uint32_t id = GroupSpellID(arr, slot);
+    const bool castByPlayer =
+        match.caster != CasterMode::Any && GroupIsPlayerCast(guid, id);
+    return MatchesAura(match, castByPlayer, id);
 }
 
 // The groupmate's level, for Spell.dbc duration scaling (0 = skip). Cheap
@@ -872,26 +883,50 @@ int GroupMemberLevel(uint64_t guid) {
 // still sit in the cache from when we observed them in range.
 bool GroupArrayHasVisibleAura(const uint16_t *arr) {
     for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot) {
-        const uint32_t id = GroupSpellID(arr, slot);
-        if (id != 0 && IsVisible(SpellRecord(id)))
+        if (GroupSlotVisible(arr, slot))
             return true;
     }
     return false;
 }
 
 // Whether cache entry `c` may supplement the (empty) group array: a visible
-// aura, not already present in the array, and — when player-filtered — cast by
-// us. See GroupArrayHasVisibleAura for when this path runs.
-bool GroupFallbackEligible(const uint16_t *arr, const Aura::Source::CachedAura &c,
-                           Match match) {
+// aura not already present in the array. The caller's `match` is applied
+// separately by `CachedMatches`. See EligibleGroupFallbacks for when this path
+// runs.
+bool GroupFallbackEligible(const uint16_t *arr,
+                           const Aura::Source::CachedAura &c) {
     if (!IsVisible(SpellRecord(c.spellId)))
         return false;
     for (int slot = 0; slot < Offsets::UNIT_AURA_TOTAL; ++slot)
         if (GroupSpellID(arr, slot) == c.spellId)
             return false;
-    if (!MatchesAura(match, c.casterGuid == Unit::Identity::PlayerGuid(), c.spellId))
-        return false;
     return true;
+}
+
+// The eligible group cache-fallback entries for out-of-range member `guid`, in
+// `Enumerate` order, unfiltered by any `Match` (callers apply `CachedMatches`).
+// Yields nothing while the group array exposes ANY visible aura: the server's
+// out-of-range aura data is then present and authoritative, mirroring how the
+// descriptor path treats a populated descriptor (DescriptorHasVisibleAura).
+// Only an entirely empty array falls back to the cache — the server resends
+// out-of-range stats as deltas only, so a member seen in range and then moved
+// away again leaves an empty party-stats aura array (the array is cleared when
+// they become visible and never re-sent), yet their auras still sit in the
+// cache from when we observed them in range. `buf` must hold kFallbackMax
+// entries. An entry's ordinal here is what an opaque group-cache slot id
+// encodes, which is why the sequence must not depend on the caller's match.
+int EligibleGroupFallbacks(const uint16_t *arr, uint64_t guid, bool harmful,
+                           Aura::Source::CachedAura *buf) {
+    if (arr == nullptr || GroupArrayHasVisibleAura(arr))
+        return 0;
+    Aura::Source::CachedAura raw[kFallbackMax];
+    const int n = Aura::Source::Enumerate(guid, harmful, raw, kFallbackMax);
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        if (GroupFallbackEligible(arr, raw[i]))
+            buf[m++] = raw[i];
+    }
+    return m;
 }
 
 // Nth (1-based) cache-fallback aura of `filter`'s kind for an out-of-range
@@ -901,10 +936,10 @@ bool PushNthGroupCacheFallback(void *L, uint64_t guid, const uint16_t *arr,
                                Emit emit = Emit::Table) {
     Aura::Source::CachedAura buf[kFallbackMax];
     const int n =
-        Aura::Source::Enumerate(guid, filter == Filter::Harmful, buf, kFallbackMax);
+        EligibleGroupFallbacks(arr, guid, filter == Filter::Harmful, buf);
     int seen = 0;
     for (int i = 0; i < n; ++i) {
-        if (!GroupFallbackEligible(arr, buf[i], match))
+        if (!CachedMatches(buf[i], match))
             continue;
         if (++seen == oneBasedIndex) {
             const Attribution a = CachedAttribution(buf[i]);
@@ -922,10 +957,10 @@ void AppendGroupCacheFallbacks(void *L, uint64_t guid, const uint16_t *arr,
                                int &nextKey) {
     Aura::Source::CachedAura buf[kFallbackMax];
     const int n =
-        Aura::Source::Enumerate(guid, filter == Filter::Harmful, buf, kFallbackMax);
+        EligibleGroupFallbacks(arr, guid, filter == Filter::Harmful, buf);
     const int level = GroupMemberLevel(guid);
     for (int i = 0; i < n; ++i) {
-        if (!GroupFallbackEligible(arr, buf[i], match))
+        if (!CachedMatches(buf[i], match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         const Attribution a = CachedAttribution(buf[i]);
@@ -941,7 +976,7 @@ bool PushGroupCacheFallbackMatch(void *L, uint64_t guid, const uint16_t *arr,
                                  bool harmful, uint32_t spellID,
                                  const char *spellName, Match match) {
     Aura::Source::CachedAura buf[kFallbackMax];
-    const int n = Aura::Source::Enumerate(guid, harmful, buf, kFallbackMax);
+    const int n = EligibleGroupFallbacks(arr, guid, harmful, buf);
     for (int i = 0; i < n; ++i) {
         if (spellID != 0 && buf[i].spellId != spellID)
             continue;
@@ -950,7 +985,7 @@ bool PushGroupCacheFallbackMatch(void *L, uint64_t guid, const uint16_t *arr,
             if (nm == nullptr || std::strcmp(nm, spellName) != 0)
                 continue;
         }
-        if (!GroupFallbackEligible(arr, buf[i], match))
+        if (!CachedMatches(buf[i], match))
             continue;
         const Attribution a = CachedAttribution(buf[i]);
         PushEnriched(L, guid, buf[i].spellId, !harmful, 1, GroupMemberLevel(guid),
@@ -974,7 +1009,7 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
     GroupRange(filter, start, end);
     int matches = 0;
     for (int slot = start; slot < end; ++slot) {
-        if (!GroupSlotEligible(guid, arr, slot, match))
+        if (!GroupSlotMatches(guid, arr, slot, match))
             continue;
         if (++matches == oneBasedIndex) {
             PushEnriched(L, guid, GroupSpellID(arr, slot),
@@ -985,10 +1020,8 @@ bool PushNthGroupAura(void *L, uint64_t guid, int oneBasedIndex, Filter filter,
         }
     }
     // Empty array (server delta-resend gap): supplement from the cache.
-    if (!GroupArrayHasVisibleAura(arr))
-        return PushNthGroupCacheFallback(L, guid, arr, oneBasedIndex, filter,
-                                         match, emit);
-    return false;
+    return PushNthGroupCacheFallback(L, guid, arr, oneBasedIndex, filter, match,
+                                     emit);
 }
 
 bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
@@ -1008,23 +1041,20 @@ bool PushGroupAuraBySpellID(void *L, uint64_t guid, uint32_t spellID,
     for (int slot = start; slot < end; ++slot) {
         if (GroupSpellID(arr, slot) != spellID)
             continue;
-        if (!GroupSlotEligible(guid, arr, slot, match))
+        if (!GroupSlotMatches(guid, arr, slot, match))
             continue;
         PushEnriched(L, guid, spellID, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
                      GroupMemberLevel(guid), false, Aura::Source::SLOT_UNBOUND);
         return true;
     }
-    if (!GroupArrayHasVisibleAura(arr)) {
-        const bool both = (filter == nullptr);
-        if ((both || *filter == Filter::Helpful) &&
-            PushGroupCacheFallbackMatch(L, guid, arr, false, spellID, nullptr,
-                                        match))
-            return true;
-        if ((both || *filter == Filter::Harmful) &&
-            PushGroupCacheFallbackMatch(L, guid, arr, true, spellID, nullptr,
-                                        match))
-            return true;
-    }
+    // Empty array (server delta-resend gap): supplement from the cache.
+    const bool both = (filter == nullptr);
+    if ((both || *filter == Filter::Helpful) &&
+        PushGroupCacheFallbackMatch(L, guid, arr, false, spellID, nullptr, match))
+        return true;
+    if ((both || *filter == Filter::Harmful) &&
+        PushGroupCacheFallbackMatch(L, guid, arr, true, spellID, nullptr, match))
+        return true;
     return false;
 }
 
@@ -1049,23 +1079,20 @@ bool PushGroupAuraBySpellName(void *L, uint64_t guid, const char *spellName,
         const char *name = LocalizedSpellName(SpellRecord(id));
         if (name == nullptr || std::strcmp(name, spellName) != 0)
             continue;
-        if (!GroupSlotEligible(guid, arr, slot, match))
+        if (!GroupSlotMatches(guid, arr, slot, match))
             continue;
         PushEnriched(L, guid, id, slot < Offsets::UNIT_AURA_BUFF_COUNT, 1,
                      GroupMemberLevel(guid), false, Aura::Source::SLOT_UNBOUND);
         return true;
     }
-    if (!GroupArrayHasVisibleAura(arr)) {
-        const bool both = (filter == nullptr);
-        if ((both || *filter == Filter::Helpful) &&
-            PushGroupCacheFallbackMatch(L, guid, arr, false, 0, spellName,
-                                        match))
-            return true;
-        if ((both || *filter == Filter::Harmful) &&
-            PushGroupCacheFallbackMatch(L, guid, arr, true, 0, spellName,
-                                        match))
-            return true;
-    }
+    // Empty array (server delta-resend gap): supplement from the cache.
+    const bool both = (filter == nullptr);
+    if ((both || *filter == Filter::Helpful) &&
+        PushGroupCacheFallbackMatch(L, guid, arr, false, 0, spellName, match))
+        return true;
+    if ((both || *filter == Filter::Harmful) &&
+        PushGroupCacheFallbackMatch(L, guid, arr, true, 0, spellName, match))
+        return true;
     return false;
 }
 
@@ -1081,7 +1108,7 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, Match match,
     GroupRange(filter, start, end);
     const int level = GroupMemberLevel(guid);
     for (int slot = start; slot < end; ++slot) {
-        if (!GroupSlotEligible(guid, arr, slot, match))
+        if (!GroupSlotMatches(guid, arr, slot, match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         PushEnriched(L, guid, GroupSpellID(arr, slot),
@@ -1090,9 +1117,111 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, Match match,
         Game::Lua::SetTable(L, outerIdx);
     }
     // Empty array (server delta-resend gap): supplement from the cache.
-    if (!GroupArrayHasVisibleAura(arr))
-        AppendGroupCacheFallbacks(L, guid, arr, filter, match, outerIdx,
-                                  nextKey);
+    AppendGroupCacheFallbacks(L, guid, arr, filter, match, outerIdx, nextKey);
+}
+
+// ── Opaque aura slots ──────────────────────────────────────────────────────
+
+int CollectSlots(const uint8_t *unit, uint64_t guid, Filter filter, Match match,
+                 int *out, int cap) {
+    int n = 0;
+    int start, end;
+    GroupRange(filter, start, end); // same [start, end) for the descriptor
+    if (unit != nullptr) {
+        for (int slot = start; slot < end && n < cap; ++slot) {
+            if (SlotMatches(unit, slot, match))
+                out[n++] = slot;
+        }
+        // The cache fallback yields only while the descriptor shows no visible
+        // aura, so these never interleave with live slots — they follow them,
+        // exactly as the by-index getters order them.
+        Aura::Source::CachedAura buf[kFallbackMax];
+        const int m = EligibleFallbacks(unit, filter, buf);
+        const int base = (filter == Filter::Harmful) ? OPAQUE_CACHE_HARMFUL
+                                                     : OPAQUE_CACHE_HELPFUL;
+        for (int k = 0; k < m && n < cap; ++k) {
+            if (CachedMatches(buf[k], match))
+                out[n++] = base + k;
+        }
+        return n;
+    }
+    // No live CGUnit — the out-of-range group path.
+    if (guid == 0)
+        return 0;
+    const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+    if (arr == nullptr)
+        return 0;
+    Aura::Source::ObserveGroupAuras(guid, arr);
+    for (int slot = start; slot < end && n < cap; ++slot) {
+        if (GroupSlotMatches(guid, arr, slot, match))
+            out[n++] = OPAQUE_GROUP + slot;
+    }
+    Aura::Source::CachedAura buf[kFallbackMax];
+    const int m = EligibleGroupFallbacks(arr, guid, filter == Filter::Harmful, buf);
+    const int base = (filter == Filter::Harmful) ? OPAQUE_GROUP_CACHE_HARMFUL
+                                                 : OPAQUE_GROUP_CACHE_HELPFUL;
+    for (int k = 0; k < m && n < cap; ++k) {
+        if (CachedMatches(buf[k], match))
+            out[n++] = base + k;
+    }
+    return n;
+}
+
+bool PushBySlot(void *L, const uint8_t *unit, uint64_t guid, int slot, Emit emit) {
+    if (slot < 0)
+        return false;
+    const int kind = slot / OPAQUE_STRIDE;
+    const int k = slot % OPAQUE_STRIDE;
+    switch (kind) {
+    case 0: // live descriptor slot
+        if (unit == nullptr || !IsSlotPopulated(unit, k))
+            return false;
+        Push(L, unit, k, emit);
+        return true;
+    case 1:   // helpful cache fallback
+    case 2: { // harmful cache fallback
+        if (unit == nullptr || k >= kFallbackMax)
+            return false;
+        const Filter filter = (kind == 2) ? Filter::Harmful : Filter::Helpful;
+        Aura::Source::CachedAura buf[kFallbackMax];
+        if (k >= EligibleFallbacks(unit, filter, buf))
+            return false;
+        PushFromCache(L, unit, buf[k], filter == Filter::Helpful, emit);
+        return true;
+    }
+    case 3: { // out-of-range group-array slot
+        if (guid == 0 || k >= Offsets::UNIT_AURA_TOTAL)
+            return false;
+        const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+        if (arr == nullptr)
+            return false;
+        Aura::Source::ObserveGroupAuras(guid, arr);
+        if (!GroupSlotVisible(arr, k))
+            return false;
+        PushEnriched(L, guid, GroupSpellID(arr, k),
+                     k < Offsets::UNIT_AURA_BUFF_COUNT, 1, GroupMemberLevel(guid),
+                     false, Aura::Source::SLOT_UNBOUND, /*known*/ nullptr, emit);
+        return true;
+    }
+    case 4:   // helpful group cache fallback
+    case 5: { // harmful group cache fallback
+        if (guid == 0 || k >= kFallbackMax)
+            return false;
+        const uint16_t *arr = Group::MemberStats::AuraArray(guid);
+        if (arr == nullptr)
+            return false;
+        const bool harmful = (kind == 5);
+        Aura::Source::CachedAura buf[kFallbackMax];
+        if (k >= EligibleGroupFallbacks(arr, guid, harmful, buf))
+            return false;
+        const Attribution a = CachedAttribution(buf[k]);
+        PushEnriched(L, guid, buf[k].spellId, !harmful, 1, GroupMemberLevel(guid),
+                     false, buf[k].slot, &a, emit);
+        return true;
+    }
+    default:
+        return false;
+    }
 }
 
 } // namespace Aura::Data

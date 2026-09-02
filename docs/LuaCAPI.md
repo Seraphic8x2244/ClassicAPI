@@ -213,6 +213,8 @@ filenames in Lua 5.0 by behaviour.
 |--------------|--------------------------|---------------------------------------------------|
 | `0x006F3140` | `setobj` / TValue copy   | 16-byte memcpy                                    |
 | `0x006F58B0` | `equalobj`               | called by `lua_equal`                             |
+| `0x006F6050` | `luaD_precall`           | frame setup for a call; Lua closure: reads Proto (`+0xc` of the closure), `is_vararg` at Proto `+0x46` → `adjust_varargs`, `numparams` `+0x45`, `maxstacksize` `+0x47`; C closure: reserves 0x14 slots and calls the C function |
+| `0x006F6200` | `adjust_varargs`         | stock 5.0: pads missing fixed params with nil, then `luaH_new(L, nvar, 1)` + `luaH_setnum` per extra arg + sets field `"n"` and pushes the table. So EVERY call to a vararg Lua function allocates one table, whether the body uses `arg` or `...` — keep vararg helpers off per-frame paths |
 | `0x006F65A0` | `luaD_call`              | the actual call dispatcher                        |
 | `0x006F6960` | `luaD_pcall`             | protected call dispatcher                         |
 | `0x006F7340` | `luaD_growstack` (or checkstack) | invoked when stack needs space            |
