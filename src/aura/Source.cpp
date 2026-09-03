@@ -360,6 +360,12 @@ Entry *Claim(uint32_t now) {
 // refresh path too.
 void SignalAuraChanged(uint64_t guid);
 
+// Defined with the duration-modifier machinery below. A trigger can CREATE the
+// aura it then edits, in which case the edit is armed at trigger time and
+// applied here, when the aura it was waiting for actually lands. See PendingMod.
+struct Entry;
+void ConsumePendingMods(Entry &e, uint32_t now);
+
 // The SpellGo hook: authoritative caster + caster-modified (talented) timing.
 // Identity is `(target, spell, caster)`, so a second caster of the same spell
 // opens its own entry instead of overwriting the first's, and a recast by the
@@ -387,6 +393,7 @@ void StoreFromCast(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
         e = Claim(now);
         *e = {targetGuid, casterGuid, spellId, expirationMs, durationMs,
               now,        SLOT_UNBOUND, KIND_UNKNOWN, true};
+        ConsumePendingMods(*e, now);
         return;
     }
     e->stampMs = now; // refresh EvictAbsent grace on any touch
@@ -399,6 +406,7 @@ void StoreFromCast(uint64_t targetGuid, uint32_t spellId, uint64_t casterGuid,
     // ourselves (deferred to the world tick, coalesced). A NEW application
     // doesn't need this: its descriptor write fires the engine's own event.
     SignalAuraChanged(targetGuid);
+    ConsumePendingMods(*e, now);
 }
 
 // The OnAuraAdded / OnAuraStacksChanged application hooks: a descriptor slot,
@@ -429,6 +437,7 @@ void StoreFromApplication(uint64_t targetGuid, uint32_t spellId,
         e = Claim(now);
         *e = {targetGuid, casterGuid, spellId, expirationMs, durationMs, now,
               static_cast<int16_t>(slot), kind, true};
+        ConsumePendingMods(*e, now);
         return;
     }
 
@@ -440,6 +449,11 @@ void StoreFromApplication(uint64_t targetGuid, uint32_t spellId,
     // back to unknown.
     if (kind != KIND_UNKNOWN)
         e->kind = kind;
+    // An armed server edit applies whoever owns the timing — the server made it
+    // AFTER the cast this entry came from, so it is the newer truth. It also
+    // adopts the entry, which makes the ownership guard below keep the edited
+    // value instead of the application's base-duration guess.
+    ConsumePendingMods(*e, now);
     if (e->casterGuid != 0)
         return; // SpellGo owns this entry; keep its caster + talented timing
     if (casterGuid != 0)
@@ -523,8 +537,10 @@ void Evict(uint64_t targetGuid, uint32_t spellId, int slot) {
 //   Molten Blast -> Flame Shock:  refresh    (RefreshHolder → reset to max)
 // A trigger is matched either by exact spellID (from the server's script
 // binding, stable across ranks) or by SpellFamilyName + school; the affected
-// aura by SpellFamilyName + a family-flag overlap (+ optional icon) — rank-proof,
-// exactly how the server's scripts find it. Conflagrate's *full*-consume path
+// aura by SpellFamilyName plus a family-flag overlap and/or a SpellIconID —
+// rank-proof, exactly how the server's scripts find it, and the icon half is
+// what reaches a custom spell with no family flags at all (see
+// AffectedMatchesRaw). Conflagrate's *full*-consume path
 // removes Immolate, which clears
 // the descriptor slot → OnAuraRemoved already handles it; the reduce rule
 // covers the keep-ticking case. Probabilistic refreshes (Carnage's roll) are
@@ -549,9 +565,23 @@ int g_modCount = 0;
 
 // The affected-aura selector alone, shared with the Lua-facing by-family
 // refresh so the two cannot disagree about what they match.
+//
+// SpellFamilyName always has to match. Past that a rule discriminates by a
+// SpellFamilyFlags overlap, by SpellIconID, or by both; a zero mask or a zero
+// icon drops that half of the test. The icon-only form is what names an aura
+// whose SpellFamilyFlags are ZERO — every one of Turtle's custom spells is
+// (308 in the hunter family alone), so the mask cannot select them while the
+// icon still can, and an icon is shared by a spell's whole rank ladder, which
+// keeps it rank-proof exactly like a family flag. Registrars reject the
+// degenerate mask-0 + icon-0 rule, which would match a whole class family.
 bool AffectedMatchesRaw(const uint8_t *rec, uint32_t family, uint64_t mask,
                         uint32_t icon) {
-    if (!Spell::Lookup::IsFitToFamily(rec, family, mask))
+    if (rec == nullptr)
+        return false;
+    if (*reinterpret_cast<const uint32_t *>(
+            rec + Offsets::OFF_SPELL_RECORD_FAMILY_NAME) != family)
+        return false;
+    if (mask != 0 && !Spell::Lookup::IsFitToFamily(rec, family, mask))
         return false;
     if (icon != 0 &&
         *reinterpret_cast<const uint32_t *>(
@@ -616,8 +646,8 @@ void FlushAuraSignals() {
     g_pendingSignalCount = 0;
 }
 
-void ApplyMod(Entry &e, const DurationMod &m, uint32_t now) {
-    switch (m.op) {
+void ApplyModOp(Entry &e, int32_t op, int32_t valueMs, uint32_t now) {
+    switch (op) {
     case MOD_REFRESH:
         if (e.durationMs > 0) {
             e.expirationMs = now + e.durationMs; // RefreshHolder → reset to max
@@ -625,14 +655,14 @@ void ApplyMod(Entry &e, const DurationMod &m, uint32_t now) {
         }
         break;
     case MOD_SET:
-        e.durationMs = static_cast<uint32_t>(m.valueMs);
-        e.expirationMs = now + static_cast<uint32_t>(m.valueMs);
+        e.durationMs = static_cast<uint32_t>(valueMs);
+        e.expirationMs = now + static_cast<uint32_t>(valueMs);
         SignalAuraChanged(e.targetGuid);
         break;
     case MOD_REDUCE:
         if (e.expirationMs != 0) {
-            if (e.expirationMs > now + static_cast<uint32_t>(m.valueMs)) {
-                e.expirationMs -= static_cast<uint32_t>(m.valueMs);
+            if (e.expirationMs > now + static_cast<uint32_t>(valueMs)) {
+                e.expirationMs -= static_cast<uint32_t>(valueMs);
                 SignalAuraChanged(e.targetGuid);
             } else {
                 e.used = false; // shaved to/past now → server removes it
@@ -642,6 +672,88 @@ void ApplyMod(Entry &e, const DurationMod &m, uint32_t now) {
     case MOD_REMOVE:
         e.used = false; // removal — OnAuraRemoved / descriptor path fires UNIT_AURA
         break;
+    }
+}
+
+void ApplyMod(Entry &e, const DurationMod &m, uint32_t now) {
+    ApplyModOp(e, m.op, m.valueMs, now);
+}
+
+// ---- Deferred duration edits (the trigger creates the aura it edits) ------
+//
+// A trigger does not always act on an aura that is ALREADY there. Bestial
+// Wrath's effect 0 is TRIGGER_SPELL(Scent of Blood), and the server's script
+// then stretches the very holder that trigger just created (tortoise-wow
+// spell_hunter_bestial_wrath). The trigger's own SMSG_SPELL_GO reaches us
+// first, so at trigger time either nothing matches yet, or something matches
+// and is overwritten moments later when the triggered cast stores its own base
+// duration. Either way the edit is lost.
+//
+// So a trigger also ARMS its targets, and the next matching store inside the
+// window re-applies the edit — from the cast path or the application path,
+// whichever the triggered aura arrives on.
+//
+// Only the IDEMPOTENT ops arm. Re-running refresh or set lands on the same
+// value, while reduce would shave a second time and remove would kill an aura
+// that was legitimately re-applied. That keeps Conflagrate (reduce) behaving
+// exactly as before.
+bool OpIsIdempotent(int32_t op) {
+    return op == MOD_REFRESH || op == MOD_SET;
+}
+
+struct PendingMod {
+    uint64_t target;
+    uint64_t caster;
+    uint32_t affectedFamily;
+    uint64_t affectedMask;
+    uint32_t affectedIcon;
+    int32_t op;
+    int32_t valueMs;
+    uint32_t untilMs;
+    bool used;
+};
+// The triggered cast follows its trigger within one packet burst, so the window
+// only has to cover network jitter. Sized like the other arm tables.
+constexpr int kPendingModMax = 8;
+constexpr uint32_t kPendingModTtlMs = 2000;
+PendingMod g_pendingMods[kPendingModMax];
+
+void ArmPendingMod(uint64_t target, uint64_t caster, const DurationMod &m,
+                   uint32_t now) {
+    PendingMod *slot = nullptr;
+    for (auto &p : g_pendingMods) {
+        // Re-arming the same rule on the same target refreshes it in place.
+        if (p.used && p.target == target && p.affectedFamily == m.affectedFamily &&
+            p.affectedMask == m.affectedMask && p.affectedIcon == m.affectedIcon) {
+            slot = &p;
+            break;
+        }
+        if (slot == nullptr && (!p.used || Time::Clock::Reached(now, p.untilMs)))
+            slot = &p;
+    }
+    if (slot == nullptr)
+        slot = &g_pendingMods[0]; // all live — steal the first
+    *slot = {target,   caster,  m.affectedFamily,     m.affectedMask,
+             m.affectedIcon, m.op, m.valueMs, now + kPendingModTtlMs, true};
+}
+
+void ConsumePendingMods(Entry &e, uint32_t now) {
+    for (auto &p : g_pendingMods) {
+        if (!p.used || p.target != e.targetGuid ||
+            Time::Clock::Reached(now, p.untilMs))
+            continue;
+        // Caster-scoped exactly like the immediate path, adoption included.
+        if (e.casterGuid != 0 && e.casterGuid != p.caster)
+            continue;
+        if (!AffectedMatchesRaw(
+                Spell::Lookup::RecordForID(static_cast<int>(e.spellId)),
+                p.affectedFamily, p.affectedMask, p.affectedIcon))
+            continue;
+        if (e.casterGuid == 0)
+            e.casterGuid = p.caster;
+        ApplyModOp(e, p.op, p.valueMs, now);
+        p.used = false; // one-shot, like the server's single-holder edit
+        return;
     }
 }
 
@@ -681,6 +793,11 @@ void ApplyDurationModifiers(uint32_t triggerSpellId, uint64_t caster,
                 ApplyMod(e, m, now);
                 break; // one matching aura per (rule, target), like the server
             }
+            // The aura may not be here yet, or may be about to be overwritten by
+            // the cast this trigger sets off. Arm the idempotent ops so the edit
+            // lands when it arrives — see PendingMod.
+            if (OpIsIdempotent(m.op))
+                ArmPendingMod(targets[t], caster, m, now);
         }
     }
 }
@@ -689,8 +806,11 @@ bool RegisterDurationMod(uint32_t triggerSpellId, uint32_t triggerFamily,
                          int32_t triggerSchool, uint32_t affectedFamily,
                          uint64_t affectedMask, uint32_t affectedIcon, int op,
                          int32_t valueMs) {
-    // Trigger must be identified one way or the other.
-    if ((triggerSpellId == 0 && triggerFamily == 0) || affectedMask == 0 ||
+    // Trigger must be identified one way or the other, and the affected aura
+    // needs at least one discriminator past its family — a flag overlap, an
+    // icon, or both. Neither would match every aura of a class.
+    if ((triggerSpellId == 0 && triggerFamily == 0) ||
+        (affectedMask == 0 && affectedIcon == 0) ||
         op < MOD_REFRESH || op > MOD_REMOVE)
         return false;
     for (int i = 0; i < g_modCount; ++i) { // replace an identical rule
@@ -1641,7 +1761,9 @@ int RefreshJudgements(uint64_t unitGuid, uint64_t attackerGuid) {
 uint32_t RefreshDurationByFamily(uint64_t unitGuid, uint32_t family,
                                  uint64_t mask, uint32_t icon,
                                  uint64_t casterGuid) {
-    if (unitGuid == 0 || mask == 0 || casterGuid == 0)
+    // Same selector invariant the rule registrar enforces: family plus at
+    // least one of flag-overlap / icon.
+    if (unitGuid == 0 || (mask == 0 && icon == 0) || casterGuid == 0)
         return 0;
     const uint32_t now = NowMs();
     for (int i = 0; i < g_usedHigh; ++i) {

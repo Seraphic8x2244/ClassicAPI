@@ -15629,10 +15629,13 @@ trigger lands:
 | `triggerFamily` | `SpellFamilyName` of the triggering cast (e.g. `6` priest). |
 | `triggerSchool` | School index the trigger must be (`0` physical … `2` fire, `5` shadow, `6` arcane), or `< 0` for any. Matching by family + school covers a whole class of spells at once — every rank, plus server-added ones — rather than a named ability. |
 | `affectedFamily` | `SpellFamilyName` of the affected aura (e.g. `5` warlock, `11` shaman, `6` priest). |
-| `affectedFamilyFlags` | A `SpellFamilyFlags` bitmask; the affected aura matches if it overlaps. Family + flag is rank-proof (covers every rank at once). |
-| `affectedIcon` | `SpellIconID` the affected aura must have, or `0` to match any. |
+| `affectedFamilyFlags` | A `SpellFamilyFlags` bitmask; the affected aura matches if it overlaps. Family plus flag is rank-proof, so it covers every rank at once. Pass `0` to select on the icon alone. |
+| `affectedIcon` | `SpellIconID` the affected aura must have, or `0` to match any. Give this when the aura has no `SpellFamilyFlags`, which is common for a server's custom spells. An icon is shared by a spell's whole rank ladder, so it stays rank-proof. |
 | `op` | `"refresh"` (reset to full duration), `"reduce"` (subtract `valueSeconds`, removing the aura if it would go non-positive), `"set"` (to `valueSeconds`), `"remove"`. |
 | `valueSeconds` | Amount for `reduce`/`set`; ignored otherwise. |
+
+Give at least one of `affectedFamilyFlags` and `affectedIcon`. A rule with
+neither would match every aura of the class, so it is rejected.
 
 The rule only fires for the aura **cast by the same unit** as the trigger
 (these mechanics act on the caster's own DoT), and misses are excluded for
@@ -15641,8 +15644,9 @@ free (a missed trigger isn't in the packet's hit list).
 Rules keyed to an **exact trigger spellID** (rather than a family + school
 category) are registered inside the DLL instead. `!!!ClassicAPI`'s built-in
 Turtle mods — Conflagrate shaving 3s off the caster's Immolate, Molten Blast
-refreshing the caster's Flame Shock — live in `src/turtle/DurationMods.cpp`,
-and Carnage's roll-gated Rip/Rake refresh in `src/turtle/Carnage.cpp`.
+refreshing the caster's Flame Shock, and Bestial Wrath stretching the pet's
+Scent of Blood to its own length — live in `src/turtle/DurationMods.cpp`, and
+Carnage's roll-gated Rip/Rake refresh in `src/turtle/Carnage.cpp`.
 
 The one rule registered from Lua
 ([Util/AuraDurationModifiers.lua](../AddOns/!!!ClassicAPI/Util/AuraDurationModifiers.lua))

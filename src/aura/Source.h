@@ -61,10 +61,11 @@ bool Get(uint64_t unitGuid, uint32_t spellId, int slot, uint64_t *outCaster,
          uint32_t *outExpirationMs, uint32_t *outDurationMs);
 
 // Refreshes `casterGuid`'s aura on `unitGuid` matching the same selector the
-// duration rules use — SpellFamilyName + family-flag overlap + optional icon
-// (0 = any) — to a full duration from now. Returns the spellID refreshed, or 0
-// if nothing matched. For a mechanic whose duration edit reaches the client
-// too late to be attributed to a cast packet, so no rule can express it.
+// duration rules use — SpellFamilyName plus a family-flag overlap and/or a
+// SpellIconID, at least one of the two — to a full duration from now. Returns
+// the spellID refreshed, or 0 if nothing matched. For a mechanic whose
+// duration edit reaches the client too late to be attributed to a cast packet,
+// so no rule can express it.
 uint32_t RefreshDurationByFamily(uint64_t unitGuid, uint32_t family,
                                  uint64_t mask, uint32_t icon,
                                  uint64_t casterGuid);
@@ -108,8 +109,10 @@ enum DurationModOp {
 };
 
 // Register a server duration-modifier rule from C++. The trigger is matched by
-// exact `triggerSpellId`; the affected aura by SpellFamilyName + a family-flag
-// overlap (+ optional `affectedIcon`, 0 = any). `valueMs` is the reduce/set
+// exact `triggerSpellId`; the affected aura by SpellFamilyName plus an
+// `affectedMask` family-flag overlap and/or an `affectedIcon`, at least one of
+// the two (0 drops that half of the test; a custom spell with no family flags
+// is named by its icon alone). `valueMs` is the reduce/set
 // amount in milliseconds (ignored by refresh/remove). Used by src/turtle
 // modules for the server's built-in mods (the family/school-matched variant is
 // still Lua-registerable via C_UnitAuras.RegisterAuraDurationModifierByTrigger).
