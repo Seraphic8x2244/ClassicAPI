@@ -78,6 +78,12 @@
 //      failed" for a texture the GPU can't hold. It acts only when the slot IS
 //      the scratch: the IMG path decompresses into a private, right-sized
 //      buffer of its own and is left untouched.
+//   6. The recycle-pool free follows the same bound (always on). The free path
+//      files a texture into a bucket with no upper size check; the cave lets
+//      textures larger than the pool can index exist, so freeing one overran
+//      the bucket table (a 2048x2048 crashed at teardown). A hook routes any
+//      texture the table can't index to the non-pooled free instead — the
+//      mirror of the allocator's cave, and the missing half of the size gate.
 //   5. The async fallback guard (always on). FUN_TEXTURE_FORCE_LOAD shoves a
 //      read that never fit the shared async buffer into a 512 KiB static
 //      fallback with no size check — a pre-existing engine bug the stock size
@@ -275,7 +281,8 @@ uintptr_t Cave() { return reinterpret_cast<uintptr_t>(g_cave); }
 
 // ---- state -------------------------------------------------------------------
 
-uint32_t g_poolMax = 0; // what the in-function CMPs admit to the pool
+uint32_t g_poolMax = 0;      // what the in-function CMPs admit to the pool
+uint32_t g_poolIndexMax = 0; // the largest dimension the bucket table can index
 int g_poolSide = 0;
 bool g_strideFixed = false;
 
@@ -284,6 +291,7 @@ bool g_strideFixed = false;
 bool ApplySizeGate() {
     g_poolSide = PoolSide();
     const uint32_t indexable = PoolMaxDimension(g_poolSide);
+    g_poolIndexMax = indexable; // the free-path guard's bound (layer 6)
     const uint32_t scratch = ScratchDimension();
     // A texture that enters the pool never reaches the cave, so it must also
     // fit the scratch as it stands. (A VanillaHelpers install whose scratch
@@ -397,6 +405,38 @@ void __fastcall ForceLoad_h(void *hTexture) {
 
 const Game::HookAutoRegister _forceLoadHook{Offsets::FUN_TEXTURE_FORCE_LOAD, &ForceLoad_h,
                                             reinterpret_cast<void **>(&ForceLoad_o)};
+
+// ---- layer 6: the recycle-pool free follows the same bound ---------------------
+
+using PoolFree_t = void(__fastcall *)(void *tex);
+PoolFree_t PoolFree_o = nullptr;
+using TexGetDesc_t = void(__fastcall *)(void *tex, uint32_t *out);
+using TexFreeRaw_t = void(__fastcall *)(void *tex);
+
+// The pool free files a texture into a bucket keyed by each dimension's
+// power-of-two factor, with no upper bound (see Offsets.h). The allocator's cave
+// lets textures larger than the pool can index exist; freeing one files it past
+// the bucket table and writes through garbage. Exclude the same textures here:
+// route anything the table can't index to the engine's own non-pooled free —
+// exactly the guard's else-branch for too-small / too-many-mip textures. Cold
+// path (texture teardown), so a MinHook here carries no per-frame concern, and
+// nothing else patches this function's code.
+void __fastcall PoolFree_h(void *tex) {
+    if (g_poolIndexMax != 0 && tex != nullptr) {
+        uint32_t desc[16] = {0};
+        reinterpret_cast<TexGetDesc_t>(Offsets::FUN_TEXTURE_GET_DESC)(tex, desc);
+        const uint32_t w = desc[Offsets::OFF_TEXDESC_WIDTH / 4];
+        const uint32_t h = desc[Offsets::OFF_TEXDESC_HEIGHT / 4];
+        if (w > g_poolIndexMax || h > g_poolIndexMax) {
+            reinterpret_cast<TexFreeRaw_t>(Offsets::FUN_TEXTURE_FREE_RAW)(tex);
+            return;
+        }
+    }
+    PoolFree_o(tex);
+}
+
+const Game::HookAutoRegister _poolFreeHook{Offsets::FUN_TEXTURE_POOL_FREE, &PoolFree_h,
+                                           reinterpret_cast<void **>(&PoolFree_o)};
 
 // ---- non-power-of-two ----------------------------------------------------------
 

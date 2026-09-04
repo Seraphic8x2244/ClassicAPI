@@ -7451,6 +7451,23 @@ enum Offsets {
     // pointer as a list head. So the size gate may never admit a dimension the
     // pool can't index unless that dimension is also routed around the pool.
     FUN_GX_TEXTURE_VALIDATE = 0x0058AB10,
+    // The recycle-pool FREE path — the mirror of the allocator, and the other
+    // half the size relaxation has to cover. It files a freed texture into a
+    // bucket indexed by `tz(w>>5) + tz(h>>5)*stride` (tz = power-of-two factor),
+    // gated ONLY by `w>31 && h>31 && mips<8` — there is NO upper bound. Stock
+    // never overran because the allocator refused anything >=1024, so an
+    // oversized texture never existed to be freed; the cave breaks that
+    // invariant, so a 2048x2048 (tz 6 per axis) files at bucket 36-42, past the
+    // 36-entry table, and writes through a garbage list head (verified crash:
+    // MOV [EAX],ECX at 0x004487D9, EAX = out-of-table pointer + 4). Fix
+    // (Texture::DimensionGate): route a texture larger than the pool can index to
+    // the engine's own non-pooled free FUN_TEXTURE_FREE_RAW — exactly what the
+    // guard's else-branch already does for too-small / too-many-mip textures.
+    FUN_TEXTURE_POOL_FREE = 0x00448670,   // __fastcall(tex); the pool free path
+    FUN_TEXTURE_FREE_RAW = 0x0058AD60,    // __fastcall(tex); non-pooled free (device release)
+    FUN_TEXTURE_GET_DESC = 0x0058ADA0,    // __fastcall(tex, out*) — fills width@+4, height@+8
+    OFF_TEXDESC_WIDTH = 0x04,
+    OFF_TEXDESC_HEIGHT = 0x08,
     // THE ACTUAL SIZE CEILING. FUN_00448BD0 runs once at startup and allocates a
     // SINGLE global decode scratch buffer, sized `FUN_005a4b80(2, 0x200, 0x200)`
     // — one 512x512 texture's worth. Every loader points the decoder at it
