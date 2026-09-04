@@ -1515,10 +1515,14 @@ const Net::PacketDispatch::AutoSubscribe _spellGoSub{&SpellGoSub};
 
 // ---- Aura-application co-hooks (timing for proc / triggered auras) -------
 
-// Classify by the absolute aura slot: 0..BUFF_COUNT-1 = buff (helpful),
-// BUFF_COUNT..TOTAL-1 = debuff (harmful).
-int8_t KindForSlot(int slot) {
-    return slot >= Offsets::UNIT_AURA_BUFF_COUNT ? KIND_HARMFUL : KIND_HELPFUL;
+// Classify by the slot's flag nibble (UNIT_AURA_FLAG_HARMFUL), not its range:
+// the server parks debuffs in buff slots once the 16 are full, and the nibble
+// is what records their real polarity. The descriptor write pass has already
+// landed the flags when the application hooks fire (see Aura::Data).
+int8_t KindForSlot(const void *unit, int slot) {
+    return Aura::Data::IsSlotHarmful(static_cast<const uint8_t *>(unit), slot)
+               ? KIND_HARMFUL
+               : KIND_HELPFUL;
 }
 
 // Stamp expiration for an aura that just landed/refreshed in `slot` on `unit`.
@@ -1574,7 +1578,7 @@ void StampApplication(void *unit, uint32_t spellId, int slot) {
     }
     const uint32_t expirationMs = durationMs > 0 ? NowMs() + durationMs : 0;
     StoreFromApplication(unitGuid, spellId, caster, expirationMs, durationMs,
-                         slot, KindForSlot(slot));
+                         slot, KindForSlot(unit, slot));
 }
 
 // Bump the player-stat-inputs signal when an aura change hits the LOCAL

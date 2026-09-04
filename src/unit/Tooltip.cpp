@@ -13,6 +13,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "aura/Data.h"
 #include "guid/Guid.h"
 #include "object/Resolve.h"
 
@@ -20,13 +21,38 @@
 
 namespace Unit::Tooltip {
 
+// The 1-based index the engine's `SetUnitBuff` / `SetUnitDebuff` would need to
+// land on `slot`: one plus the slots before it in ITS range (0..31 or 32..47)
+// that pass the engine's tooltip visibility gate — the exact walk
+// `FUN_00534AC0` / `FUN_00534E30` perform (verified by decompile).
+static int EngineIndexForSlot(const uint8_t *unit, int slot) {
+    const int home =
+        slot < Offsets::UNIT_AURA_BUFF_COUNT ? 0 : Offsets::UNIT_AURA_BUFF_COUNT;
+    int index = 1;
+    for (int s = home; s < slot; ++s) {
+        if (Aura::Data::IsSlotTooltipVisible(unit, s))
+            ++index;
+    }
+    return index;
+}
+
 // `GameTooltip:SetUnitAura(unit, index, [filter])` — modern unified-aura
-// method. 1.12 splits this into `SetUnitBuff` (slot 32) and
-// `SetUnitDebuff` (slot 33); we dispatch to the right one based on the
-// `filter` string ("HELPFUL" → SetUnitBuff, "HARMFUL" → SetUnitDebuff).
+// method. 1.12 has `SetUnitBuff` (slot 32) and `SetUnitDebuff` (slot 33), each
+// indexing its own slot RANGE (0..31 / 32..47) under the engine's tooltip
+// gate. `C_UnitAuras` indexes by the aura's polarity nibble instead (see
+// Aura::Data), so the two index spaces diverge once the server has parked a
+// debuff in a buff slot — and an index an addon got from `C_UnitAuras` must
+// still open the right tooltip. So: resolve (index, filter) to the absolute
+// slot in OUR space, then hand the engine the index THAT slot has within its
+// own range under ITS gate, choosing SetUnitBuff or SetUnitDebuff by where the
+// slot lives. The aura tooltip builder only ever receives spellId / level /
+// stacks, so a debuff in a buff slot renders identically through SetUnitBuff.
 //
-// `filter` defaults to "HELPFUL" when omitted, matching modern
-// behavior. Anything other than a HARMFUL match goes to SetUnitBuff.
+// `filter` defaults to "HELPFUL" when omitted, matching modern behavior; only
+// its HELPFUL/HARMFUL half is read (a PLAYER-filtered index is not an index
+// into the plain list — pass an index from the same plain list, as FrameXML
+// does). A unit with no live CGUnit (out-of-range groupmate) passes straight
+// through: the engine reads the group array by range there, exactly as we do.
 static int __fastcall Script_GameTooltipSetUnitAura(void *L) {
     // Args: self (table), unit (string), index (number), filter (optional string)
     if (Game::Lua::Type(L, 1) != Game::Lua::TYPE_TABLE) {
@@ -51,14 +77,31 @@ static int __fastcall Script_GameTooltipSetUnitAura(void *L) {
         }
     }
 
-    // Drop the filter arg before calling — the existing
-    // SetUnitBuff/SetUnitDebuff take (self, unit, index) only.
-    Game::Lua::SetTop(L, 3);
+    int index = static_cast<int>(Game::Lua::ToNumber(L, 3));
+    bool useDebuffMethod = isHarmful;
+    const auto *unit = static_cast<const uint8_t *>(
+        Game::ResolveUnitToken(Game::Lua::ToString(L, 2)));
+    if (unit != nullptr) {
+        const int slot = Aura::Data::FindNthSlot(
+            unit, index,
+            isHarmful ? Aura::Data::Filter::Harmful : Aura::Data::Filter::Helpful);
+        if (slot >= 0) {
+            index = EngineIndexForSlot(unit, slot);
+            useDebuffMethod = slot >= Offsets::UNIT_AURA_BUFF_COUNT;
+        }
+        // slot < 0: nothing at that index in our space; the raw index goes
+        // through and the engine's own walk shows nothing either.
+    }
+
+    // Rebuild the args as (self, unit, engineIndex) — the engine methods take
+    // exactly those three; the filter string is consumed here.
+    Game::Lua::SetTop(L, 2);
+    Game::Lua::PushNumber(L, static_cast<double>(index));
 
     using Script_t = int(__fastcall *)(void *L);
     auto fn = reinterpret_cast<Script_t>(
-        isHarmful ? Offsets::FUN_SCRIPT_GAMETOOLTIP_SET_UNIT_DEBUFF
-                  : Offsets::FUN_SCRIPT_GAMETOOLTIP_SET_UNIT_BUFF);
+        useDebuffMethod ? Offsets::FUN_SCRIPT_GAMETOOLTIP_SET_UNIT_DEBUFF
+                        : Offsets::FUN_SCRIPT_GAMETOOLTIP_SET_UNIT_BUFF);
     return fn(L);
 }
 

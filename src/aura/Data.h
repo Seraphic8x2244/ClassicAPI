@@ -20,19 +20,27 @@
 // `unit + OFF_CGUNIT_OBJECT_FIELDS`; the layout is documented in
 // `Offsets.h` under `OFF_UNIT_FIELD_AURA*`.
 //
-// Slot indexing convention used here matches the engine's:
+// Slots are absolute 0..47. The server SEATS positive auras in 0..31 and
+// negative ones in 32..47, but that is a preference, not a rule: once the 16
+// debuff slots are full it parks further debuffs in 0..31 (and sets
+// UNIT_FLAG_AURAS_VISIBLE so the client renders them). An aura's real polarity
+// is the per-slot flag nibble (UNIT_AURA_FLAG_HELPFUL / _HARMFUL), which the
+// server writes for every visible aura — that is what `Filter` selects on
+// here. The engine's own UnitBuff/UnitDebuff split by slot range and so report
+// a spilled debuff as a buff; that is a 1.12 UI limitation we deliberately do
+// not mirror (retail's contract is the aura's actual polarity). A polarity
+// walk visits its home range first, then the other range, so indices stay
+// exactly what they were in the common no-spill case.
 //
-//   slot 0..31  → buffs   (helpful)
-//   slot 32..47 → debuffs (harmful)
-//
-// Callers that take a 1-based Lua index into "buffs" or "debuffs"
-// translate to the absolute 0..47 slot before calling in.
+// Callers that take a 1-based Lua index into "buffs" or "debuffs" translate
+// to the absolute 0..47 slot before calling in.
 
 namespace Aura::Data {
 
-// Filter for slot iteration. The engine's `UnitBuff` / `UnitDebuff`
-// pick one direction; modern `C_UnitAuras.GetAuraDataByIndex` defaults
-// to helpful when no filter is specified.
+// Filter for slot iteration: the aura's polarity per its flag nibble (see the
+// file header). The engine's `UnitBuff` / `UnitDebuff` pick one direction;
+// modern `C_UnitAuras.GetAuraDataByIndex` defaults to helpful when no filter
+// is specified.
 enum class Filter { Helpful, Harmful };
 
 // How a resolved aura is emitted onto the Lua stack by the single-aura push
@@ -85,11 +93,32 @@ uint32_t ReadSpellID(const uint8_t *unit, int slot);
 // to decide whether to surface an aura through Lua.
 bool IsSlotPopulated(const uint8_t *unit, int slot);
 
-// Finds the absolute slot of the `oneBasedIndex`-th populated aura
-// matching `filter`. Returns -1 if no such aura. Walks
-// 0..UNIT_AURA_BUFF_COUNT-1 for Helpful, UNIT_AURA_BUFF_COUNT..
-// UNIT_AURA_TOTAL-1 for Harmful. When `playerOnly` is true, only auras
-// the local player cast (per `IsPlayerCast`) are counted/returned.
+// The aura's polarity from its flag nibble: true iff the slot carries
+// UNIT_AURA_FLAG_HARMFUL. False for an empty slot or a null unit. This, not
+// the slot range, is what `Filter` selects on (see the file header).
+bool IsSlotHarmful(const uint8_t *unit, int slot);
+
+// The engine's TOOLTIP visibility gate for a slot: occupied, visible nibble,
+// and the spell passes `FUN_GAMETOOLTIP_AURA_VISIBLE` — exactly what
+// `SetUnitBuff` / `SetUnitDebuff` count while turning an index into a slot.
+// Differs from `IsSlotPopulated` (the UnitBuff gate), so use THIS to compute
+// the index the engine's tooltip methods expect for a given slot.
+bool IsSlotTooltipVisible(const uint8_t *unit, int slot);
+
+// The i-th slot (0..UNIT_AURA_TOTAL-1) in the order a `filter` walk visits the
+// descriptor: the polarity's home range first (helpful 0..31, harmful 32..47),
+// then the other range, where spilled debuffs live. Every enumeration that
+// hands out indices or slot lists uses this so they agree on order.
+int SlotInFilterOrder(Filter filter, int i);
+
+// `SlotMatches` plus the polarity test: populated, of `filter`'s polarity, and
+// passing `match`.
+bool SlotMatchesFilter(const uint8_t *unit, int slot, Filter filter,
+                       const Match &match);
+
+// Finds the absolute slot of the `oneBasedIndex`-th populated aura of
+// `filter`'s polarity that passes `match`. Returns -1 if no such aura. Walks
+// all 48 slots in `SlotInFilterOrder`.
 int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
                 Match match = {});
 

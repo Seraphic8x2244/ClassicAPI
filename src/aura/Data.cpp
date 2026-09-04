@@ -272,6 +272,49 @@ bool IsSlotPopulated(const uint8_t *unit, int slot) {
     return IsVisible(SpellRecord(spellID));
 }
 
+bool IsSlotHarmful(const uint8_t *unit, int slot) {
+    if (slot < 0 || slot >= Offsets::UNIT_AURA_TOTAL)
+        return false;
+    auto *desc = Descriptor(unit);
+    if (desc == nullptr)
+        return false;
+    const uint8_t byte = *(desc + Offsets::OFF_UNIT_FIELD_AURAFLAGS + slot / 2);
+    const uint8_t nibble = (byte >> ((slot & 1) * 4)) & 0xF;
+    return (nibble & Offsets::UNIT_AURA_FLAG_HARMFUL) != 0;
+}
+
+bool IsSlotTooltipVisible(const uint8_t *unit, int slot) {
+    if (slot < 0 || slot >= Offsets::UNIT_AURA_TOTAL)
+        return false;
+    auto *desc = Descriptor(unit);
+    if (desc == nullptr)
+        return false;
+    const int spellID = *reinterpret_cast<const int *>(
+        desc + Offsets::OFF_UNIT_FIELD_AURA + slot * 4);
+    if (spellID <= 0) // the engine's own `0 < id` test (signed)
+        return false;
+    const uint8_t byte = *(desc + Offsets::OFF_UNIT_FIELD_AURAFLAGS + slot / 2);
+    const uint8_t nibble = (byte >> ((slot & 1) * 4)) & 0xF;
+    if ((nibble & Offsets::UNIT_AURA_VISIBLE_MASK) == 0)
+        return false;
+    const uint8_t *rec = SpellRecord(static_cast<uint32_t>(spellID));
+    if (rec == nullptr)
+        return false;
+    using Fn = char(__fastcall *)(const uint8_t *);
+    auto fn = reinterpret_cast<Fn>(
+        static_cast<uintptr_t>(Offsets::FUN_GAMETOOLTIP_AURA_VISIBLE));
+    return fn(rec) != 0;
+}
+
+int SlotInFilterOrder(Filter filter, int i) {
+    // Harmful: 32..47 first, then 0..31 (where the server parks debuffs once
+    // the 16 are full). Helpful: 0..31 then 32..47 — positive auras never
+    // spill downward in practice, so that tail is a no-op safety net.
+    if (filter == Filter::Harmful)
+        return (i + Offsets::UNIT_AURA_BUFF_COUNT) % Offsets::UNIT_AURA_TOTAL;
+    return i;
+}
+
 bool IsPlayerCast(const uint8_t *unit, int slot) {
     const uint32_t spellID = ReadSpellID(unit, slot);
     if (spellID == 0)
@@ -342,6 +385,15 @@ bool SlotMatches(const uint8_t *unit, int slot, const Match &match) {
     return IsSlotPopulated(unit, slot) && PopulatedSlotMatches(unit, slot, match);
 }
 
+bool SlotMatchesFilter(const uint8_t *unit, int slot, Filter filter,
+                       const Match &match) {
+    if (!IsSlotPopulated(unit, slot))
+        return false;
+    if (IsSlotHarmful(unit, slot) != (filter == Filter::Harmful))
+        return false;
+    return PopulatedSlotMatches(unit, slot, match);
+}
+
 // Group-array analog of IsPlayerCast: the member has no descriptor, so there is
 // no slot to attribute by and the cache is consulted by (guid, spellID) alone.
 // A miss counts as "not the player" (same as IsPlayerCast).
@@ -355,15 +407,10 @@ int FindNthSlot(const uint8_t *unit, int oneBasedIndex, Filter filter,
                 Match match) {
     if (unit == nullptr || oneBasedIndex < 1)
         return -1;
-    const int start = (filter == Filter::Harmful)
-                          ? Offsets::UNIT_AURA_BUFF_COUNT
-                          : 0;
-    const int end = (filter == Filter::Harmful)
-                        ? Offsets::UNIT_AURA_TOTAL
-                        : Offsets::UNIT_AURA_BUFF_COUNT;
     int matches = 0;
-    for (int slot = start; slot < end; ++slot) {
-        if (!SlotMatches(unit, slot, match))
+    for (int i = 0; i < Offsets::UNIT_AURA_TOTAL; ++i) {
+        const int slot = SlotInFilterOrder(filter, i);
+        if (!SlotMatchesFilter(unit, slot, filter, match))
             continue;
         if (++matches == oneBasedIndex)
             return slot;
@@ -375,16 +422,14 @@ int FindSlotBySpellID(const uint8_t *unit, uint32_t spellID,
                       const Filter *filter, Match match) {
     if (unit == nullptr || spellID == 0)
         return -1;
-    const int start = (filter != nullptr && *filter == Filter::Harmful)
-                          ? Offsets::UNIT_AURA_BUFF_COUNT
-                          : 0;
-    const int end = (filter != nullptr && *filter == Filter::Helpful)
-                        ? Offsets::UNIT_AURA_BUFF_COUNT
-                        : Offsets::UNIT_AURA_TOTAL;
-    for (int slot = start; slot < end; ++slot) {
+    for (int i = 0; i < Offsets::UNIT_AURA_TOTAL; ++i) {
+        const int slot = (filter != nullptr) ? SlotInFilterOrder(*filter, i) : i;
         if (!IsSlotPopulated(unit, slot))
             continue;
         if (ReadSpellID(unit, slot) != spellID)
+            continue;
+        if (filter != nullptr &&
+            IsSlotHarmful(unit, slot) != (*filter == Filter::Harmful))
             continue;
         if (!PopulatedSlotMatches(unit, slot, match))
             continue;
@@ -397,17 +442,15 @@ int FindSlotBySpellName(const uint8_t *unit, const char *spellName,
                         const Filter *filter, Match match) {
     if (unit == nullptr || spellName == nullptr || *spellName == '\0')
         return -1;
-    const int start = (filter != nullptr && *filter == Filter::Harmful)
-                          ? Offsets::UNIT_AURA_BUFF_COUNT
-                          : 0;
-    const int end = (filter != nullptr && *filter == Filter::Helpful)
-                        ? Offsets::UNIT_AURA_BUFF_COUNT
-                        : Offsets::UNIT_AURA_TOTAL;
-    for (int slot = start; slot < end; ++slot) {
+    for (int i = 0; i < Offsets::UNIT_AURA_TOTAL; ++i) {
+        const int slot = (filter != nullptr) ? SlotInFilterOrder(*filter, i) : i;
         if (!IsSlotPopulated(unit, slot))
             continue;
         const char *name = LocalizedSpellName(SpellRecord(ReadSpellID(unit, slot)));
         if (name == nullptr || std::strcmp(name, spellName) != 0)
+            continue;
+        if (filter != nullptr &&
+            IsSlotHarmful(unit, slot) != (*filter == Filter::Harmful))
             continue;
         if (!PopulatedSlotMatches(unit, slot, match))
             continue;
@@ -670,7 +713,7 @@ static Attribution CachedAttribution(const Aura::Source::CachedAura &c) {
 
 void Push(void *L, const uint8_t *unit, int slot, Emit emit) {
     const uint32_t spellID = ReadSpellID(unit, slot);
-    const bool isHelpful = slot < Offsets::UNIT_AURA_BUFF_COUNT;
+    const bool isHelpful = !IsSlotHarmful(unit, slot); // nibble, not slot range
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
     PushEnriched(L, UnitGuid(unit), spellID, isHelpful, ReadStacks(unit, slot),
                  unitLevel, unit != nullptr && unit == LocalPlayer(), slot,
@@ -828,8 +871,10 @@ void AppendCacheFallbacks(void *L, const uint8_t *unit, Filter filter,
 
 namespace {
 
-// Absolute slot range [start, end) for a filter, matching the descriptor
-// convention (helpful 0..31, harmful 32..47).
+// Absolute slot range [start, end) for a filter in the GROUP ARRAY (helpful
+// 0..31, harmful 32..47). The array carries spell IDs only — no flag nibble —
+// so the seating range is the only polarity the out-of-range path has. (The
+// descriptor path reads the nibble instead; see SlotInFilterOrder.)
 void GroupRange(Filter filter, int &start, int &end) {
     start = (filter == Filter::Harmful) ? Offsets::UNIT_AURA_BUFF_COUNT : 0;
     end = (filter == Filter::Harmful) ? Offsets::UNIT_AURA_TOTAL
@@ -1125,11 +1170,10 @@ void AppendGroupAuras(void *L, uint64_t guid, Filter filter, Match match,
 int CollectSlots(const uint8_t *unit, uint64_t guid, Filter filter, Match match,
                  int *out, int cap) {
     int n = 0;
-    int start, end;
-    GroupRange(filter, start, end); // same [start, end) for the descriptor
     if (unit != nullptr) {
-        for (int slot = start; slot < end && n < cap; ++slot) {
-            if (SlotMatches(unit, slot, match))
+        for (int i = 0; i < Offsets::UNIT_AURA_TOTAL && n < cap; ++i) {
+            const int slot = SlotInFilterOrder(filter, i);
+            if (SlotMatchesFilter(unit, slot, filter, match))
                 out[n++] = slot;
         }
         // The cache fallback yields only while the descriptor shows no visible
@@ -1152,6 +1196,8 @@ int CollectSlots(const uint8_t *unit, uint64_t guid, Filter filter, Match match,
     if (arr == nullptr)
         return 0;
     Aura::Source::ObserveGroupAuras(guid, arr);
+    int start, end;
+    GroupRange(filter, start, end);
     for (int slot = start; slot < end && n < cap; ++slot) {
         if (GroupSlotMatches(guid, arr, slot, match))
             out[n++] = OPAQUE_GROUP + slot;

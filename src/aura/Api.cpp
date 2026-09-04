@@ -21,7 +21,9 @@
 // tokens separated by `|` and/or whitespace, each optionally negated with a
 // leading `!`. Whole-token matching, so `RAID_PLAYER_DISPELLABLE` is not
 // mistaken for `PLAYER` and `!PLAYER` is a negation rather than a match.
-// Honored: `HELPFUL` / `HARMFUL` (descriptor slot ranges), `PLAYER` /
+// Honored: `HELPFUL` / `HARMFUL` (the aura's flag-nibble polarity — see
+// Data.h; NOT the slot range, which misreads debuffs spilled into buff
+// slots), `PLAYER` /
 // `!PLAYER` (caster == / != the local player, from the Aura::Source cache),
 // `DISPELLABLE` / `!DISPELLABLE` (dispel type is / isn't one a
 // dispel/purge/steal can remove — Spell.dbc Dispel ∈ Magic/Curse/Disease/
@@ -472,19 +474,15 @@ int __fastcall Script_UnitAuraBySlot(void *L) {
     return PushAuraBySlot(L, Data::Emit::Positional);
 }
 
-// Iterates one slot range and pushes AuraData tables into `outer` at
-// sequential keys starting from `nextKey`. Updates `nextKey` so a
-// follow-up call can append to the same outer table.
+// Iterates the auras of one polarity (in `SlotInFilterOrder`, the same order
+// the by-index getters use) and pushes AuraData tables into `outer` at
+// sequential keys starting from `nextKey`. Updates `nextKey` so a follow-up
+// call can append to the same outer table.
 void AppendRangeToArray(void *L, const uint8_t *unit, int outerIdx,
                        Data::Filter filter, int &nextKey, Data::Match match) {
-    const int start = (filter == Data::Filter::Harmful)
-                          ? Offsets::UNIT_AURA_BUFF_COUNT
-                          : 0;
-    const int end = (filter == Data::Filter::Harmful)
-                        ? Offsets::UNIT_AURA_TOTAL
-                        : Offsets::UNIT_AURA_BUFF_COUNT;
-    for (int slot = start; slot < end; ++slot) {
-        if (!Data::SlotMatches(unit, slot, match))
+    for (int i = 0; i < Offsets::UNIT_AURA_TOTAL; ++i) {
+        const int slot = Data::SlotInFilterOrder(filter, i);
+        if (!Data::SlotMatchesFilter(unit, slot, filter, match))
             continue;
         Game::Lua::PushNumber(L, static_cast<double>(nextKey++));
         Data::Push(L, unit, slot);

@@ -1497,6 +1497,16 @@ enum Offsets {
     UNIT_AURA_DEBUFF_COUNT = 16,               // slot range 32..47 (harmful)
     UNIT_AURA_TOTAL = 48,
     UNIT_AURA_VISIBLE_MASK = 0x0E,             // nibble mask used by the engine's visibility gate
+    // Per-slot flag nibble bits as the server writes them (tortoise-wow
+    // SpellAuraHolder::SetAuraFlag, verified): a positive aura gets HELPFUL
+    // (+ CANCELABLE unless SPELL_ATTR_CANT_CANCEL), a negative aura gets
+    // HARMFUL. This is the aura's real polarity. The slot range is only where
+    // the server preferred to seat it — once the 16 debuff slots are full it
+    // parks further debuffs in 0..31 (and sets UNIT_FLAG_AURAS_VISIBLE so the
+    // client renders them), so a slot number alone misreads those.
+    UNIT_AURA_FLAG_CANCELABLE = 0x01,
+    UNIT_AURA_FLAG_HELPFUL = 0x04,
+    UNIT_AURA_FLAG_HARMFUL = 0x08,
 
     // PLAYER_FIELD_MOD_DAMAGE_DONE_POS/NEG — the player's per-school spell
     // damage bonus. Offsets from the engine's own UpdateField name/index
@@ -1528,6 +1538,15 @@ enum Offsets {
     // `+0x2B0`. Both `Script_UnitBuff` and `Script_UnitDebuff` call
     // it to filter their aura iteration; we call it the same way.
     FUN_SPELL_IS_VISIBLE_AURA = 0x00519860,
+    // The TOOLTIP variant of the gate: what `Script_GameTooltip_SetUnitBuff`
+    // (0x00534AC0) / `SetUnitDebuff` (0x00534E30) apply per slot while
+    // turning a Lua index into a slot. `__fastcall(spellRecord) -> bool`:
+    // Attributes & 0x80 (HIDDEN_CLIENTSIDE) clear, AttributesEx & 0x10000000
+    // (NO_AURA_ICON) clear, and no EffectApplyAuraName in {44, 45, 151}
+    // (the tracking auras). Verified by decompile; differs from the UnitBuff
+    // gate above, so an index into one space is not an index into the other
+    // — `GameTooltip:SetUnitAura` counts with THIS one when it translates.
+    FUN_GAMETOOLTIP_AURA_VISIBLE = 0x00534DF0,
 
     // Player-only aura timing tables. Unlike UNIT_FIELD_AURA (which is
     // populated for any unit but has no timing info), these are the
