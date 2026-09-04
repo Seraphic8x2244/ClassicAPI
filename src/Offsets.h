@@ -7385,6 +7385,107 @@ enum Offsets {
     FUN_GX_TEXFLAGS_INIT = 0x0058A980,
     FUN_TEXTURE_GET_RENDERABLE = 0x0044ACF0,
 
+    // --- Texture dimension gates (power-of-two / max size) --------------------
+    // 1.12 rejects a non-power-of-two texture TWICE, and both are plain software
+    // checks — no device caps are consulted for the POT rule at either site:
+    //   1. the allocator/recycler FUN_00448450, which returns NULL outright
+    //      (`TEST w,w-1 / JNZ reject` per axis, then `CMP dim,0x400 / JAE`);
+    //   2. the GX create validator FUN_0058AB10, which re-tests POT for every
+    //      texture type but 2 (type 0 = 2D, 1 = cubemap — the BLP loader passes
+    //      `width == height*6` as the type, and FUN_00542180-style atlas creates
+    //      pass 0).
+    // Verified unchanged in both later clients: 3.3.5 FUN_00681d90 and 4.3.4
+    // FUN_00840d30 carry the validator's POT test verbatim, same type-2
+    // exemption. What they DO change is the allocator: its dimension test is
+    // demoted to a pool-eligibility window (`dim - 0x20 < 0x1e1`, i.e. [32,512]),
+    // so an out-of-range dimension skips the recycle pool and allocates fresh
+    // rather than failing. That demotion is only safe there because 3.3.5 clamps
+    // its device-caps max to the scratch size (1024) and lets the validator carry
+    // the bound. 1.12's validator ALSO compares against the per-type caps max
+    // (`caps + 0x60 + type*4`, caps via FUN_0058A230) — but that value is raw
+    // hardware (a 2560x1080 passed it), so in 1.12 the allocator's hardcoded
+    // 0x400 is the ONLY thing protecting the decode scratch described below. It
+    // is not redundant. Do not port the demotion without porting a bound.
+    //
+    // The recycle pool is indexed by log2(dim >> 5) and its hit test compares
+    // only flags/type/miplevels — never width/height — so an NPOT texture must
+    // never reach it or it recycles a bucket of unrelated dimensions. Any patch
+    // relaxing the POT rule therefore has to route the failures through a bound
+    // check and THEN to the pool-skip site — never simply delete them, and never
+    // straight to pool-skip (see CODE ORDER MATTERS below).
+    FUN_GX_TEXTURE_ALLOC = 0x00448450,
+    PATCH_TEXALLOC_POT_W_JMP = 0x004484AE,  // 0F 85 rel32 -> VA_TEXALLOC_REJECT
+    PATCH_TEXALLOC_POT_H_JMP = 0x004484B9,  // 0F 85 rel32 -> VA_TEXALLOC_REJECT
+    // `CMP EBX,imm32` (81 FB) / `CMP EAX,imm32` (3D) — the size bound per axis,
+    // 0x400 stock. VanillaHelpers.dll leaves these and flips the jumps below
+    // from 0F 83 (JAE) to 0F 87 (JA) so exactly-1024 passes.
+    PATCH_TEXALLOC_SIZE_W_IMM = 0x004484C1,
+    PATCH_TEXALLOC_SIZE_H_IMM = 0x004484CC,
+    PATCH_TEXALLOC_SIZE_W_JMP = 0x004484C5, // 0F 83 rel32 -> VA_TEXALLOC_REJECT
+    PATCH_TEXALLOC_SIZE_H_JMP = 0x004484D0, // 0F 83 rel32 -> VA_TEXALLOC_REJECT
+    VA_TEXALLOC_POOL_SKIP = 0x0044864B,     // "skip the pool, create fresh"
+    VA_TEXALLOC_REJECT = 0x00448665,        // XOR EAX,EAX; RET 0x14
+    // CODE ORDER MATTERS: the POT jumps sit ABOVE the size CMPs, so a POT
+    // failure retargeted straight to VA_TEXALLOC_POOL_SKIP jumps OVER the size
+    // bound — an NPOT 3000x3000 would reach the decoder unbounded. Any NPOT
+    // relaxation must route POT failures through a bound check first
+    // (Texture::DimensionGate does it with a code cave). At the jump sites EBX =
+    // width and EAX = height, EDI = 0 and the 9-dword descriptor at [EBP-0x2C]
+    // is complete, so the pool-skip tail is enterable from any of them.
+    //
+    // Recycle-pool index arithmetic, `index = h_log + w_log * SIDE`, SIDE = 5
+    // for the stock 5x5 (32..512) table. VanillaHelpers grows the table to 6x6
+    // (its init-count immediate below reads 36 instead of 25) but leaves BOTH of
+    // these at stride 5, so a log of 5 on either axis collides: 32x1024 shares a
+    // bucket with 64x32, 64x1024 with 128x32 — and the bucket match never
+    // compares w/h, so the wrong-size texture is silently recycled. Fix = rewrite
+    // each 5-byte pair to `IMUL r,r,6; ADD r,other` (6B F6 06 03 F3 at the
+    // allocator, 6B DB 06 03 D8 at free), which preserves whichever operand
+    // stock treats as the row and only changes the stride. Stock's alloc and
+    // free agree with each other, so the fixed pair does too.
+    PATCH_TEXPOOL_INDEX_STRIDE_ALLOC = 0x00448529, // 8D 04 B3 03 F0  LEA EAX,[EBX+ESI*4]; ADD ESI,EAX
+    PATCH_TEXPOOL_INDEX_STRIDE_FREE = 0x004487AD,  // 8D 0C 98 03 D9  LEA ECX,[EAX+EBX*4]; ADD EBX,ECX
+    PATCH_TEXPOOL_INIT_COUNT = 0x00447C45,         // B9 imm32 — bucket count: 25 stock, 36 VanillaHelpers
+    // The stock table lives at 0x00B05BE8 (25 x 12 bytes) and ends EXACTLY at
+    // VAR_TEXTURE_DECODE_SCRATCH — an out-of-range bucket index reads the scratch
+    // pointer as a list head. So the size gate may never admit a dimension the
+    // pool can't index unless that dimension is also routed around the pool.
+    FUN_GX_TEXTURE_VALIDATE = 0x0058AB10,
+    // THE ACTUAL SIZE CEILING. FUN_00448BD0 runs once at startup and allocates a
+    // SINGLE global decode scratch buffer, sized `FUN_005a4b80(2, 0x200, 0x200)`
+    // — one 512x512 texture's worth. Every loader points the decoder at it
+    // (`texObj + 0x120`; see FUN_0044A260's param_1==0 branch and FUN_0044A560),
+    // and the decoder writes rows with no bounds check, so a texture larger than
+    // this buffer overruns the heap. The allocator's `< 0x400` gate is therefore
+    // NOT redundant with the validator's device-caps max — the caps max runs to
+    // thousands, this buffer does not. VanillaHelpers.dll patches both 0x200
+    // immediates to 0x400 in the same function it relaxes the size limit in;
+    // the pairing is mandatory, not incidental. Verified by crash: a 2560x1080
+    // TGA faulted in the decoder's pixel writer at 0x004492E5 (ACCESS_VIOLATION,
+    // write) 2.6x past a 1024x1024 buffer.
+    // Single caller (boot, 0x00402862); the matching free + NULL is the exit
+    // teardown FUN_00448D30. No mid-session re-init path exists, and the five
+    // readers all re-read the global at use time, so the pointer can be swapped
+    // for a larger engine-allocated buffer without a hook.
+    FUN_TEXTURE_DECODE_SCRATCH_ALLOC = 0x00448BD0,
+    VAR_TEXTURE_DECODE_SCRATCH = 0x00B05D14, // void* — the buffer itself
+    // The two size immediates the boot alloc feeds FUN_GX_FORMAT_IMAGE_BYTES:
+    // `MOV EDX,imm32` is width (BA imm32), `PUSH imm32` is height (68 imm32).
+    // Read them back (+1) to learn what the buffer was ACTUALLY sized to on this
+    // DLL stack — 0x200 stock, 0x400 once VanillaHelpers has run.
+    PATCH_TEXDECODE_SCRATCH_DIM_W = 0x00448BE1,
+    PATCH_TEXDECODE_SCRATCH_DIM_H = 0x00448BDC,
+    // __fastcall(ecx = format, edx = width, [stack] = height) -> total bytes for
+    // the image plus its mip chain plus the per-level row-pointer table.
+    FUN_GX_FORMAT_IMAGE_BYTES = 0x005A4B80,
+    // The `NEG EAX; SBB EAX,EAX` (F7 D8 1B C0) pair inside the validator's isPOT
+    // idiom `(x & (x-1)) -> NEG/SBB -> INC -> TEST/JZ`, once per axis. The two
+    // axes share the final TEST/JZ with the type-2 branch, so the arithmetic is
+    // the surgical patch point — neutering the shared JZ would also disable the
+    // type-2 flags check.
+    PATCH_TEXVALIDATE_POT_W = 0x0058AB7C,
+    PATCH_TEXVALIDATE_POT_H = 0x0058AB8D,
+
     // --- Inline-texture positioning (slice 1: measure/emit integration) --------
     // The 1.12 text pipeline builds a layout as a list of render "nodes" (one
     // per wrapped line); each node owns per-font-page glyph vertex batches and a
