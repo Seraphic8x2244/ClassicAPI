@@ -75,11 +75,11 @@
 //      pending and the texture stays invisible, the normal not-loaded state.
 //      So a BLP FILE is bounded by the shared buffer (2 MiB stock, 32 MiB with
 //      VanillaHelpers) — gracefully. TGA reads are synchronous and unaffected.
-//   NPOT (default on, `_classicapi_NonPowerOfTwoTextures`). POT failures go to
-//      the cave (fit, then fresh allocation — never the pool, whose log2 index
-//      is meaningless for NPOT), and the validator's own POT re-test is forced
-//      true. Verified in-game for the TGA/UI path (clamped UVs, single mip);
-//      NPOT BLPs with DXT blocks or mip chains are untested.
+//   NPOT (always on). POT failures go to the cave (fit, then fresh allocation
+//      — never the pool, whose log2 index is meaningless for NPOT), and the
+//      validator's own POT re-test is forced true. Verified in-game for the
+//      TGA/UI path (clamped UVs, single mip); NPOT BLPs with DXT blocks or mip
+//      chains are untested.
 //
 // Applied from module registration — glue boot and every FrameXML init — which
 // is after every other DLL's load-time patching, so the values read back are
@@ -257,7 +257,6 @@ uintptr_t Cave() { return reinterpret_cast<uintptr_t>(g_cave); }
 uint32_t g_poolMax = 0; // what the in-function CMPs admit to the pool
 int g_poolSide = 0;
 bool g_strideFixed = false;
-bool g_nonPowerOfTwo = true;
 
 // ---- layer 1: pool eligibility follows the engine -----------------------------
 
@@ -327,20 +326,6 @@ const Game::HookAutoRegister _forceLoadHook{Offsets::FUN_TEXTURE_FORCE_LOAD, &Fo
 
 // ---- non-power-of-two ----------------------------------------------------------
 
-struct Site {
-    uintptr_t addr;
-    unsigned len;
-};
-constexpr Site kNpotSites[] = {
-    {Offsets::PATCH_TEXALLOC_POT_W_JMP, 6},
-    {Offsets::PATCH_TEXALLOC_POT_H_JMP, 6},
-    {Offsets::PATCH_TEXVALIDATE_POT_W, 4},
-    {Offsets::PATCH_TEXVALIDATE_POT_H, 4},
-};
-constexpr int kNpotSiteCount = sizeof kNpotSites / sizeof kNpotSites[0];
-uint8_t g_npotOriginal[kNpotSiteCount][6];
-bool g_npotSnapshot = false;
-
 // The validator computes "is a power of two" as
 //     EAX = x & (x-1); NEG EAX; SBB EAX,EAX; INC EAX; TEST EAX,EAX; JZ fail
 // so replacing NEG/SBB with `XOR EAX,EAX` leaves the INC to produce 1 and the
@@ -348,39 +333,17 @@ bool g_npotSnapshot = false;
 // the type-2 branch — which reaches the same TEST through its own SBB — intact.
 constexpr uint8_t kPotTestForced[4] = {0x31, 0xC0, 0x90, 0x90}; // XOR EAX,EAX; NOP; NOP
 
-// Nobody else patches these four sites, so the snapshot is stock — but reading
-// it back is still cheaper to trust than a byte pattern we assumed.
-void SnapshotNpotSites() {
-    if (g_npotSnapshot)
-        return;
-    for (int i = 0; i < kNpotSiteCount; ++i)
-        std::memcpy(g_npotOriginal[i], reinterpret_cast<const void *>(kNpotSites[i].addr),
-                    kNpotSites[i].len);
-    g_npotSnapshot = true;
-}
-
-bool ApplyNonPowerOfTwo(bool enable) {
-    SnapshotNpotSites();
-    bool ok = true;
-    if (enable) {
-        // JNZ (not a power of two) -> the cave: fit the scratch, then a fresh
-        // allocation — never the pool, whose log2 index cannot describe NPOT.
-        ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_W_JMP, 0x85, Cave()) && ok;
-        ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_H_JMP, 0x85, Cave()) && ok;
-        ok = Common::PatchBytes(reinterpret_cast<void *>(Offsets::PATCH_TEXVALIDATE_POT_W),
-                                kPotTestForced, sizeof kPotTestForced) &&
-             ok;
-        ok = Common::PatchBytes(reinterpret_cast<void *>(Offsets::PATCH_TEXVALIDATE_POT_H),
-                                kPotTestForced, sizeof kPotTestForced) &&
-             ok;
-    } else {
-        for (int i = 0; i < kNpotSiteCount; ++i)
-            ok = Common::PatchBytes(reinterpret_cast<void *>(kNpotSites[i].addr), g_npotOriginal[i],
-                                    kNpotSites[i].len) &&
-                 ok;
-    }
-    if (ok)
-        g_nonPowerOfTwo = enable;
+bool ApplyNonPowerOfTwo() {
+    // JNZ (not a power of two) -> the cave: fit the scratch, then a fresh
+    // allocation — never the pool, whose log2 index cannot describe NPOT.
+    bool ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_W_JMP, 0x85, Cave());
+    ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_H_JMP, 0x85, Cave()) && ok;
+    ok = Common::PatchBytes(reinterpret_cast<void *>(Offsets::PATCH_TEXVALIDATE_POT_W),
+                            kPotTestForced, sizeof kPotTestForced) &&
+         ok;
+    ok = Common::PatchBytes(reinterpret_cast<void *>(Offsets::PATCH_TEXVALIDATE_POT_H),
+                            kPotTestForced, sizeof kPotTestForced) &&
+         ok;
     return ok;
 }
 
@@ -391,40 +354,26 @@ void ApplyGates() {
     if (!ApplySizeGate())
         return;
     ApplyStrideFix();
-    ApplyNonPowerOfTwo(g_nonPowerOfTwo);
+    ApplyNonPowerOfTwo();
 }
 
 // ---- Lua ---------------------------------------------------------------------
 
-// `_classicapi_NonPowerOfTwoTextures([enable])` -> bool
-// Returns the state after the call; with no argument it only reports. The engine
-// caches textures by path for the session, so a texture that failed under the
-// old setting needs a different path to be retried.
-int __fastcall Script_NonPowerOfTwoTextures(void *L) {
-    if (Game::Lua::Type(L, 1) > Game::Lua::TYPE_NIL)
-        ApplyNonPowerOfTwo(Game::Lua::ToBoolean(L, 1) != 0);
-    Game::Lua::PushBool(L, g_nonPowerOfTwo);
-    return 1;
-}
-
-// `_classicapi_TextureLimits()`
-//   -> scratchSide, poolMax, poolSide, deviceMax, nonPowerOfTwo, strideFixed
-// scratchSide is the high-water mark of what has been loaded; deviceMax is the
-// GPU's own ceiling and the only one enforced.
+// `_classicapi_TextureLimits()` -> scratchSide, poolMax, poolSide, deviceMax, strideFixed
+// What the gate is actually working with, for /dump. scratchSide is the
+// high-water mark of what has been loaded; deviceMax is the GPU's own ceiling
+// and the only one enforced.
 int __fastcall Script_TextureLimits(void *L) {
     Game::Lua::PushNumber(L, static_cast<double>(ScratchDimension()));
     Game::Lua::PushNumber(L, static_cast<double>(g_poolMax));
     Game::Lua::PushNumber(L, static_cast<double>(g_poolSide));
     Game::Lua::PushNumber(L, static_cast<double>(DeviceMaxDimension()));
-    Game::Lua::PushBool(L, g_nonPowerOfTwo);
     Game::Lua::PushBool(L, g_strideFixed);
-    return 6;
+    return 5;
 }
 
 void RegisterLuaFunctions() {
     ApplyGates();
-    Game::Lua::RegisterGlobalFunction("_classicapi_NonPowerOfTwoTextures",
-                                      &Script_NonPowerOfTwoTextures);
     Game::Lua::RegisterGlobalFunction("_classicapi_TextureLimits", &Script_TextureLimits);
 }
 
