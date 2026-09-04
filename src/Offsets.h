@@ -7478,6 +7478,49 @@ enum Offsets {
     // __fastcall(ecx = format, edx = width, [stack] = height) -> total bytes for
     // the image plus its mip chain plus the per-level row-pointer table.
     FUN_GX_FORMAT_IMAGE_BYTES = 0x005A4B80,
+    // The engine's own decode-buffer constructor: `__fastcall(ecx = format,
+    // edx = width, [stack] height, file, line) -> void*` (RET 0xC). Exactly
+    // `SMemAlloc(FUN_GX_FORMAT_IMAGE_BYTES(fmt,w,h), file, line, 0)` followed by
+    // the row-pointer-table init FUN_005A4BB0 performs per decode. Both decoders
+    // call it (via the small-texture recycle front FUN_0044AF90, which falls
+    // through to it above 256px) when the scratch is NULL, so a buffer it
+    // returns is precisely what the scratch slot expects — and SMemAlloc-backed,
+    // so the exit teardown's SMemFree on it is valid.
+    FUN_TEXTURE_DECODE_BUFFER_ALLOC = 0x005A4AF0,
+    // Device-relative: the caps block at +0x23C (what FUN_0058A230 returns) plus
+    // the type-0 (2D) max-texture-dimension slot at +0x60 — the exact field the
+    // create validator FUN_0058AB10 compares width and height against
+    // (`CMP EDI,[EAX + ESI*4 + 0x60]`, ESI = type). This is the GPU's own limit,
+    // and the only size ceiling the dimension gate enforces: reading it before
+    // growing the decode scratch means we never allocate for a texture the
+    // validator would refuse a moment later. Raw hardware max on modern cards
+    // (a 2560x1080 passed it) — 3.3.5 clamps the equivalent to 1024, 1.12 does
+    // not.
+    OFF_GXDEV_CAPS_MAX_TEX_DIM = 0x29C,
+    // --- Async texture I/O: the force-load path and its 512 KiB trap ----------
+    // FUN_TEXTURE_GET_RENDERABLE(hTex, force=1) calls this when the GxTex does
+    // not exist yet — i.e. for every UI texture on first draw. `__fastcall(ecx =
+    // HTEXTURE)`. If the pending read at [hTex + OFF_HTEXTURE_ASYNC_REQUEST] was
+    // never dispatched (request byte +0x1D == 0: it didn't fit the 2 MiB shared
+    // buffer at 0x00905BE4, or the buffer was busy), it unlinks the request,
+    // points it at a STATIC fallback buffer, dispatches, and blocks until the
+    // read completes. There is no size check. The fallback spans
+    // 0x00885804..0x00905804 — 0x80000 bytes, bounded exactly by the first live
+    // global after it — so a file larger than 512 KiB read through this path
+    // overruns the async list heads, the recycle-pool table and the shared
+    // buffer. That is VanillaHelpers' "crashes while loading textures bigger
+    // than 2 MiB"; its 32 MiB shared buffer makes the path rarer, not safe. The
+    // stock size gate hid the bug by keeping every BLP under ~1.4 MB. Guard:
+    // refuse to force a request whose size exceeds the fallback — it stays
+    // pending and the texture stays invisible, which is the normal not-loaded
+    // state every caller already handles. TGA reads are synchronous and never
+    // touch this path.
+    FUN_TEXTURE_FORCE_LOAD = 0x0044AD50,
+    OFF_HTEXTURE_ASYNC_REQUEST = 0x138, // async request node, or 0
+    OFF_ASYNCREQ_SIZE = 0x08,           // file size (FUN_006487F0 result)
+    OFF_ASYNCREQ_IN_SHARED = 0x1D,      // byte: 1 once assigned a buffer and dispatched
+    VAR_ASYNC_FALLBACK_BUFFER = 0x00885804,
+    ASYNC_FALLBACK_BUFFER_SIZE = 0x80000,
     // The `NEG EAX; SBB EAX,EAX` (F7 D8 1B C0) pair inside the validator's isPOT
     // idiom `(x & (x-1)) -> NEG/SBB -> INC -> TEST/JZ`, once per axis. The two
     // axes share the final TEST/JZ with the type-2 branch, so the arithmetic is

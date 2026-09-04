@@ -11,8 +11,8 @@
 // You should have received a copy of the GNU General Public License along with
 // ClassicAPI. If not, see <https://www.gnu.org/licenses/>.
 
-// Texture dimension gates — make 1.12's allocator enforce the bound that
-// actually exists, and let non-power-of-two textures through it safely.
+// Texture dimension gates — let any texture the GPU can hold load, whatever its
+// size or shape, without ever letting the decoder outrun its buffer.
 //
 // THE INVARIANT. Every texture decode in this engine writes into ONE global
 // scratch buffer (VAR_TEXTURE_DECODE_SCRATCH), allocated once at boot for a
@@ -37,36 +37,54 @@
 // And the POT jumps sit ABOVE the size CMPs in the allocator, so retargeting a
 // POT failure straight to the pool-skip tail jumps OVER the bound.
 //
-// DESIGN. A 28-byte code cave in a page we own carries the bound:
+// DESIGN — no numbers of our own. A fixed cap only exists because the buffer is
+// sized up front; size it on demand and the cap disappears. Every dimension
+// failure in the allocator — POT or size — is routed into a 24-byte code cave in
+// a page we own, which hands the texture's width and height to EnsureScratch:
 //
-//     CMP EBX,N ; JA reject ; CMP EAX,N ; JA reject ; JMP pool-skip
+//     PUSHAD ; MOV ECX,EBX ; MOV EDX,EAX ; CALL EnsureScratch
+//     TEST AL,AL ; POPAD ; JZ reject ; JMP pool-skip
 //
-// and every dimension failure in the allocator — POT or size — is routed into
-// it. The cave is the single source of truth for "too big"; the in-function
-// size CMPs decide only "poolable". Today both numbers are S. Layer 3 (large
-// textures) will grow the scratch, raise N in the cave, and leave the CMPs at
-// the pool's maximum — which is precisely 3.3.5's split between allocator and
-// validator, minus the dependence on a caps clamp 1.12 doesn't have.
+// EnsureScratch refuses anything over the device's own max texture dimension —
+// the caps field the create validator compares against, so we never grow for a
+// texture the engine would refuse a moment later — and otherwise replaces the
+// scratch with one that fits, through the engine's own decode-buffer
+// constructor FUN_TEXTURE_DECODE_BUFFER_ALLOC (the routine both decoders use
+// when the scratch is NULL). The scratch is a high-water mark: someone who never
+// loads anything over 1024 pays nothing. The in-function size CMPs decide only
+// "poolable" (the smaller of what the recycle pool can index and the boot
+// scratch). That is 3.3.5's allocator/validator split, with the validator's
+// bound honoured up front instead of relying on a caps clamp 1.12 doesn't have.
 //
-// Layers shipped here:
-//   1. Gate follows the scratch (always on). S is read back from the boot
-//      immediates, so the gate is right on any DLL stack, and additionally
-//      capped to what the recycle pool can index (see PoolMaxDimension) —
-//      the stock bucket table ends exactly at the scratch pointer.
+// Layers:
+//   1. Pool eligibility follows the engine (always on). The pool limit is read
+//      back from the boot immediates and the pool-count immediate, so it is
+//      right on any DLL stack — the stock bucket table ends exactly at the
+//      scratch pointer, so an index it can't hold reads the pointer as a list.
 //   2. VanillaHelpers' pool-index stride (auto, when its 6x6 table is
 //      detected). Their table is 6 wide but the index arithmetic stayed at
 //      stride 5, so a 1024 dimension collides with a 32-high bucket and the
 //      wrong-size texture is recycled: 32x1024 rendered nothing, 64x1024
 //      worked by luck. Both index sites are rewritten to stride 6.
+//   3. Grow on demand (always on) — the cave above.
+//   4. The async fallback guard (always on). FUN_TEXTURE_FORCE_LOAD shoves a
+//      read that never fit the shared async buffer into a 512 KiB static
+//      fallback with no size check — a pre-existing engine bug the stock size
+//      gate merely hid, and the actual mechanism behind "big BLPs crash". The
+//      hook refuses to force a request larger than the fallback; it stays
+//      pending and the texture stays invisible, the normal not-loaded state.
+//      So a BLP FILE is bounded by the shared buffer (2 MiB stock, 32 MiB with
+//      VanillaHelpers) — gracefully. TGA reads are synchronous and unaffected.
 //   NPOT (default on, `_classicapi_NonPowerOfTwoTextures`). POT failures go to
-//      the cave (bound, then fresh allocation — never the pool, whose log2
-//      index is meaningless for NPOT), and the validator's own POT re-test is
-//      forced true. Verified in-game for the TGA/UI path (clamped UVs, single
-//      mip); NPOT BLPs with DXT blocks or mip chains are untested.
+//      the cave (fit, then fresh allocation — never the pool, whose log2 index
+//      is meaningless for NPOT), and the validator's own POT re-test is forced
+//      true. Verified in-game for the TGA/UI path (clamped UVs, single mip);
+//      NPOT BLPs with DXT blocks or mip chains are untested.
 //
 // Applied from module registration — glue boot and every FrameXML init — which
 // is after every other DLL's load-time patching, so the values read back are
-// the ones actually in force.
+// the ones actually in force. The guard hook installs with the rest of the
+// DLL's hooks.
 
 #include "Common.h"
 #include "Game.h"
@@ -87,7 +105,7 @@ uint32_t ReadImm32(uintptr_t addr) { return *reinterpret_cast<const uint32_t *>(
 
 void Put32(uint8_t *dst, uint32_t v) { std::memcpy(dst, &v, sizeof v); }
 
-// rel32 for a jump whose NEXT instruction begins at `next`.
+// rel32 for a jump/call whose NEXT instruction begins at `next`.
 uint32_t Rel32(uintptr_t next, uintptr_t target) {
     return static_cast<uint32_t>(static_cast<int32_t>(target - next));
 }
@@ -106,10 +124,11 @@ bool WriteNearJump(uintptr_t site, uint8_t cond, uintptr_t target) {
 
 // ---- what the engine was actually configured with ----------------------------
 
-// Side of the boot-allocated decode scratch. Read back from the two immediates
-// FUN_00448BD0 feeds FUN_GX_FORMAT_IMAGE_BYTES, so this is what the buffer was
-// REALLY sized to, whoever patched them. A mismatch is someone else's bug; the
-// smaller is the only safe answer.
+// Side of the decode scratch. Read back from the two immediates FUN_00448BD0
+// feeds FUN_GX_FORMAT_IMAGE_BYTES, so this is what the buffer is REALLY sized
+// to, whoever last set them — the engine at boot, VanillaHelpers, or
+// GrowScratch below. A mismatch is someone else's bug; the smaller is the only
+// safe answer.
 uint32_t ScratchDimension() {
     const uint32_t w = ReadImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_W + 1);
     const uint32_t h = ReadImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_H + 1);
@@ -133,23 +152,80 @@ int PoolSide() {
 // over 0..side-1. An unknown layout is treated as stock.
 uint32_t PoolMaxDimension(int side) { return 32u << ((side > 0 ? side : 5) - 1); }
 
+// The GPU's own maximum texture dimension for 2D textures — the field the
+// create validator compares against. 0 if the device isn't up.
+uint32_t DeviceMaxDimension() {
+    const auto *device = *reinterpret_cast<const uint8_t *const *>(Offsets::VAR_GX_DEVICE);
+    if (device == nullptr)
+        return 0;
+    return *reinterpret_cast<const uint32_t *>(device + Offsets::OFF_GXDEV_CAPS_MAX_TEX_DIM);
+}
+
+// ---- layer 3: the scratch grows to fit ----------------------------------------
+
+constexpr const char *kAllocTag = "ClassicAPI/texture/DimensionGate.cpp";
+
+using DecodeBufferAlloc_t = void *(__fastcall *)(int format, uint32_t width, uint32_t height,
+                                                 const char *file, uint32_t line);
+using SMemFree_t = void(__stdcall *)(void *buf, const char *file, int line, int flags);
+
+// Replace the scratch with one sized for `side` x `side` (format 2, what the
+// boot alloc uses), through the engine's own decode-buffer constructor. Safe
+// from any main-thread context that is not itself a texture decode: every
+// reader re-reads VAR_TEXTURE_DECODE_SCRATCH per decode, and the old buffer's
+// only other reference is the exit teardown, which SMemFree's whatever the slot
+// holds. Never shrinks. Records the new side in the boot immediates so
+// ScratchDimension() — and every later registration — reads it back.
+bool GrowScratch(uint32_t side) {
+    if (side <= ScratchDimension())
+        return true;
+    auto alloc = reinterpret_cast<DecodeBufferAlloc_t>(Offsets::FUN_TEXTURE_DECODE_BUFFER_ALLOC);
+    void *fresh = alloc(2, side, side, kAllocTag, __LINE__);
+    if (fresh == nullptr)
+        return false;
+    auto **slot = reinterpret_cast<void **>(Offsets::VAR_TEXTURE_DECODE_SCRATCH);
+    void *old = *slot;
+    *slot = fresh;
+    if (old != nullptr)
+        reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE)(old, kAllocTag, __LINE__, 0);
+    WriteImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_W + 1, side);
+    WriteImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_H + 1, side);
+    return true;
+}
+
+// Called from the cave for every texture the allocator's own tests turned away
+// (not a power of two, or larger than the pool can index). Returns false to
+// reject — only for what the GPU itself can't hold — otherwise makes sure the
+// scratch can take it and lets it through to a fresh allocation. Runs on the
+// main thread inside FUN_00448450, which is never a decode in progress.
+bool __fastcall EnsureScratch(uint32_t width, uint32_t height) {
+    const uint32_t deviceMax = DeviceMaxDimension();
+    if (deviceMax == 0 || width > deviceMax || height > deviceMax)
+        return false;
+    return GrowScratch(width > height ? width : height);
+}
+
 // ---- the code cave -----------------------------------------------------------
 //
-//   +0   81 FB imm32   CMP EBX, N        ; EBX = width  at every entry site
-//   +6   0F 87 rel32   JA  reject
-//   +12  3D imm32      CMP EAX, N        ; EAX = height
-//   +17  0F 87 rel32   JA  reject
-//   +23  E9 rel32      JMP pool-skip     ; fresh allocation, descriptor is complete
+//   +0   60             PUSHAD
+//   +1   8B CB          MOV ECX,EBX         ; EBX = width  at every entry site
+//   +3   8B D0          MOV EDX,EAX         ; EAX = height
+//   +5   E8 rel32       CALL EnsureScratch
+//   +10  84 C0          TEST AL,AL
+//   +12  61             POPAD               ; does not touch EFLAGS
+//   +13  0F 84 rel32    JZ  reject
+//   +19  E9 rel32       JMP pool-skip       ; fresh allocation, descriptor is complete
 //
 // Entered only by jumps from inside FUN_00448450, where EBX/EAX still hold the
 // dimensions, EDI is 0 and [EBP-0x2C] is the finished descriptor — everything
-// the pool-skip tail expects. Flags are clobbered; nothing downstream reads
-// them. Lives for the process: engine code points into it.
+// the pool-skip tail expects. PUSHAD/POPAD keep every register the engine still
+// needs; flags are clobbered and nothing downstream reads them. Lives for the
+// process: engine code points into it.
 
 uint8_t *g_cave = nullptr;
-constexpr size_t kCaveSize = 28;
+constexpr size_t kCaveSize = 24;
 
-bool BuildCave(uint32_t bound) {
+bool BuildCave() {
     if (g_cave == nullptr) {
         g_cave = static_cast<uint8_t *>(
             VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
@@ -158,16 +234,17 @@ bool BuildCave(uint32_t bound) {
     }
     const auto base = reinterpret_cast<uintptr_t>(g_cave);
     uint8_t c[kCaveSize];
-    c[0] = 0x81, c[1] = 0xFB;
-    Put32(c + 2, bound);
-    c[6] = 0x0F, c[7] = 0x87;
-    Put32(c + 8, Rel32(base + 12, Offsets::VA_TEXALLOC_REJECT));
-    c[12] = 0x3D;
-    Put32(c + 13, bound);
-    c[17] = 0x0F, c[18] = 0x87;
-    Put32(c + 19, Rel32(base + 23, Offsets::VA_TEXALLOC_REJECT));
-    c[23] = 0xE9;
-    Put32(c + 24, Rel32(base + 28, Offsets::VA_TEXALLOC_POOL_SKIP));
+    c[0] = 0x60;
+    c[1] = 0x8B, c[2] = 0xCB;
+    c[3] = 0x8B, c[4] = 0xD0;
+    c[5] = 0xE8;
+    Put32(c + 6, Rel32(base + 10, reinterpret_cast<uintptr_t>(&EnsureScratch)));
+    c[10] = 0x84, c[11] = 0xC0;
+    c[12] = 0x61;
+    c[13] = 0x0F, c[14] = 0x84;
+    Put32(c + 15, Rel32(base + 19, Offsets::VA_TEXALLOC_REJECT));
+    c[19] = 0xE9;
+    Put32(c + 20, Rel32(base + 24, Offsets::VA_TEXALLOC_POOL_SKIP));
     std::memcpy(g_cave, c, kCaveSize);
     FlushInstructionCache(GetCurrentProcess(), g_cave, kCaveSize);
     return true;
@@ -177,26 +254,23 @@ uintptr_t Cave() { return reinterpret_cast<uintptr_t>(g_cave); }
 
 // ---- state -------------------------------------------------------------------
 
-uint32_t g_bound = 0;   // what the cave rejects above
 uint32_t g_poolMax = 0; // what the in-function CMPs admit to the pool
 int g_poolSide = 0;
 bool g_strideFixed = false;
 bool g_nonPowerOfTwo = true;
 
-// ---- layer 1: gate follows the scratch --------------------------------------
+// ---- layer 1: pool eligibility follows the engine -----------------------------
 
 bool ApplySizeGate() {
-    const uint32_t scratch = ScratchDimension();
     g_poolSide = PoolSide();
-    const uint32_t poolMax = PoolMaxDimension(g_poolSide);
-    // Until layer 3 routes oversize textures around the pool, the bound and the
-    // pool limit are the same number: the smaller of what the scratch holds and
-    // what the pool can index. (A VanillaHelpers install whose pool patch failed
-    // but whose size patch didn't would otherwise index past the stock table —
-    // straight into VAR_TEXTURE_DECODE_SCRATCH.)
-    g_bound = scratch < poolMax ? scratch : poolMax;
-    g_poolMax = g_bound;
-    if (!BuildCave(g_bound))
+    const uint32_t indexable = PoolMaxDimension(g_poolSide);
+    const uint32_t scratch = ScratchDimension();
+    // A texture that enters the pool never reaches the cave, so it must also
+    // fit the scratch as it stands. (A VanillaHelpers install whose scratch
+    // patch failed but whose pool patch didn't would otherwise let 1024 into a
+    // 512 buffer.)
+    g_poolMax = scratch < indexable ? scratch : indexable;
+    if (!BuildCave())
         return false;
     bool ok = WriteImm32(Offsets::PATCH_TEXALLOC_SIZE_W_IMM, g_poolMax);
     ok = WriteImm32(Offsets::PATCH_TEXALLOC_SIZE_H_IMM, g_poolMax) && ok;
@@ -227,6 +301,29 @@ bool ApplyStrideFix() {
     g_strideFixed = ok;
     return ok;
 }
+
+// ---- layer 4: the async fallback guard -----------------------------------------
+
+using ForceLoad_t = void(__fastcall *)(void *hTexture);
+ForceLoad_t ForceLoad_o = nullptr;
+
+// A request that never fit the shared async buffer would be forced into the
+// 512 KiB static fallback with no size check (see Offsets.h). Refuse when it
+// can't fit there either: the request stays pending and the texture stays
+// invisible — the normal not-loaded state every caller already handles —
+// instead of overrunning the pool table.
+void __fastcall ForceLoad_h(void *hTexture) {
+    const auto *req = *reinterpret_cast<const uint8_t *const *>(
+        static_cast<const uint8_t *>(hTexture) + Offsets::OFF_HTEXTURE_ASYNC_REQUEST);
+    if (req != nullptr && req[Offsets::OFF_ASYNCREQ_IN_SHARED] == 0 &&
+        *reinterpret_cast<const uint32_t *>(req + Offsets::OFF_ASYNCREQ_SIZE) >
+            Offsets::ASYNC_FALLBACK_BUFFER_SIZE)
+        return;
+    ForceLoad_o(hTexture);
+}
+
+const Game::HookAutoRegister _forceLoadHook{Offsets::FUN_TEXTURE_FORCE_LOAD, &ForceLoad_h,
+                                            reinterpret_cast<void **>(&ForceLoad_o)};
 
 // ---- non-power-of-two ----------------------------------------------------------
 
@@ -266,7 +363,7 @@ bool ApplyNonPowerOfTwo(bool enable) {
     SnapshotNpotSites();
     bool ok = true;
     if (enable) {
-        // JNZ (not a power of two) -> the cave: bound first, then a fresh
+        // JNZ (not a power of two) -> the cave: fit the scratch, then a fresh
         // allocation — never the pool, whose log2 index cannot describe NPOT.
         ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_W_JMP, 0x85, Cave()) && ok;
         ok = WriteNearJump(Offsets::PATCH_TEXALLOC_POT_H_JMP, 0x85, Cave()) && ok;
@@ -287,10 +384,10 @@ bool ApplyNonPowerOfTwo(bool enable) {
     return ok;
 }
 
-// Re-asserted on every registration so a `/reload` cannot leave the code
-// segment and our recorded state disagreeing. Order matters: the cave must
-// exist before anything is pointed at it.
-void ApplyCurrent() {
+// Re-asserted on every registration so the code segment and our recorded state
+// cannot disagree. Order matters: the cave must exist before anything is
+// pointed at it.
+void ApplyGates() {
     if (!ApplySizeGate())
         return;
     ApplyStrideFix();
@@ -310,18 +407,22 @@ int __fastcall Script_NonPowerOfTwoTextures(void *L) {
     return 1;
 }
 
-// `_classicapi_TextureLimits()` -> maxDimension, poolSide, nonPowerOfTwo, strideFixed
-// What the gate is actually enforcing on this DLL stack, for /dump.
+// `_classicapi_TextureLimits()`
+//   -> scratchSide, poolMax, poolSide, deviceMax, nonPowerOfTwo, strideFixed
+// scratchSide is the high-water mark of what has been loaded; deviceMax is the
+// GPU's own ceiling and the only one enforced.
 int __fastcall Script_TextureLimits(void *L) {
-    Game::Lua::PushNumber(L, static_cast<double>(g_bound));
+    Game::Lua::PushNumber(L, static_cast<double>(ScratchDimension()));
+    Game::Lua::PushNumber(L, static_cast<double>(g_poolMax));
     Game::Lua::PushNumber(L, static_cast<double>(g_poolSide));
+    Game::Lua::PushNumber(L, static_cast<double>(DeviceMaxDimension()));
     Game::Lua::PushBool(L, g_nonPowerOfTwo);
     Game::Lua::PushBool(L, g_strideFixed);
-    return 4;
+    return 6;
 }
 
 void RegisterLuaFunctions() {
-    ApplyCurrent();
+    ApplyGates();
     Game::Lua::RegisterGlobalFunction("_classicapi_NonPowerOfTwoTextures",
                                       &Script_NonPowerOfTwoTextures);
     Game::Lua::RegisterGlobalFunction("_classicapi_TextureLimits", &Script_TextureLimits);
@@ -329,7 +430,7 @@ void RegisterLuaFunctions() {
 
 // The glue screen loads textures too, and this is the first registration that
 // runs after every other DLL's load-time patching.
-void RegisterGlue() { ApplyCurrent(); }
+void RegisterGlue() { ApplyGates(); }
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
 const Game::GlueModuleAutoRegister _glueAutoreg{&RegisterGlue};
