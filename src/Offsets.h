@@ -7510,17 +7510,42 @@ enum Offsets {
     // overruns the async list heads, the recycle-pool table and the shared
     // buffer. That is VanillaHelpers' "crashes while loading textures bigger
     // than 2 MiB"; its 32 MiB shared buffer makes the path rarer, not safe. The
-    // stock size gate hid the bug by keeping every BLP under ~1.4 MB. Guard:
-    // refuse to force a request whose size exceeds the fallback — it stays
-    // pending and the texture stays invisible, which is the normal not-loaded
-    // state every caller already handles. TGA reads are synchronous and never
-    // touch this path.
+    // stock size gate hid the bug by keeping every BLP under ~1.4 MB. Guard
+    // (Texture::DimensionGate): refuse to force a request larger than the
+    // fallback — the texture stays blank instead of overrunning. Growing the
+    // fallback to fit was tried and reverted: the read runs on the engine's
+    // async reader thread (no crash handler), and a read into a right-sized heap
+    // buffer faulted where the same read into the oversized shared buffer does
+    // not — not yet isolated. TGA reads are synchronous and never on this path.
     FUN_TEXTURE_FORCE_LOAD = 0x0044AD50,
     OFF_HTEXTURE_ASYNC_REQUEST = 0x138, // async request node, or 0
     OFF_ASYNCREQ_SIZE = 0x08,           // file size (FUN_006487F0 result)
     OFF_ASYNCREQ_IN_SHARED = 0x1D,      // byte: 1 once assigned a buffer and dispatched
     VAR_ASYNC_FALLBACK_BUFFER = 0x00885804,
     ASYNC_FALLBACK_BUFFER_SIZE = 0x80000,
+    // --- BLP decompresses BEFORE it allocates -----------------------------------
+    // The .blp loader FUN_0044A560 copies the shared scratch pointer into
+    // texObj+0x120, calls this decompressor to write the decoded image THROUGH
+    // THAT COPY, and only then calls the allocator FUN_00448450. TGA does it the
+    // other way round (allocate, decode later at upload), which is why the
+    // allocator's gate protects TGA but never sees a BLP's dimensions in time; a
+    // 2048x2048 BLP has always overrun the scratch on this client. The other
+    // caller, the IMG path FUN_00449840 (completion FUN_004497F0), does NOT use
+    // the scratch: it allocates a private buffer sized for the image through
+    // FUN_0044AF90, stores it in the same slot, and its release frees whatever
+    // the slot holds — so a hook here must act only when the slot equals
+    // VAR_TEXTURE_DECODE_SCRATCH, and must repoint that slot after growing. (The BLP pre-scale FUN_00448B60 halves against caps+0x60, the
+    // raw hardware max, so it never fires on a modern GPU and protects nothing.)
+    // `__thiscall(reader, format, int *scratchSlot, mipBase, flag)`, RET 0x10;
+    // the reader carries the level-0 dimensions, `>> mipBase` is the level
+    // actually written. Both callers are completion callbacks that the
+    // main-thread pump FUN_00443E70 runs, so a pre-hook here is main-thread and
+    // never inside another decode. Encoding 3 (uncompressed) only writes the row
+    // table into the scratch and points the rows at the file buffer; DXT and
+    // palettized decompress into it — the crash case.
+    FUN_BLP_DECOMPRESS = 0x005A8430,
+    OFF_BLPREADER_WIDTH = 0x10,
+    OFF_BLPREADER_HEIGHT = 0x14,
     // The `NEG EAX; SBB EAX,EAX` (F7 D8 1B C0) pair inside the validator's isPOT
     // idiom `(x & (x-1)) -> NEG/SBB -> INC -> TEST/JZ`, once per axis. The two
     // axes share the final TEST/JZ with the type-2 branch, so the arithmetic is

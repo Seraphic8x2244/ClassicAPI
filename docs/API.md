@@ -4553,13 +4553,16 @@ sprite sheets, inline texture markup, tooltips, and masks. The client allocates
 memory for a large texture only when an addon loads one. An addon that uses
 small textures costs nothing extra.
 
-Two limits remain. Both are about the file, not the image:
+Two limits remain. Both are about the BLP format, not the image size:
 
-- A BLP file larger than about 2 MB does not load (32 MB with VanillaHelpers).
-  The texture stays blank. A TGA file has no size limit. For an image larger
-  than 1024x1024, use an uncompressed 32-bit TGA.
-- A non-power-of-two BLP with DXT compression or a mip chain is untested. For a
-  non-power-of-two image, use TGA.
+- A very large uncompressed BLP file does not load. The limit is the file size,
+  about 2 MB, or 32 MB with VanillaHelpers. The texture stays blank. This
+  affects only uncompressed BLP. A DXT-compressed BLP is about eight times
+  smaller and stays under the limit. A TGA file has no size limit.
+- A non-power-of-two BLP with DXT compression or a mip chain is untested.
+
+For a large or non-power-of-two image, use an uncompressed 32-bit TGA, or a
+DXT-compressed BLP for a smaller file.
 
 ```lua
 local t = frame:CreateTexture(nil, "ARTWORK")

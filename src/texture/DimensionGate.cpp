@@ -66,15 +66,27 @@
 //      stride 5, so a 1024 dimension collides with a 32-high bucket and the
 //      wrong-size texture is recycled: 32x1024 rendered nothing, 64x1024
 //      worked by luck. Both index sites are rewritten to stride 6.
-//   3. Grow on demand (always on) — the cave above.
-//   4. The async fallback guard (always on). FUN_TEXTURE_FORCE_LOAD shoves a
+//   3. Grow on demand (always on) — the cave above. This is enough for TGA,
+//      which allocates first and decodes later at upload.
+//   4. BLP grows BEFORE it decompresses (always on). The .blp loader writes
+//      the decoded image into the scratch and only then calls the allocator, so
+//      the cave is too late for it — a 2048x2048 BLP has always overrun the
+//      scratch on this client. A pre-hook on the decompressor FUN_BLP_DECOMPRESS,
+//      which carries the dimensions itself, grows the scratch first — and
+//      repoints the caller's already-copied slot at the new buffer, since the
+//      decompressor writes through that copy — or reports "decompression
+//      failed" for a texture the GPU can't hold. It acts only when the slot IS
+//      the scratch: the IMG path decompresses into a private, right-sized
+//      buffer of its own and is left untouched.
+//   5. The async fallback guard (always on). FUN_TEXTURE_FORCE_LOAD shoves a
 //      read that never fit the shared async buffer into a 512 KiB static
 //      fallback with no size check — a pre-existing engine bug the stock size
 //      gate merely hid, and the actual mechanism behind "big BLPs crash". The
-//      hook refuses to force a request larger than the fallback; it stays
-//      pending and the texture stays invisible, the normal not-loaded state.
-//      So a BLP FILE is bounded by the shared buffer (2 MiB stock, 32 MiB with
-//      VanillaHelpers) — gracefully. TGA reads are synchronous and unaffected.
+//      hook refuses to force a request larger than the fallback; the texture
+//      stays blank. So a BLP FILE larger than the shared buffer (2 MiB stock,
+//      32 MiB with VanillaHelpers) does not load — an uncompressed BLP only;
+//      DXT stays far under, and TGA is synchronous. Growing the fallback to fit
+//      was tried and reverted (a reader-thread fault, not yet isolated).
 //   NPOT (always on). POT failures go to the cave (fit, then fresh allocation
 //      — never the pool, whose log2 index is meaningless for NPOT), and the
 //      validator's own POT re-test is forced true. Verified in-game for the
@@ -169,6 +181,8 @@ using DecodeBufferAlloc_t = void *(__fastcall *)(int format, uint32_t width, uin
                                                  const char *file, uint32_t line);
 using SMemFree_t = void(__stdcall *)(void *buf, const char *file, int line, int flags);
 
+void *g_retiredScratch = nullptr; // the previous scratch, freed at the next growth
+
 // Replace the scratch with one sized for `side` x `side` (format 2, what the
 // boot alloc uses), through the engine's own decode-buffer constructor. Safe
 // from any main-thread context that is not itself a texture decode: every
@@ -186,8 +200,15 @@ bool GrowScratch(uint32_t side) {
     auto **slot = reinterpret_cast<void **>(Offsets::VAR_TEXTURE_DECODE_SCRATCH);
     void *old = *slot;
     *slot = fresh;
-    if (old != nullptr)
-        reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE)(old, kAllocTag, __LINE__, 0);
+    // Retire the old buffer one generation late. Every consumer re-reads the
+    // global per decode, and BlpDecompress_h repoints the one slot that was
+    // copied before the growth — but keeping exactly one retired buffer alive
+    // means any holder not accounted for reads stale bytes instead of unmapped
+    // memory. Bounded: one buffer, freed at the next growth.
+    if (g_retiredScratch != nullptr)
+        reinterpret_cast<SMemFree_t>(Offsets::FUN_STORM_SMEM_FREE)(g_retiredScratch, kAllocTag,
+                                                                  __LINE__, 0);
+    g_retiredScratch = old;
     WriteImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_W + 1, side);
     WriteImm32(Offsets::PATCH_TEXDECODE_SCRATCH_DIM_H + 1, side);
     return true;
@@ -301,16 +322,69 @@ bool ApplyStrideFix() {
     return ok;
 }
 
-// ---- layer 4: the async fallback guard -----------------------------------------
+// ---- layer 4: BLP grows the scratch before it decompresses ---------------------
+
+using BlpDecompress_t = int(__fastcall *)(void *reader, void *edxUnused, int format,
+                                          int *scratchSlot, uint32_t mipBase, int flag);
+BlpDecompress_t BlpDecompress_o = nullptr;
+
+// __thiscall wired as __fastcall with the ignored EDX slot. The reader holds the
+// level-0 dimensions; `mipBase` is how many levels the BLP pre-scale skipped, so
+// the level actually written is `>> mipBase` (floored at 1, as the engine does).
+// Returning 0 is the decompressor's own failure code: the loader logs
+// "decompression failed" and the texture stays blank.
+int __fastcall BlpDecompress_h(void *reader, void *edxUnused, int format, int *scratchSlot,
+                               uint32_t mipBase, int flag) {
+    // Only a caller decompressing into the SHARED scratch concerns us. The .blp
+    // path (FUN_0044A560) copies VAR_TEXTURE_DECODE_SCRATCH into its slot before
+    // calling in; the IMG path (FUN_00449840) hands in a private buffer it already
+    // sized for the image through FUN_0044AF90, and must be left alone — its
+    // release path frees whatever the slot holds.
+    const auto *scratchVar = reinterpret_cast<const int *>(Offsets::VAR_TEXTURE_DECODE_SCRATCH);
+    if (scratchSlot != nullptr && *scratchSlot != 0 && *scratchSlot == *scratchVar) {
+        const auto *r = static_cast<const uint8_t *>(reader);
+        uint32_t w = *reinterpret_cast<const uint32_t *>(r + Offsets::OFF_BLPREADER_WIDTH) >>
+                     (mipBase & 31);
+        uint32_t h = *reinterpret_cast<const uint32_t *>(r + Offsets::OFF_BLPREADER_HEIGHT) >>
+                     (mipBase & 31);
+        if (w == 0)
+            w = 1;
+        if (h == 0)
+            h = 1;
+        if (!EnsureScratch(w, h))
+            return 0;
+        // The decompressor — and the upload after it — work through the caller's
+        // copy, not the global. If the scratch just grew, the copy still names
+        // the retired buffer; repoint it.
+        *scratchSlot = *scratchVar;
+    }
+    return BlpDecompress_o(reader, edxUnused, format, scratchSlot, mipBase, flag);
+}
+
+const Game::HookAutoRegister _blpDecompressHook{Offsets::FUN_BLP_DECOMPRESS, &BlpDecompress_h,
+                                                reinterpret_cast<void **>(&BlpDecompress_o)};
+
+// ---- layer 5: the async fallback guard ----------------------------------------
 
 using ForceLoad_t = void(__fastcall *)(void *hTexture);
 ForceLoad_t ForceLoad_o = nullptr;
 
-// A request that never fit the shared async buffer would be forced into the
-// 512 KiB static fallback with no size check (see Offsets.h). Refuse when it
-// can't fit there either: the request stays pending and the texture stays
-// invisible — the normal not-loaded state every caller already handles —
-// instead of overrunning the pool table.
+// A request that never fit the shared async buffer is about to be forced into
+// the 512 KiB static fallback with no size check (see Offsets.h) — the engine
+// bug behind "big BLPs crash". Refuse when it cannot fit: the request stays
+// pending and the texture stays blank, the normal not-loaded state every caller
+// already handles, instead of overrunning the pool table.
+//
+// Growing the fallback to fit — the symmetric move to the scratch — was tried
+// and reverted: the read runs on the engine's async reader thread, which has no
+// crash handler, and a read into a right-sized heap buffer froze then killed the
+// process where the same read into the oversized shared buffer does not. The
+// fault is on that thread and not yet isolated, so this stops at the safe
+// refusal. Consequence: a BLP FILE larger than the shared async buffer (2 MiB
+// stock, 32 MiB with VanillaHelpers) does not load. That is only an
+// UNCOMPRESSED BLP over ~1.4 MB / ~22 MB of image; DXT stays far under the
+// buffer, and TGA is synchronous and never on this path — so it costs only a
+// pathological input.
 void __fastcall ForceLoad_h(void *hTexture) {
     const auto *req = *reinterpret_cast<const uint8_t *const *>(
         static_cast<const uint8_t *>(hTexture) + Offsets::OFF_HTEXTURE_ASYNC_REQUEST);
