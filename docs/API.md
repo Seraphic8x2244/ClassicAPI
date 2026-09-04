@@ -193,6 +193,7 @@ build instructions.
   - [`texture:GetNumMaskTextures()`](#texturegetnummasktextures)
   - [`texture:GetMaskTexture(index)`](#texturegetmasktextureindex)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
+  - [Texture size and shape](#texture-size-and-shape)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`editBox:SetCursorPosition(position)`](#editboxsetcursorpositionposition)
   - [`editBox:GetCursorPosition()`](#editboxgetcursorposition)
@@ -4536,6 +4537,35 @@ Returns the number of masks attached to this texture.
 
 Returns the mask at `index` (1 is the first one added), or `nil` when there is
 no mask at that index.
+
+### Texture size and shape
+
+A texture can have any width and any height. The two sides do not need to be
+powers of two, and they do not need to be equal. A 397x385 photo, a 1919x1079
+screenshot, and a 32x1024 strip all load and draw correctly.
+
+There is no fixed upper limit on texture size. The only limit is the maximum
+texture size of your graphics card, which is 16384 on most modern cards. A
+texture larger than this limit does not load.
+
+This applies to every path that loads a texture: `SetTexture`, `SetTexCoord`
+sprite sheets, inline texture markup, tooltips, and masks. The client allocates
+memory for a large texture only when an addon loads one. An addon that uses
+small textures costs nothing extra.
+
+Two limits remain. Both are about the file, not the image:
+
+- A BLP file larger than about 2 MB does not load (32 MB with VanillaHelpers).
+  The texture stays blank. A TGA file has no size limit. For an image larger
+  than 1024x1024, use an uncompressed 32-bit TGA.
+- A non-power-of-two BLP with DXT compression or a mip chain is untested. For a
+  non-power-of-two image, use TGA.
+
+```lua
+local t = frame:CreateTexture(nil, "ARTWORK")
+t:SetSize(397, 385)
+t:SetTexture("Interface\\AddOns\\MyAddon\\photo")   -- a 397x385 uncompressed TGA
+```
 
 ### `fontstring:SetRotation(angle [, cx, cy])`
 
