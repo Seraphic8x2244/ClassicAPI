@@ -14471,6 +14471,14 @@ with `C_Texture.RegisterAtlas` and then set it by name like any other atlas.
 
 Atlas names are not case sensitive.
 
+The eight raid target markers are published as atlases, named
+`UI-RaidTargetingIcon_1` through `UI-RaidTargetingIcon_8`. All eight markers share
+one sheet here, so an atlas is the only way to name a single marker.
+
+```lua
+markerTexture:SetAtlas("UI-RaidTargetingIcon_8", true)   -- the skull
+```
+
 ### `C_Texture.GetAtlasInfo(atlasName)`
 
 Returns a table that describes the atlas, or `nil` when the name is not known.
