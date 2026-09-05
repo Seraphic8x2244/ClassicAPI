@@ -3885,6 +3885,22 @@ enum Offsets {
     // war setter. Polyfilled in `src/faction/UnitFactionPolyfill.cpp`.
     FUN_FACTION_SET_INACTIVE = 0x004D60F0,
 
+    // `Script_SetFactionInactive` / `Script_SetFactionActive` — the stock
+    // `SetFactionInactive(index)` / `SetFactionActive(index)` globals. Each
+    // resolves its 1-based index through `FUN_RESOLVE_FACTION_INDEX` and,
+    // for a non-zero factionID, calls SET_INACTIVE with 1 / 0 respectively.
+    // Standard Lua C ABI, so both re-register under a namespace table as-is.
+    // Setting by faction id is the same call without the index resolve.
+    FUN_SCRIPT_SET_FACTION_INACTIVE = 0x004D69B0,
+    FUN_SCRIPT_SET_FACTION_ACTIVE = 0x004D6A00,
+
+    // `Script_IsFactionInactive` — the stock `IsFactionInactive(index)`
+    // global (pushes 1 / nil, not a boolean). Its worker at `0x004D6210`
+    // takes the 0-based INDEX rather than a faction id — unlike the at-war
+    // getter — resolving index → factionID → repListID before reading the
+    // INACTIVE bit. Standard Lua C ABI, so it re-registers as-is.
+    FUN_SCRIPT_IS_FACTION_INACTIVE = 0x004D6AF0,
+
     // SMSG_SET_FACTION_ATWAR handler — `__stdcall(uint32_t opcode,
     // void *packet)`. Fires when the server force-changes the player's
     // at-war state on a faction (e.g., a flag the player can't toggle

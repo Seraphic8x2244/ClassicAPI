@@ -163,6 +163,8 @@ build instructions.
   - [`C_Reputation.SetSelectedFactionByID(factionID)`](#c_reputationsetselectedfactionbyidfactionid)
   - [`C_Reputation.SetWatchedFactionByID(factionID)`](#c_reputationsetwatchedfactionbyidfactionid)
   - [`C_Reputation.ToggleFactionAtWarByID(factionID)`](#c_reputationtogglefactionatwarbyidfactionid)
+  - [`C_Reputation.IsFactionActive(factionSortIndex)` / `C_Reputation.IsFactionActiveByID(factionID)`](#c_reputationisfactionactivefactionsortindex--c_reputationisfactionactivebyidfactionid)
+  - [`C_Reputation.SetFactionInactiveByID(factionID)` / `C_Reputation.SetFactionActiveByID(factionID)`](#c_reputationsetfactioninactivebyidfactionid--c_reputationsetfactionactivebyidfactionid)
   - [`C_Reputation.GetLastStandingChange()`](#c_reputationgetlaststandingchange)
 
 - [Focus](#focus)
@@ -4003,6 +4005,46 @@ Non-positive IDs are ignored. The change is sent to the server, so it
 sticks the same way the reputation pane's checkbox does, and
 `UNIT_FACTION` fires for `"player"` when the state actually changes — a
 refused toggle stays silent.
+
+### `C_Reputation.IsFactionActive(factionSortIndex)` / `C_Reputation.IsFactionActiveByID(factionID)`
+
+Returns whether a faction is **not** filed under the "Inactive" heading
+in the reputation pane. `IsFactionActive` takes a 1-based displayed-list
+position; the `ByID` form (a ClassicAPI extension) takes a faction ID.
+
+Both report `false` for anything that isn't a real faction with a
+reputation slot — an out-of-range position, a category header, or an ID
+the character has no slot for.
+
+```lua
+C_Reputation.IsFactionActiveByID(87)        -- true until you park it
+C_Reputation.SetFactionInactiveByID(87)
+C_Reputation.IsFactionActiveByID(87)        -- now false
+```
+
+### `C_Reputation.SetFactionInactiveByID(factionID)` / `C_Reputation.SetFactionActiveByID(factionID)`
+
+ClassicAPI extension. Moves a faction into or out of the "Inactive"
+category by ID rather than by displayed-list position.
+
+Marking a faction inactive files it under the collapsible "Inactive"
+heading in the reputation pane, which is how players park factions they
+have finished with. The displayed list is rebuilt, so positions of the
+other factions shift — read them again afterwards rather than reusing an
+index from before the call.
+
+```lua
+C_Reputation.SetFactionInactiveByID(87)   -- park Bloodsail Buccaneers
+C_Reputation.SetFactionActiveByID(87)     -- and bring it back
+```
+
+Non-positive IDs are ignored. A faction with no reputation slot is left
+alone. The change is sent to the server, and `UNIT_FACTION` fires for
+`"player"` when the state actually changes.
+
+`canSetInactive` on
+[`C_Reputation.GetFactionDataByID`](#c_reputationgetfactiondatabyidfactionid)
+tells you whether a faction can take the change.
 
 ### `C_Reputation.GetLastStandingChange()`
 
