@@ -21,7 +21,7 @@
 // each row here binds one Blizzard atlas name to the 1.12 texture that carries the
 // same art, plus the sub-rect within it.
 //
-// WHY THIS TABLE IS FIVE ROWS AND NOT FIVE THOUSAND
+// WHY THIS TABLE IS TINY AND NOT FIVE THOUSAND ROWS
 //
 // The member table has 5,353 named regions. Almost none of them can be bound
 // automatically, for three independent reasons established by measurement:
@@ -43,12 +43,28 @@
 //      cannot be derived from the two tables, and a wrong guess renders wrong art
 //      rather than failing loudly.
 //
-// The five rows below are the ones where the atlas sprite size and the 1.12 file
-// dimensions agree exactly, which makes the whole file the sprite and the texcoords
-// a trivial 0..1. Everything else needs a human to pick the 1.12 equivalent and
-// read its sub-rect out of the client's own FrameXML. That work is driven by the
-// miss log (`_classicapi_DumpAtlasMisses`) rather than done speculatively, so the
-// table only ever grows toward what real addons actually ask for.
+// HOW A ROW GETS DERIVED
+//
+// Two methods, both evidence-based. Every row records which one it came from.
+//
+//   NAME MATCH — the atlas name IS a 1.12 filename AND the dimensions agree, so
+//     the whole file is the sprite and the texcoords are a trivial 0..1. Only 5
+//     names clear both bars. Do NOT skip the dimension check: 11 more names match
+//     while the art does not.
+//   WIDGET MATCH — the strong one. Classic Era's UI is this UI rebuilt, so the
+//     same widget exists in both trees: one names its art by atlas, the other by
+//     file plus TexCoords. Grep `atlas="name"` in Classic Era's exported
+//     FrameXML, find the same widget in the client's own exported FrameXML, and
+//     read the binding straight off it. Take the SIZE from the 1.12 file rather
+//     than the member table — packing adds a pixel or two of bleed.
+//
+// Anything neither method reaches needs a human to pick the equivalent art by
+// eye, which is the lowest-confidence case and always needs a render check.
+// `C_Texture.RegisterAtlas` replaces a built-in binding at runtime, so a
+// candidate row can be tested live before it is added here.
+//
+// Growth is driven by the miss log (`_classicapi_DumpAtlasMisses`), never done
+// speculatively, so the table only ever moves toward what real addons ask for.
 //
 // Two source-data traps, handled during extraction:
 //   - 28 members have an EMPTY name and must be skipped.
@@ -75,6 +91,15 @@ struct Entry {
 };
 
 constexpr Entry kAtlases[] = {
+    // WIDGET MATCH. Classic Era's FloatingChatFrame.xml draws the chat menu
+    // button's `Flash` overlay with atlas "chatframe-button-highlightalert";
+    // this client's FloatingChatFrame.xml draws the same `$parentFlash` region
+    // with UI-ChatIcon-BlinkHilight and no TexCoords, so the whole file is the
+    // sprite. Size is the 1.12 file's 32x32, not the member table's 34x32 (that
+    // extra bleed came from packing). Verified in-game: a blue glow ring.
+    {"chatframe-button-highlightalert", "Interface\\ChatFrame\\UI-ChatIcon-BlinkHilight",
+     32, 32, 0.0f, 1.0f, 0.0f, 1.0f, 924, 10841, false, false},
+    // NAME MATCH, dimensions confirmed against the BLP headers.
     {"MinimapArrow", "Interface\\Minimap\\MinimapArrow", 32, 32, 0.0f, 1.0f, 0.0f, 1.0f, 647,
      9441, false, false},
     {"Repair", "Interface\\CURSOR\\Repair", 32, 32, 0.0f, 1.0f, 0.0f, 1.0f, 647, 9509, false,
