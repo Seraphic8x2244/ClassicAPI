@@ -3647,6 +3647,22 @@ enum Offsets {
     VAR_FACTION_DISPLAY_COUNT = 0x00B73764,
     VAR_FACTION_VISIBLE_MAX_INDEX = 0x00B73760,
 
+    // Reputation-pane selection. Stored as a FACTION ID, not a list
+    // index: `Script_SetSelectedFaction` (below) takes a 1-based
+    // displayed-list index but immediately resolves it through
+    // `FUN_RESOLVE_FACTION_INDEX` and stores the resulting factionID
+    // here, and `Script_GetSelectedFaction` (0x004D6C00) walks the
+    // displayed list to map it back to a 1-based index (0 when the
+    // stored id isn't currently listed). So selecting by ID is a
+    // direct write — no index round-trip. Verified by decompiling
+    // both accessors.
+    VAR_FACTION_SELECTED_ID = 0x00B73768,
+
+    // `Script_SetSelectedFaction` — the stock `SetSelectedFaction(index)`
+    // global. `int __fastcall(void *L)`, standard Lua C ABI, so it can be
+    // re-registered under a namespace table as-is.
+    FUN_SCRIPT_SET_SELECTED_FACTION = 0x004D6BB0,
+
     // Faction.dbc — standard 5-DWORD class shape, records pointer at +0x08
     // and count at +0x0C of the class instance at 0x00C0DD48. Records is an
     // array of `FactionRec *` indexed directly by factionID (1-based;

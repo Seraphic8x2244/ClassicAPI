@@ -464,6 +464,34 @@ static int __fastcall Script_C_Reputation_GetFactionDataByIndex(void *L) {
     return 1;
 }
 
+// `C_Reputation.SetSelectedFactionByID(factionID)` — ClassicAPI
+// extension. Selects a faction in the reputation pane by ID rather
+// than by displayed-list position, the same convenience
+// `SetWatchedFactionByID` gives over `SetWatchedFactionIndex`.
+//
+// The engine already stores the selection AS a factionID
+// (`VAR_FACTION_SELECTED_ID`) — the stock index form only resolves its
+// argument to an id before storing it — so this writes the id straight
+// through, with no list walk and no dependence on the faction being
+// currently listed. `GetSelectedFaction()` maps it back to an index,
+// reporting 0 while the faction isn't in the displayed list.
+//
+// Negative IDs are ignored; 0 clears the selection.
+static int __fastcall Script_C_Reputation_SetSelectedFactionByID(void *L) {
+    if (!Game::Lua::IsNumber(L, 1)) {
+        Game::Lua::Error(L,
+            "Usage: C_Reputation.SetSelectedFactionByID(factionID)");
+        return 0;
+    }
+    const int factionID = static_cast<int>(Game::Lua::ToNumber(L, 1));
+    if (factionID < 0)
+        return 0;
+
+    *reinterpret_cast<int32_t *>(
+        static_cast<uintptr_t>(Offsets::VAR_FACTION_SELECTED_ID)) = factionID;
+    return 0;
+}
+
 // `C_Reputation.SetWatchedFactionByID(factionID)` — sets the faction
 // shown above the XP bar by ID rather than by displayed-list index.
 // Modern API; vanilla 1.12 only exposes `SetWatchedFactionIndex(idx)`,
@@ -499,6 +527,14 @@ static void RegisterLuaFunctions() {
     Game::Lua::RegisterGlobalFunction("GetFactionParentID", &Script_GetFactionParentID);
     Game::Lua::RegisterTableFunction("C_Reputation", "SetWatchedFactionByID",
                                      &Script_C_Reputation_SetWatchedFactionByID);
+    Game::Lua::RegisterTableFunction("C_Reputation", "SetSelectedFactionByID",
+                                     &Script_C_Reputation_SetSelectedFactionByID);
+    // The stock global, mirrored into the namespace — the engine's own
+    // handler already has the Lua C ABI, so it registers as-is.
+    Game::Lua::RegisterTableFunction(
+        "C_Reputation", "SetSelectedFaction",
+        reinterpret_cast<Game::Lua::CFunction>(
+            static_cast<uintptr_t>(Offsets::FUN_SCRIPT_SET_SELECTED_FACTION)));
     Game::Lua::RegisterTableFunction("C_Reputation", "GetWatchedFactionData",
                                      &Script_C_Reputation_GetWatchedFactionData);
     Game::Lua::RegisterTableFunction("C_Reputation", "GetFactionStandings",

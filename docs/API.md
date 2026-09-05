@@ -160,6 +160,7 @@ build instructions.
   - [`C_Reputation.GetWatchedFactionData()`](#c_reputationgetwatchedfactiondata)
   - [`C_Reputation.GetFactionDataByID(factionID)`](#c_reputationgetfactiondatabyidfactionid)
   - [`C_Reputation.GetFactionDataByIndex(factionSortIndex)`](#c_reputationgetfactiondatabyindexfactionsortindex)
+  - [`C_Reputation.SetSelectedFactionByID(factionID)`](#c_reputationsetselectedfactionbyidfactionid)
   - [`C_Reputation.SetWatchedFactionByID(factionID)`](#c_reputationsetwatchedfactionbyidfactionid)
   - [`C_Reputation.GetLastStandingChange()`](#c_reputationgetlaststandingchange)
 
@@ -3928,6 +3929,25 @@ shared `ReadFactionData` chain — no Lua-side round-trip through
 `Script_GetFactionInfo`. `isHeader` / `isCollapsed` come from the
 displayed-list header array at `0x00B736C0` (count at `0x00B736B0`)
 and the per-character bitmask at `0x0084A0A4`.
+
+### `C_Reputation.SetSelectedFactionByID(factionID)`
+
+ClassicAPI extension. Selects a faction in the reputation pane by ID —
+the same convenience
+[`C_Reputation.SetWatchedFactionByID`](#c_reputationsetwatchedfactionbyidfactionid)
+gives over the stock index-based call.
+
+The selection is held as a faction ID, so this sets it directly and the
+faction does not have to be in the displayed list at the time.
+`GetSelectedFaction()` maps the selection back to a 1-based displayed-list
+index, and reports `0` while the faction is not listed.
+
+Passing `0` clears the selection. Negative IDs are ignored.
+
+```lua
+C_Reputation.SetSelectedFactionByID(69)      -- Darnassus
+print(GetFactionInfo(GetSelectedFaction()))  -- "Darnassus"
+```
 
 ### `C_Reputation.SetWatchedFactionByID(factionID)`
 
