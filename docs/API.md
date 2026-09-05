@@ -416,6 +416,7 @@ build instructions.
   - [`GetInboxItemLink(messageIndex[, attachmentIndex])`](#getinboxitemlinkmessageindex-attachmentindex)
 
 - [Map](#map)
+  - [`C_Map.CanSetUserWaypointOnMap(uiMapID)`](#c_mapcansetuserwaypointonmapuimapid)
   - [`C_Map.GetAreaInfo(areaID)`](#c_mapgetareainfoareaid)
   - [`C_Map.GetAreas()`](#c_mapgetareas)
   - [`C_Map.GetAreaTriggerInfo(triggerID)` / `C_Map.GetAreaTriggers([mapID])`](#c_mapgetareatriggerinfotriggerid--c_mapgetareatriggersmapid)
@@ -430,7 +431,12 @@ build instructions.
   - [`C_Map.GetMapRectOnMap(uiMapID, topUiMapID)`](#c_mapgetmaprectonmapuimapid-topuimapid)
   - [`C_Map.GetMapWorldSize([areaID])`](#c_mapgetmapworldsizeareaid)
   - [`C_Map.GetPlayerMapPosition(uiMapID, unitToken)`](#c_mapgetplayermappositionuimapid-unittoken)
+  - [`C_Map.GetUserWaypoint()` / `C_Map.HasUserWaypoint()` / `C_Map.ClearUserWaypoint()`](#c_mapgetuserwaypoint--c_maphasuserwaypoint--c_mapclearuserwaypoint)
+  - [`C_Map.GetUserWaypointHyperlink()` / `C_Map.GetUserWaypointFromHyperlink(hyperlink)`](#c_mapgetuserwaypointhyperlink--c_mapgetuserwaypointfromhyperlinkhyperlink)
+  - [`C_Map.GetUserWaypointPositionForMap(uiMapID)`](#c_mapgetuserwaypointpositionformapuimapid)
   - [`C_Map.GetWorldPosFromMapPos(uiMapID, mapPosition)`](#c_mapgetworldposfrommapposuimapid-mapposition)
+  - [`C_Map.SetUserWaypoint(uiMapPoint)`](#c_mapsetuserwaypointuimappoint)
+  - [`USER_WAYPOINT_UPDATED` event](#user_waypoint_updated-event)
 
 - [MapExplorationInfo](#mapexplorationinfo)
   - [`C_MapExplorationInfo.GetExploredMapTextures([areaID])`](#c_mapexplorationinfogetexploredmaptexturesareaid)
@@ -10192,6 +10198,104 @@ local minX, maxX, minY, maxY = C_Map.GetMapRectOnMap(14, 1)  -- Durotar on Kalim
 
 A zone placed off the edge of the standard continent map can return values
 outside `0..1`.
+
+### `C_Map.SetUserWaypoint(uiMapPoint)`
+
+Places the user waypoint — the single player-set map pin — and returns whether
+it was set. Fires `USER_WAYPOINT_UPDATED`.
+
+`uiMapPoint` is a table with these fields:
+
+| field | meaning |
+|---|---|
+| `uiMapID` | the map the pin sits on |
+| `position` | a `vector2` with `.x` / `.y` in `0..1` |
+| `z` | optional height |
+
+Build one with `UiMapPoint.CreateFromCoordinates(uiMapID, x, y[, z])` or
+`UiMapPoint.CreateFromVector2D(uiMapID, position[, z])`.
+
+```lua
+C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(14, 0.5, 0.6))
+```
+
+Returns `false` for a malformed point, or for a map that cannot hold a pin
+(see [`C_Map.CanSetUserWaypointOnMap`](#c_mapcansetuserwaypointonmapuimapid)).
+The pin lasts for the session and survives a UI reload.
+
+### `C_Map.GetUserWaypoint()` / `C_Map.HasUserWaypoint()` / `C_Map.ClearUserWaypoint()`
+
+`GetUserWaypoint` returns the pin as a UiMapPoint table, or `nil` when none is
+set. `HasUserWaypoint` returns whether one is set. `ClearUserWaypoint` removes
+it and fires `USER_WAYPOINT_UPDATED`.
+
+```lua
+local point = C_Map.GetUserWaypoint()
+if point then
+    local x, y = point.position:GetXY()
+end
+```
+
+### `C_Map.GetUserWaypointPositionForMap(uiMapID)`
+
+Returns the pin's position on `uiMapID` as a `vector2`, or `nil` when the pin
+does not fall on that map.
+
+The pin is stored against one map, so this converts it to whichever map you
+are drawing. A pin dropped on a zone resolves on that zone's continent, and
+the reverse.
+
+```lua
+-- pin at (0.5, 0.6) on Durotar (14)
+local pos = C_Map.GetUserWaypointPositionForMap(-13)   -- on Kalimdor
+-- 0.589, 0.534
+```
+
+### `C_Map.GetUserWaypointHyperlink()` / `C_Map.GetUserWaypointFromHyperlink(hyperlink)`
+
+`GetUserWaypointHyperlink` returns a link describing the pin, or `nil` when
+none is set. `GetUserWaypointFromHyperlink` reads such a link back into a
+UiMapPoint, or `nil` when the string is not one.
+
+The payload is `worldmap:uiMapID:x:y`, with both coordinates multiplied by
+10000.
+
+```lua
+/dump C_Map.GetUserWaypointHyperlink()
+-- "|cffffff00|Hworldmap:14:5000:6000|h[Map Pin Location]|h|r"
+```
+
+`GetUserWaypointFromHyperlink` takes either a whole link or the bare
+`worldmap:` payload, so it can read a link out of chat text.
+
+### `C_Map.CanSetUserWaypointOnMap(uiMapID)`
+
+Returns whether a pin can be placed on the given map. A map needs a coordinate
+rect to hold one, so zones, continents, and instance maps accept a pin while
+the whole-world map does not.
+
+```lua
+C_Map.CanSetUserWaypointOnMap(14)    -- true  (Durotar)
+C_Map.CanSetUserWaypointOnMap(-694)  -- false (the world map)
+```
+
+### `USER_WAYPOINT_UPDATED` event
+
+Fires (with no payload) whenever the user waypoint changes — when
+[`C_Map.SetUserWaypoint`](#c_mapsetuserwaypointuimappoint) places one, and
+when [`C_Map.ClearUserWaypoint`](#c_mapgetuserwaypoint--c_maphasuserwaypoint--c_mapclearuserwaypoint)
+removes one. Re-read the pin with `C_Map.GetUserWaypoint` when it fires.
+
+Clearing while no pin is set changes nothing, so it fires nothing.
+
+```lua
+local f = CreateFrame("Frame")
+f:RegisterEvent("USER_WAYPOINT_UPDATED")
+f:SetScript("OnEvent", function()
+    local point = C_Map.GetUserWaypoint()
+    -- redraw the pin, or hide it when point is nil
+end)
+```
 
 ### `C_Map.GetAreaTriggerInfo(triggerID)` / `C_Map.GetAreaTriggers([mapID])`
 

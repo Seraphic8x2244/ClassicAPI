@@ -43,6 +43,7 @@ Util\Rectangle.lua
 Util\Vector2D.lua
 Util\Vector3D.lua
 Util\Vector4D.lua
+Util\UiMapPoint.lua
 Util\UIParent.lua
 Util\AuraDurationModifiers.lua
 Util\AuraUtil.lua

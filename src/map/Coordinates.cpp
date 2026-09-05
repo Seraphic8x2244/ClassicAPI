@@ -46,6 +46,7 @@
 #include "Offsets.h"
 #include "dbc/Lookup.h"
 #include "map/Area.h"
+#include "map/Vector2.h"
 #include "unit/Position.h"
 
 #include <cstdint>
@@ -59,40 +60,11 @@ bool OnMap(double px, double py) {
     return px >= 0.0 && px <= 1.0 && py >= 0.0 && py <= 1.0;
 }
 
-// Reads `t.x` / `t.y` from the table at absolute stack index `idx` (a vector2
-// or plain `{x,y}`). `idx` must be positive so it survives the key pushes.
-// Returns false when the slot isn't a table.
-bool ReadXY(void *L, int idx, double *x, double *y) {
-    if (Game::Lua::Type(L, idx) != Game::Lua::TYPE_TABLE)
-        return false;
-    Game::Lua::PushString(L, "x");
-    Game::Lua::GetTable(L, idx);
-    *x = Game::Lua::ToNumber(L, -1);
-    Game::Lua::SetTop(L, -2);
-    Game::Lua::PushString(L, "y");
-    Game::Lua::GetTable(L, idx);
-    *y = Game::Lua::ToNumber(L, -1);
-    Game::Lua::SetTop(L, -2);
-    return true;
-}
+using Map::PushVector2D;
 
-// Pushes a Vector2DMixin built from (x, y) via the `CreateVector2D` global so
-// `pos:GetXY()` works. Falls back to a plain `{x=, y=}` table when the global
-// isn't reachable (addon not loaded). Leaves exactly one value on the stack.
-void PushVector2D(void *L, double x, double y) {
-    const int base = Game::Lua::GetTop(L);
-    Game::Lua::PushString(L, "CreateVector2D");
-    Game::Lua::GetTable(L, Game::Lua::GLOBALS_INDEX);
-    Game::Lua::PushNumber(L, x);
-    Game::Lua::PushNumber(L, y);
-    if (Game::Lua::PCall(L, 2, 1, 0) == 0)
-        return; // Vector2DMixin object on top
-    // pcall failed (global missing / not callable): drop the error object and
-    // build a plain coordinate table instead.
-    Game::Lua::SetTop(L, base);
-    Game::Lua::NewTable(L);
-    Game::Lua::SetFieldNumber(L, "x", x);
-    Game::Lua::SetFieldNumber(L, "y", y);
+// Reads `t.x` / `t.y` from the table at absolute stack index `idx`.
+bool ReadXY(void *L, int idx, double *x, double *y) {
+    return Map::ReadVector2D(L, idx, x, y);
 }
 
 // `C_Map.GetPlayerMapPosition(uiMapID, unitToken)` — the unit's normalized
