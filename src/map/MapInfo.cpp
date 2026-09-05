@@ -52,6 +52,7 @@
 #include "map/Area.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace Map::MapInfo {
@@ -287,6 +288,94 @@ int __fastcall Script_GetMapInfoAtPosition(void *L) {
     return 1;
 }
 
+// A map's background is this many tiles (`NUM_WORLDMAP_DETAIL_TILES`).
+constexpr int kWorldMapDetailTiles = 12;
+
+bool FileExists(const char *path) {
+    using FileExists_t = int(__stdcall *)(const char *path, int mode);
+    auto fn = reinterpret_cast<FileExists_t>(
+        static_cast<uintptr_t>(Offsets::FUN_FILE_EXISTS));
+    return fn(path, 1) != 0;
+}
+
+// Builds tile `n`'s texture path (1-based) for map directory `dir`, without
+// the file extension — the form `SetTexture` takes.
+void BuildTilePath(char *out, size_t size, const char *dir, int n) {
+    std::snprintf(out, size, "Interface\\WorldMap\\%s\\%s%d", dir, dir, n);
+}
+
+// `C_Map.MapHasArt(uiMapID)` — whether the map has a drawable background.
+//
+// A map's art is the tile set `Interface\WorldMap\<dir>\<dir>1..12`, where
+// `<dir>` is the WorldMapArea row's own name — the same directory the world
+// map frame builds its tile paths from. So the question is answered by
+// probing for the first tile: a row with no name, or one whose art the
+// client doesn't ship, has none.
+//
+// Note this is independent of whether a map has a coordinate rect. The
+// whole-world map has art but no rect, and an instance row can have a rect
+// but ship no art.
+int __fastcall Script_MapHasArt(void *L) {
+    const bool ok = Game::Lua::IsNumber(L, 1);
+    const int uiMapID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const int row = ok ? Map::Area::RowForUiMapID(uiMapID) : -1;
+
+    bool hasArt = false;
+    const char *dir = RowName(row);
+    if (dir != nullptr && dir[0] != '\0') {
+        char path[0x120];
+        BuildTilePath(path, sizeof(path), dir, 1);
+        char probe[0x140];
+        std::snprintf(probe, sizeof(probe), "%s.blp", path);
+        hasArt = FileExists(probe);
+    }
+
+    Game::Lua::SetTop(L, 0);
+    Game::Lua::PushBool(L, hasArt);
+    return 1;
+}
+
+// `C_Map.GetMapArtLayerTextures(uiMapID, layerIndex)` — the background tile
+// textures for one of a map's art layers, in draw order (left to right, top
+// to bottom).
+//
+// A map here has exactly one art layer, the 12-tile background the world map
+// frame draws, so `layerIndex` 1 returns it and any other index returns an
+// empty table. Always returns a table.
+//
+// Entries are texture PATHS, ready to hand to `SetTexture`, rather than the
+// numeric file ids the modern call returns — this client identifies a texture
+// by its path, which is the same substitution `C_Map.GetMapOverlays` makes
+// for its `fileDataIDs`. Tiles the client doesn't ship are skipped, so a map
+// with no art gives an empty table.
+int __fastcall Script_GetMapArtLayerTextures(void *L) {
+    const bool ok = Game::Lua::IsNumber(L, 1) && Game::Lua::IsNumber(L, 2);
+    const int uiMapID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const int layerIndex = ok ? static_cast<int>(Game::Lua::ToNumber(L, 2)) : 0;
+    const int row = ok ? Map::Area::RowForUiMapID(uiMapID) : -1;
+    const char *dir = (layerIndex == 1) ? RowName(row) : nullptr;
+
+    Game::Lua::SetTop(L, 0);
+    Game::Lua::NewTable(L);
+    if (dir == nullptr || dir[0] == '\0')
+        return 1;
+
+    int outIdx = 0;
+    for (int n = 1; n <= kWorldMapDetailTiles; ++n) {
+        char path[0x120];
+        BuildTilePath(path, sizeof(path), dir, n);
+        char probe[0x140];
+        std::snprintf(probe, sizeof(probe), "%s.blp", path);
+        if (!FileExists(probe))
+            continue;
+        outIdx += 1;
+        Game::Lua::PushNumber(L, static_cast<double>(outIdx));
+        Game::Lua::PushString(L, path);
+        Game::Lua::SetTable(L, -3);
+    }
+    return 1;
+}
+
 // `C_Map.GetFallbackWorldMapID()` — the uiMapID of the whole-world map, the
 // safe default when no better map is known.
 int __fastcall Script_GetFallbackWorldMapID(void *L) {
@@ -304,6 +393,9 @@ void RegisterLuaFunctions() {
                                      &Script_GetMapInfoAtPosition);
     Game::Lua::RegisterTableFunction("C_Map", "GetFallbackWorldMapID",
                                      &Script_GetFallbackWorldMapID);
+    Game::Lua::RegisterTableFunction("C_Map", "MapHasArt", &Script_MapHasArt);
+    Game::Lua::RegisterTableFunction("C_Map", "GetMapArtLayerTextures",
+                                     &Script_GetMapArtLayerTextures);
 }
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};

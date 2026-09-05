@@ -429,6 +429,7 @@ build instructions.
   - [`C_Map.GetBestMapForUnit(unitToken)`](#c_mapgetbestmapforunitunittoken)
   - [`C_Map.GetFallbackWorldMapID()`](#c_mapgetfallbackworldmapid)
   - [`C_Map.GetMapAreaIDs()`](#c_mapgetmapareaids)
+  - [`C_Map.GetMapArtLayerTextures(uiMapID, layerIndex)`](#c_mapgetmapartlayertexturesuimapid-layerindex)
   - [`C_Map.GetMapChildrenInfo(uiMapID)`](#c_mapgetmapchildreninfouimapid)
   - [`C_Map.GetMapInfo(uiMapID)`](#c_mapgetmapinfouimapid)
   - [`C_Map.GetMapInfoAtPosition(uiMapID, x, y)`](#c_mapgetmapinfoatpositionuimapid-x-y)
@@ -441,6 +442,7 @@ build instructions.
   - [`C_Map.GetUserWaypointHyperlink()` / `C_Map.GetUserWaypointFromHyperlink(hyperlink)`](#c_mapgetuserwaypointhyperlink--c_mapgetuserwaypointfromhyperlinkhyperlink)
   - [`C_Map.GetUserWaypointPositionForMap(uiMapID)`](#c_mapgetuserwaypointpositionformapuimapid)
   - [`C_Map.GetWorldPosFromMapPos(uiMapID, mapPosition)`](#c_mapgetworldposfrommapposuimapid-mapposition)
+  - [`C_Map.MapHasArt(uiMapID)`](#c_mapmaphasartuimapid)
   - [`C_Map.SetUserWaypoint(uiMapPoint)`](#c_mapsetuserwaypointuimappoint)
   - [`USER_WAYPOINT_UPDATED` event](#user_waypoint_updated-event)
 
@@ -10255,6 +10257,48 @@ no specific map is known. Returns `0` if the client has no world map.
 ```lua
 local worldID = C_Map.GetFallbackWorldMapID()   -- -694
 ```
+
+### `C_Map.MapHasArt(uiMapID)`
+
+Returns whether the map has a drawable background — that is, whether the
+client ships the map's tile art.
+
+This is independent of whether a map has coordinates. The whole-world map
+has art but no coordinate rect, while an instance map can have a rect and
+no art.
+
+```lua
+C_Map.MapHasArt(14)     -- true   (Durotar)
+C_Map.MapHasArt(-13)    -- true   (Kalimdor)
+C_Map.MapHasArt(-600)   -- false  (an instance map with no art)
+```
+
+### `C_Map.GetMapArtLayerTextures(uiMapID, layerIndex)`
+
+Returns the background tile textures for one of a map's art layers, in
+draw order — left to right, then top to bottom. Always returns a table.
+
+A map here has a single art layer, so `layerIndex` `1` gives the
+background and any other index gives an empty table. A map with no art
+gives an empty table too.
+
+```lua
+local tiles = C_Map.GetMapArtLayerTextures(14, 1)
+-- 12 entries, "Interface\WorldMap\Durotar\Durotar1" through "...Durotar12"
+
+for i, path in ipairs(tiles) do
+    _G["MyMapTile" .. i]:SetTexture(path)
+end
+```
+
+The tiles form a grid four wide and three tall of 256-pixel squares —
+the layout the world map itself draws.
+
+Entries are texture paths, ready to pass to `SetTexture`, in place of the
+numeric file ids: a texture is named by its path here. The same
+substitution appears in
+[`C_Map.GetMapOverlays`](#c_mapgetmapoverlaysareaid) for its
+`fileDataIDs`.
 
 ### `C_Map.GetPlayerMapPosition(uiMapID, unitToken)`
 
