@@ -1488,10 +1488,10 @@ enum Offsets {
     //                and gate on `(nibble & 0x0E) != 0` (visibility)
     //   Both read stacks at desc[+0x1AC + slot] and display as `byte + 1`
     //
-    // For our purposes we don't decode individual flag bits — we
-    // distinguish helpful vs harmful by absolute slot range, and we
-    // derive `dispelName` from `Spell.dbc[+0x10]` (see
-    // `OFF_SPELL_DISPEL_TYPE` below), not from the flags nibble.
+    // Aura visibility always uses the descriptor nibble. Polarity uses the
+    // fixed slot range under normal 1.12.1 semantics; Turtle's extension uses
+    // dedicated nibble bits so harmful auras can spill into helpful slots.
+    // `dispelName` comes from `Spell.dbc[+0x10]` (see OFF_SPELL_DISPEL_TYPE).
     OFF_UNIT_FIELD_AURA = 0xA4,                // u32 spell ID per slot, 48 slots total
     // UNIT_AURA event id for FUN_UNIT_EVENT_BROADCAST. The per-token unit
     // events use field-index == event-id; the aura field is index 0x29
@@ -1504,13 +1504,10 @@ enum Offsets {
     UNIT_AURA_DEBUFF_COUNT = 16,               // slot range 32..47 (harmful)
     UNIT_AURA_TOTAL = 48,
     UNIT_AURA_VISIBLE_MASK = 0x0E,             // nibble mask used by the engine's visibility gate
-    // Per-slot flag nibble bits as the server writes them (tortoise-wow
-    // SpellAuraHolder::SetAuraFlag, verified): a positive aura gets HELPFUL
-    // (+ CANCELABLE unless SPELL_ATTR_CANT_CANCEL), a negative aura gets
-    // HARMFUL. This is the aura's real polarity. The slot range is only where
-    // the server preferred to seat it — once the 16 debuff slots are full it
-    // parks further debuffs in 0..31 (and sets UNIT_FLAG_AURAS_VISIBLE so the
-    // client renders them), so a slot number alone misreads those.
+    // Turtle's per-slot polarity bits (tortoise-wow SpellAuraHolder::SetAuraFlag,
+    // verified): positive = 0x04, negative = 0x08. These are Turtle semantics,
+    // not stock 1.12.1 aura-flag semantics; non-Turtle polarity is determined
+    // by the fixed 0..31 helpful / 32..47 harmful slot ranges.
     UNIT_AURA_FLAG_CANCELABLE = 0x01,
     UNIT_AURA_FLAG_HELPFUL = 0x04,
     UNIT_AURA_FLAG_HARMFUL = 0x08,

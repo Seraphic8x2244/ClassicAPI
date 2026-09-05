@@ -1515,10 +1515,9 @@ const Net::PacketDispatch::AutoSubscribe _spellGoSub{&SpellGoSub};
 
 // ---- Aura-application co-hooks (timing for proc / triggered auras) -------
 
-// Classify by the slot's flag nibble (UNIT_AURA_FLAG_HARMFUL), not its range:
-// the server parks debuffs in buff slots once the 16 are full, and the nibble
-// is what records their real polarity. The descriptor write pass has already
-// landed the flags when the application hooks fire (see Aura::Data).
+// Classify through Aura::Data so this cache follows the same flavor-aware
+// polarity rule as C_UnitAuras: fixed slot ranges normally, Turtle's polarity
+// nibble when Turtle is detected (required for Turtle's spilled debuffs).
 int8_t KindForSlot(const void *unit, int slot) {
     return Aura::Data::IsSlotHarmful(static_cast<const uint8_t *>(unit), slot)
                ? KIND_HARMFUL

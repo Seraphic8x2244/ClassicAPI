@@ -22,6 +22,7 @@
 #include "spell/CrowdControl.h"
 #include "spell/IsSelfBuff.h"
 #include "time/Clock.h"
+#include "turtle/Detect.h"
 #include "unit/Identity.h"
 
 #include <cstdint>
@@ -275,6 +276,15 @@ bool IsSlotPopulated(const uint8_t *unit, int slot) {
 bool IsSlotHarmful(const uint8_t *unit, int slot) {
     if (slot < 0 || slot >= Offsets::UNIT_AURA_TOTAL)
         return false;
+
+    // Stock 1.12.1 aura polarity is encoded by the descriptor slot range:
+    // helpful 0..31, harmful 32..47. Turtle extends that layout by parking
+    // excess harmful auras in helpful slots and records their real polarity
+    // in the per-slot flag nibble, so only Turtle should interpret 0x04/0x08
+    // as helpful/harmful flags.
+    if (!Turtle::Detected())
+        return slot >= Offsets::UNIT_AURA_BUFF_COUNT;
+
     auto *desc = Descriptor(unit);
     if (desc == nullptr)
         return false;
@@ -307,9 +317,9 @@ bool IsSlotTooltipVisible(const uint8_t *unit, int slot) {
 }
 
 int SlotInFilterOrder(Filter filter, int i) {
-    // Harmful: 32..47 first, then 0..31 (where the server parks debuffs once
-    // the 16 are full). Helpful: 0..31 then 32..47 — positive auras never
-    // spill downward in practice, so that tail is a no-op safety net.
+    // Harmful: 32..47 first, then 0..31 (where Turtle can park excess
+    // debuffs). Helpful: 0..31 then 32..47. On normal 1.12.1 semantics
+    // IsSlotHarmful filters the opposite range, so the second pass is a no-op.
     if (filter == Filter::Harmful)
         return (i + Offsets::UNIT_AURA_BUFF_COUNT) % Offsets::UNIT_AURA_TOTAL;
     return i;
@@ -713,7 +723,7 @@ static Attribution CachedAttribution(const Aura::Source::CachedAura &c) {
 
 void Push(void *L, const uint8_t *unit, int slot, Emit emit) {
     const uint32_t spellID = ReadSpellID(unit, slot);
-    const bool isHelpful = !IsSlotHarmful(unit, slot); // nibble, not slot range
+    const bool isHelpful = !IsSlotHarmful(unit, slot); // flavor-aware polarity
     const int unitLevel = (unit != nullptr) ? PlayerLevel(unit) : 0;
     PushEnriched(L, UnitGuid(unit), spellID, isHelpful, ReadStacks(unit, slot),
                  unitLevel, unit != nullptr && unit == LocalPlayer(), slot,

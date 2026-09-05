@@ -5734,8 +5734,8 @@ go to a different resolver and won't match).
 
 Unified-aura method. `index` is in the same `HELPFUL` / `HARMFUL` index
 space as `C_UnitAuras.GetAuraDataByIndex`, so an index you got from
-`C_UnitAuras` always opens the matching tooltip. That includes a debuff
-that the server parked in a buff slot. The tooltip itself comes from the
+`C_UnitAuras` always opens the matching tooltip. On Turtle, that includes a
+debuff the server parked in a buff slot. The tooltip itself comes from the
 engine's own `SetUnitBuff` or `SetUnitDebuff`. `filter` defaults to
 helpful when omitted. Only its `HELPFUL` or `HARMFUL` token is read, so
 pass an index from the same plain list.
@@ -15974,13 +15974,12 @@ Backport of the `C_UnitAuras` namespace. Returns
 
 Reads primarily off the unit's `m_objectFields` descriptor — same
 data source `UnitBuff` / `UnitDebuff` use. The descriptor has 48 aura
-slots. The server seats buffs in slots 0 to 31 and debuffs in slots 32
-to 47 while it can. When the 16 debuff slots are full, it puts further
-debuffs into free buff slots. Each slot also carries a flag that records
-the aura's real polarity, and `HELPFUL` / `HARMFUL` select on that flag.
-So a debuff that sits in a buff slot is still a debuff here. The native
-`UnitBuff` / `UnitDebuff` split by slot range and report such a debuff as
-a buff. Indices are stable in the normal case: a `HARMFUL` walk visits
+slots. Under normal 1.12.1 semantics, buffs occupy slots 0 to 31 and
+debuffs occupy slots 32 to 47, so `HELPFUL` / `HARMFUL` classify by that
+range. Turtle extends the layout: excess debuffs can spill into free buff
+slots, with their real polarity recorded in the per-slot flag nibble. On
+Turtle, `HELPFUL` / `HARMFUL` therefore select on that polarity flag. Indices
+are stable in the normal case: a `HARMFUL` walk visits
 slots 32 to 47 first, then any spilled debuffs in 0 to 31.
 
 When a party/raid member has **no live unit object at all** (a
@@ -15998,8 +15997,8 @@ these functions surface them, exactly as the built-in `UnitBuff` /
 | `applications` | number | stack count (engine stores `stacks-1`, we display `+1`) |
 | `spellId` | number | spell ID from the descriptor's aura array |
 | `dispelName` | string | `"Magic"` / `"Curse"` / `"Disease"` / `"Poison"` (from `SpellDispelType.dbc`), or `""` if non-dispellable |
-| `isHelpful` | boolean | true when the slot's polarity flag marks the aura positive |
-| `isHarmful` | boolean | true when the slot's polarity flag marks the aura negative. Read from the flag, not the slot number, so a debuff parked in a buff slot reads harmful |
+| `isHelpful` | boolean | true when the aura is helpful: by fixed slot range normally, or Turtle polarity flag on Turtle |
+| `isHarmful` | boolean | true when the aura is harmful: by fixed slot range normally, or Turtle polarity flag on Turtle (including spilled debuffs) |
 | `duration` | number | applied duration in seconds. When the aura's cast was observed (in the `Aura::Source` cache), this is the caster-modified duration — talent/glyph extensions like Improved Shadow Word: Pain included — so it stays consistent with `expirationTime` (`remaining ≤ duration`). On a cache miss it falls back to the base `Spell.dbc → SpellDuration.dbc` value with level scaling. Returns 0 for spells flagged "no duration" (passives, paladin auras, infinite buffs) |
 | `expirationTime` | number | for `unit == "player"`, read from the engine's player-buff table at `0x00BC6040` (same data `GetPlayerBuffTimeLeft` returns). For any other unit, taken from the `Aura::Source` cache (cast time + duration captured from `SMSG_SPELL_GO`; see below). `0` when neither source has it. `expirationTime - GetTime()` gives the true remaining time |
 | `sourceUnit` | string | unit token of the caster (`"player"`, `"raid7"`, `"nameplate1"`, …), resolved from the `Aura::Source` cache. `nil` if the cast wasn't observed or the caster maps to no current token |
@@ -16016,8 +16015,9 @@ The optional `filter` string is a pipe-separated set of upper-case
 tokens (`"HELPFUL"`, `"HARMFUL"`,
 `"HELPFUL|PLAYER"`, etc.). Honored:
 
-- **`HELPFUL`** (default) / **`HARMFUL`** — pick buffs or debuffs by each
-  aura's polarity flag. In `GetUnitAuras`, supplying neither returns both.
+- **`HELPFUL`** (default) / **`HARMFUL`** — pick buffs or debuffs by the
+  normal 1.12.1 slot range, or by Turtle's polarity flag on Turtle. In
+  `GetUnitAuras`, supplying neither returns both.
 - **`PLAYER`** — restrict to auras the local player cast, via the
   `Aura::Source` caster cache (`sourceGUID == ` player GUID). Combines with
   the range tokens (`"HARMFUL|PLAYER"` = your debuffs only). Because the
@@ -16123,9 +16123,9 @@ end
 separated by `|` or spaces, each token optionally negated with a
 leading `!`. This build honors:
 
-- `HELPFUL` / `HARMFUL` — buffs / debuffs, by each aura's polarity flag
-  rather than its slot number. With neither token the query returns both
-  (the indexed getter defaults to helpful).
+- `HELPFUL` / `HARMFUL` — buffs / debuffs, by the normal 1.12.1 slot
+  range or by Turtle's polarity flag on Turtle. With neither token the query
+  returns both (the indexed getter defaults to helpful).
 - `PLAYER` / `!PLAYER` — only auras the local player cast, or only
   auras the player did not cast. Caster data comes from casts this
   session, so an aura present before you saw it cast has no caster and

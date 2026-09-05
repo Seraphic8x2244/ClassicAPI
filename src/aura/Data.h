@@ -20,25 +20,22 @@
 // `unit + OFF_CGUNIT_OBJECT_FIELDS`; the layout is documented in
 // `Offsets.h` under `OFF_UNIT_FIELD_AURA*`.
 //
-// Slots are absolute 0..47. The server SEATS positive auras in 0..31 and
-// negative ones in 32..47, but that is a preference, not a rule: once the 16
-// debuff slots are full it parks further debuffs in 0..31 (and sets
-// UNIT_FLAG_AURAS_VISIBLE so the client renders them). An aura's real polarity
-// is the per-slot flag nibble (UNIT_AURA_FLAG_HELPFUL / _HARMFUL), which the
-// server writes for every visible aura — that is what `Filter` selects on
-// here. The engine's own UnitBuff/UnitDebuff split by slot range and so report
-// a spilled debuff as a buff; that is a 1.12 UI limitation we deliberately do
-// not mirror (retail's contract is the aura's actual polarity). A polarity
-// walk visits its home range first, then the other range, so indices stay
-// exactly what they were in the common no-spill case.
+// Slots are absolute 0..47. Normal 1.12.1 semantics use 0..31 for helpful
+// auras and 32..47 for harmful auras, so the slot range is the polarity. Turtle
+// extends that layout by parking excess harmful auras in 0..31 and uses the
+// per-slot 0x04/0x08 flag nibble to preserve their real polarity. `Filter`
+// therefore classifies by slot range normally and by the Turtle polarity flag
+// when Turtle is detected. A polarity walk still visits its home range first,
+// then the other range, so indices stay unchanged in the common no-spill case.
 //
 // Callers that take a 1-based Lua index into "buffs" or "debuffs" translate
 // to the absolute 0..47 slot before calling in.
 
 namespace Aura::Data {
 
-// Filter for slot iteration: the aura's polarity per its flag nibble (see the
-// file header). The engine's `UnitBuff` / `UnitDebuff` pick one direction;
+// Filter for slot iteration: the aura's polarity per its normal slot range or,
+// on Turtle, its polarity flag nibble (see the file header). The engine's
+// `UnitBuff` / `UnitDebuff` pick one direction;
 // modern `C_UnitAuras.GetAuraDataByIndex` defaults to helpful when no filter
 // is specified.
 enum class Filter { Helpful, Harmful };
@@ -93,9 +90,9 @@ uint32_t ReadSpellID(const uint8_t *unit, int slot);
 // to decide whether to surface an aura through Lua.
 bool IsSlotPopulated(const uint8_t *unit, int slot);
 
-// The aura's polarity from its flag nibble: true iff the slot carries
-// UNIT_AURA_FLAG_HARMFUL. False for an empty slot or a null unit. This, not
-// the slot range, is what `Filter` selects on (see the file header).
+// The aura's polarity. Normal 1.12.1 semantics use the fixed slot range;
+// Turtle uses UNIT_AURA_FLAG_HARMFUL so harmful auras can spill into 0..31.
+// False for an invalid slot (and, on Turtle, a null unit).
 bool IsSlotHarmful(const uint8_t *unit, int slot);
 
 // The engine's TOOLTIP visibility gate for a slot: occupied, visible nibble,
@@ -107,7 +104,7 @@ bool IsSlotTooltipVisible(const uint8_t *unit, int slot);
 
 // The i-th slot (0..UNIT_AURA_TOTAL-1) in the order a `filter` walk visits the
 // descriptor: the polarity's home range first (helpful 0..31, harmful 32..47),
-// then the other range, where spilled debuffs live. Every enumeration that
+// then the other range, where Turtle may expose spilled debuffs. Every enumeration that
 // hands out indices or slot lists uses this so they agree on order.
 int SlotInFilterOrder(Filter filter, int i);
 
