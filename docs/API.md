@@ -158,6 +158,7 @@ build instructions.
   - [`GetFactionParentID(factionID)`](#getfactionparentidfactionid)
   - [`C_Reputation.GetFactionStandings()`](#c_reputationgetfactionstandings)
   - [`C_Reputation.GetWatchedFactionData()`](#c_reputationgetwatchedfactiondata)
+  - [`C_Reputation.GetFactionDataByID(factionID)`](#c_reputationgetfactiondatabyidfactionid)
   - [`C_Reputation.GetFactionDataByIndex(factionSortIndex)`](#c_reputationgetfactiondatabyindexfactionsortindex)
   - [`C_Reputation.SetWatchedFactionByID(factionID)`](#c_reputationsetwatchedfactionbyidfactionid)
   - [`C_Reputation.GetLastStandingChange()`](#c_reputationgetlaststandingchange)
@@ -3860,6 +3861,27 @@ Implementation reads the watched `RepListID` from the player's
 `0x00B73290` to recover the factionID, then runs the shared
 `ReadFactionData` chain (Faction.dbc lookup, reaction band, rep slot
 flags, header/collapsed checks).
+
+### `C_Reputation.GetFactionDataByID(factionID)`
+
+Returns a `FactionData` table for a faction by ID, or `nil` when the ID
+has no `Faction.dbc` record.
+
+The table has the same shape as
+[`C_Reputation.GetFactionDataByIndex`](#c_reputationgetfactiondatabyindexfactionsortindex)
+— see that section for the full field list.
+
+The faction does not have to be in the player's reputation list. One the
+character has never encountered fills cleanly, with `currentStanding` `0`
+and `atWarWith` `false`, so you can read any faction's name, description,
+and standing thresholds without walking the displayed list.
+
+```lua
+local d = C_Reputation.GetFactionDataByID(69)   -- Darnassus
+if d then
+    print(d.name, d.currentStanding, d.nextReactionThreshold)
+end
+```
 
 ### `C_Reputation.GetFactionDataByIndex(factionSortIndex)`
 

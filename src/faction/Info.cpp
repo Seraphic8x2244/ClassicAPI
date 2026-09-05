@@ -407,6 +407,30 @@ static int __fastcall Script_C_Reputation_GetWatchedFactionData(void *L) {
     return 1;
 }
 
+// `C_Reputation.GetFactionDataByID(factionID)` — modern table-shaped
+// accessor keyed by faction ID rather than by displayed-list position.
+// Returns nil when the ID has no `Faction.dbc` record.
+//
+// Unlike the index form, this doesn't need the faction to be in the
+// player's displayed reputation list: `ReadFactionData` fills an
+// unencountered faction cleanly (currentStanding 0, not at war), so a
+// lookup works for any real faction.
+static int __fastcall Script_C_Reputation_GetFactionDataByID(void *L) {
+    if (!Game::Lua::IsNumber(L, 1)) {
+        Game::Lua::Error(L, "Usage: C_Reputation.GetFactionDataByID(factionID)");
+        return 0;
+    }
+    const int factionID = static_cast<int>(Game::Lua::ToNumber(L, 1));
+
+    FactionData d;
+    if (!ReadFactionData(factionID, &d))
+        return 0; // nil — no such faction
+
+    Game::Lua::SetTop(L, 0);
+    PushFactionDataTable(L, d);
+    return 1;
+}
+
 // `C_Reputation.GetFactionDataByIndex(factionSortIndex)` — modern
 // table-shaped accessor over the displayed reputation list. 1-based
 // index covering the same range as vanilla's `GetFactionInfo(index)`
@@ -479,6 +503,8 @@ static void RegisterLuaFunctions() {
                                      &Script_C_Reputation_GetWatchedFactionData);
     Game::Lua::RegisterTableFunction("C_Reputation", "GetFactionStandings",
                                      &Script_C_Reputation_GetFactionStandings);
+    Game::Lua::RegisterTableFunction("C_Reputation", "GetFactionDataByID",
+                                     &Script_C_Reputation_GetFactionDataByID);
     Game::Lua::RegisterTableFunction("C_Reputation", "GetFactionDataByIndex",
                                      &Script_C_Reputation_GetFactionDataByIndex);
 }
