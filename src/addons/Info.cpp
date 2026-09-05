@@ -26,6 +26,7 @@
 
 #include "Game.h"
 #include "Offsets.h"
+#include "addons/LoadState.h"
 
 #include <cstdint>
 
@@ -251,19 +252,23 @@ int __fastcall Script_GetAddOnSecurity(void *L) {
 
 // `C_AddOns.IsAddOnLoaded(indexOrName)` → `(loadedOrLoading, loaded)`.
 //
-// Modern WoW distinguishes "load-in-progress" from "fully loaded" —
-// matters for LoD addons whose load is split across multiple
-// `LoadAddOn` callbacks. Vanilla 1.12's `FUN_0051F240` is fully
-// synchronous: the loaded byte at `entry+0x18` flips from 0 → 1
-// inside a single call, so the "loading" state is never observable
-// from Lua. We return the same boolean twice — `loadedOrLoading`
-// and `loaded` are identical here.
+// Modern WoW distinguishes "load-in-progress" from "fully loaded", and
+// the two really are distinguishable here: the engine's loaded byte
+// (`entry+0x18`) is set at the START of a load, before the addon's files
+// run, so the byte alone answers `loadedOrLoading`, not `loaded`. The
+// window is reachable from Lua — an addon's own file-scope code, and any
+// dependency pulled in during it, run while the byte already reads set.
+//
+// So `loadedOrLoading` is the engine's byte, and `loaded` additionally
+// requires the addon not to be mid-load, which `AddOns::LoadState`
+// tracks from the loader itself.
 //
 // Resolves both numeric indices (via `FUN_ADDON_GET_BY_INDEX`) and
 // string names. `IS_LOADED` accepts an entry pointer as its name arg
 // because the entry's first 12 bytes are the inline NUL-terminated
 // directory name (same as the other per-field accessors), so we can
-// feed it either an entry or a Lua-side string transparently.
+// feed it either an entry or a Lua-side string transparently — and that
+// same pointer is the name `LoadState` matches on.
 int __fastcall Script_IsAddOnLoaded(void *L) {
     const uint8_t *entry = ResolveAddOnName(L);
     if (entry == nullptr) {
@@ -273,8 +278,11 @@ int __fastcall Script_IsAddOnLoaded(void *L) {
     }
     auto isLoaded = reinterpret_cast<EntryByteFn_t>(
         Offsets::FUN_ADDON_IS_LOADED);
-    const bool loaded = isLoaded(entry) != 0;
-    Game::Lua::PushBool(L, loaded);
+    const bool loadedOrLoading = isLoaded(entry) != 0;
+    const bool loaded =
+        loadedOrLoading &&
+        !AddOns::LoadState::IsLoading(reinterpret_cast<const char *>(entry));
+    Game::Lua::PushBool(L, loadedOrLoading);
     Game::Lua::PushBool(L, loaded);
     return 2;
 }
@@ -385,6 +393,12 @@ static void RegisterLuaFunctions() {
                                      &Script_DoesAddOnExist);
     Game::Lua::RegisterTableFunction("C_AddOns", "IsAddOnLoaded",
                                      &Script_IsAddOnLoaded);
+    // The stock global, mirrored into the namespace — the engine's own
+    // handler already has the Lua C ABI and the modern return shape.
+    Game::Lua::RegisterTableFunction(
+        "C_AddOns", "LoadAddOn",
+        reinterpret_cast<Game::Lua::CFunction>(
+            static_cast<uintptr_t>(Offsets::FUN_SCRIPT_LOAD_ADDON)));
     Game::Lua::RegisterTableFunction("C_AddOns", "GetAddOnOptionalDependencies",
                                      &Script_GetAddOnOptionalDependencies);
     Game::Lua::RegisterIntegerEnum(

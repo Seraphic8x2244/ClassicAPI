@@ -5765,6 +5765,29 @@ enum Offsets {
     //     (0=SECURE, 1=INSECURE, 2=BANNED). Defaults to `1` (INSECURE)
     //     when the entry isn't in the override table.
     FUN_ADDON_IS_LOADED = 0x0051E6F0,
+
+    // The per-addon loader — `uint __fastcall(const char *name, char flag,
+    // void *progressCtx)`. Returns non-zero (low byte) once the addon is
+    // loaded, including the early-out when it already was.
+    //
+    // **It sets the entry's loaded byte (`+0x18`) BEFORE running anything**,
+    // then loads LoadWith + required deps (clearing the byte again if a
+    // required dep fails), runs the TOC files, `Bindings.xml` and the
+    // SavedVariables, fires `ADDON_LOADED`, and finally loads the entries
+    // that name this one in their LoadWith. So the byte means "load has
+    // begun", i.e. `loadedOrLoading` — NOT "load has finished". The window
+    // is observable from Lua, because the addon's own files (and every
+    // dependency pulled in during them) execute inside it.
+    // `AddOns::LoadState` co-hooks this to tell the two states apart.
+    FUN_ADDON_LOAD_ONE = 0x0051F240,
+
+    // `Script_LoadAddOn` — the stock `LoadAddOn(index or name)` global.
+    // Pushes two values either way: `(1, nil)` on success, or
+    // `(nil, "REASON")` with a locale-independent reason token
+    // ("DISABLED", "MISSING", … / "UNKNOWN_ERROR") on failure — already the
+    // modern `loaded, value` shape apart from `1` standing in for `true`.
+    // Standard Lua C ABI, so it re-registers under a namespace table as-is.
+    FUN_SCRIPT_LOAD_ADDON = 0x0048E980,
     FUN_ADDON_CAN_LOAD = 0x0051E780,
     FUN_ADDON_GET_SECURITY_INDEX = 0x0051E990,
 

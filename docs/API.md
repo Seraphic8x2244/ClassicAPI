@@ -18,6 +18,7 @@ build instructions.
   - [`C_AddOns.GetAddOnNotes(indexOrName)`](#c_addonsgetaddonnotesindexorname)
   - [`C_AddOns.IsAddOnLoadable(indexOrName)`](#c_addonsisaddonloadableindexorname)
   - [`C_AddOns.IsAddOnLoaded(indexOrName)`](#c_addonsisaddonloadedindexorname)
+  - [`C_AddOns.LoadAddOn(indexOrName)`](#c_addonsloadaddonindexorname)
   - [`C_AddOns.GetAddOnSecurity(indexOrName)`](#c_addonsgetaddonsecurityindexorname)
   - [`C_AddOns.DoesAddOnExist(indexOrName)`](#c_addonsdoesaddonexistindexorname)
   - [`C_AddOns.GetAddOnOptionalDependencies(indexOrName)`](#c_addonsgetaddonoptionaldependenciesindexorname)
@@ -930,16 +931,48 @@ C_AddOns.IsAddOnLoaded("garbage")       -- false, false
 C_AddOns.IsAddOnLoaded(1)               -- true, true   (first addon by index)
 ```
 
-The two returns distinguish "load-in-progress" from "fully loaded" —
-the difference matters for `LoadOnDemand` addons whose load is split
-across multiple `LoadAddOn` callbacks. The addon loader
-(`FUN_0051F240`) is fully synchronous: the `loaded` byte flips inside
-a single call, so the in-flight state is never observable from Lua.
-Both returns are always the same boolean here. We surface the
-two-return shape so consumer code doesn't need to special-case it.
+### `C_AddOns.LoadAddOn(indexOrName)`
+
+Loads a `LoadOnDemand` addon. Returns `loaded, value`:
+
+- `loaded` — `1` when the addon loaded, or was already loaded. `nil`
+  otherwise.
+- `value` — a locale-independent reason the load failed, such as
+  `"DISABLED"`, or `"UNKNOWN_ERROR"` when no specific reason is
+  available. `nil` on success.
+
+```lua
+local loaded, reason = C_AddOns.LoadAddOn("Blizzard_AuctionUI")
+if not loaded then
+    print("could not load:", reason)
+end
+```
+
+Test `loaded` for truth rather than comparing it to `true` — it is the
+number `1`.
+
+The two returns distinguish "load-in-progress" from "fully loaded", and
+they really do differ while an addon is loading. An addon's own files
+run part-way through its load, so code at file scope sees itself as
+loading but not yet loaded:
+
+```lua
+-- at file scope in MyAddon.lua
+C_AddOns.IsAddOnLoaded("MyAddon")       -- true, false
+-- and once the load has finished
+C_AddOns.IsAddOnLoaded("MyAddon")       -- true, true
+```
+
+The same holds for anything else running inside that window, such as a
+dependency loaded on the way in: it sees the addon that pulled it in as
+`true, false`.
 
 Unknown addons (numeric index past `GetNumAddOns()`, or
 string name not in the registry) return `false, false`.
+
+> An addon asking about **itself** from its own `ADDON_LOADED` handler
+> gets `true, false`, because that event fires just before its load call
+> returns. Asking about any *other* addon there is accurate.
 
 ### `C_AddOns.GetAddOnSecurity(indexOrName)`
 
