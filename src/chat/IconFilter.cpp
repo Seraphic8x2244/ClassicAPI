@@ -11,28 +11,32 @@
 // You should have received a copy of the GNU General Public License along with
 // ClassicAPI. If not, see <https://www.gnu.org/licenses/>.
 
-// Inline-texture (`|T`) chat anti-spoof.
+// Inline-texture (`|T`, `|A`) chat anti-spoof.
 //
 // Vanilla neutralizes player-*typed* escapes in chat (a typed `|cff…|r`,
 // `|Hitem…|h` or `|T…|t` shows as raw text) — only *trusted* text renders them
 // (addon `AddMessage`, shift-clicked links). Our Text::InlineTexture backport
-// breaks that parity for `|T` alone: it detects the neutralized `||T` form and
-// draws the icon anyway, so a player could `/say` `|Tpath|t` and have a real
-// icon appear in everyone's chat AND in the speech bubble over their head.
+// breaks that parity for the two texture markers: it detects the neutralized
+// `||T` / `||A` form and draws the art anyway, so a player could `/say`
+// `|Tpath|t` and have a real icon appear in everyone's chat AND in the speech
+// bubble over their head.
 //
-// This restores vanilla's behavior for `|T` by defanging it in the chat path,
-// while leaving `|c`/`|r`/`|H`/`|h` exactly as vanilla (already raw for typed
-// input). It CANNOT be done in the text emitter: addon `|T` and player `|T`
-// reach the emitter as byte-identical `||T` (vanilla doubles the unrecognized
-// `|T` for both), so the only place they're distinguishable is the source —
-// server-delivered chat flows through the chat dispatcher, addon `print` does
-// not. Chat::Dispatch owns that hook and calls this on the message.
+// This restores vanilla's behavior for both markers by defanging them in the
+// chat path, while leaving `|c`/`|r`/`|H`/`|h` exactly as vanilla (already raw
+// for typed input). It CANNOT be done in the text emitter: addon `|T` and player
+// `|T` reach the emitter as byte-identical `||T` (vanilla doubles the
+// unrecognized escape for both), so the only place they're distinguishable is
+// the source — server-delivered chat flows through the chat dispatcher, addon
+// `print` does not. Chat::Dispatch owns that hook and calls this on the message.
 //
-// Defang = replace the `|` of each `|T` with a space, breaking the pipe→T
+// Defang = replace the `|` of each opener with a space, breaking the pipe→letter
 // adjacency the inline-texture detector keys on (`|T` and `||T` both contain the
-// `|T` substring, so this catches the doubled form too). The path text stays
-// readable, the closer `|t` is inert without an opener, and every other escape
-// is untouched.
+// `|T` substring, so this catches the doubled form too). The payload text stays
+// readable, the closer is inert without an opener, and every other escape is
+// untouched.
+//
+// ANY new marker the emitter learns MUST be added here in the same change, or it
+// becomes a chat-spoof vector.
 
 #include "IconFilter.h"
 
@@ -40,10 +44,16 @@ namespace Chat::IconFilter {
 
 namespace {
 
-// True if `s` contains an inline-texture opener (`|T`) anywhere.
+// True if `s` contains an inline-texture opener anywhere. Both markers count:
+// `|T` names a texture path and `|A` names an atlas, and either one would render
+// art from player-typed text if it survived to the fontstring.
+bool IsIconOpener(const char *s) {
+    return s[0] == '|' && (s[1] == 'T' || s[1] == 'A');
+}
+
 bool HasIconEscape(const char *s) {
     for (; *s != '\0'; ++s)
-        if (s[0] == '|' && s[1] == 'T')
+        if (IsIconOpener(s))
             return true;
     return false;
 }
@@ -68,12 +78,12 @@ const char *Sanitize(const char *msg, char *buf, size_t bufSize) {
     // opener survives for the inline-texture detector to fire on.
     size_t j = 0;
     for (size_t i = 0; msg[i] != '\0' && j + 1 < bufSize;) {
-        if (msg[i] == '|' && msg[i + 1] == 'T') {
+        if (IsIconOpener(msg + i)) {
             const bool doubledPipe = (i > 0 && msg[i - 1] == '|');
             buf[j++] = doubledPipe ? '|' : ' '; // keep pipe only if it completes `||`
             if (j + 1 < bufSize)
-                buf[j++] = ' '; // blank the `T`
-            i += 2;             // consumed `|T`
+                buf[j++] = ' '; // blank the `T` / `A`
+            i += 2;             // consumed the opener
         } else {
             buf[j++] = msg[i++];
         }

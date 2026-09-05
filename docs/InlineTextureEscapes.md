@@ -556,9 +556,26 @@ Render the modern inline-texture escape (warcraft.wiki.gg/wiki/UI_escape_sequenc
 |Tpath:height[:width[:offsetX:offsetY[:texWidth:texHeight:left:right:top:bottom[:rV:gV:bV]]]]|t
 ```
 
-Atlas markup (`|A:atlas:…|a`) is Legion+ (needs an atlas DB 1.12 lacks) — out
-of scope. FileDataID paths are Legion+ — 1.12 resolves texture PATH strings
-only.
+Atlas markup is also supported:
+
+```
+|A:atlasName:height:width[:offsetX:offsetY]|a
+```
+
+It shares every scanner, measure, wrap and placement stage with `|T` — only the
+payload parser differs. `ParseAtlasIcon` resolves the name through
+`Texture::Atlas` and fills the SAME `IconDesc`, because an atlas is exactly the
+"path + normalized sub-rect" that struct already carries for a `|T` span with
+texcoords. A `height`/`width` of `0` resolves to the atlas's own pixel size at
+PARSE time (not the line font height `|T` falls back to), which is what keeps the
+rest of the pipeline marker-agnostic. Tiling atlases draw one quad, so
+`tilesHorizontally` / `tilesVertically` are not honored here.
+
+Adding any further marker means touching `IconStartLen`, `FindIconClose`,
+`InlineSpanLen`, the ghost guard in `FlushLayout` — and, mandatory,
+`chat/IconFilter.cpp`, or the marker becomes a chat-spoof vector.
+
+FileDataID paths are Legion+ — 1.12 resolves texture PATH strings only.
 
 ## Confirmed: 1.12 has ZERO inline-texture support
 

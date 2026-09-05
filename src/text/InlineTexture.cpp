@@ -11,11 +11,21 @@
 // You should have received a copy of the GNU General Public License along with
 // ClassicAPI. If not, see <https://www.gnu.org/licenses/>.
 
-// Inline texture escape (`|Tpath:height:width:...|t`) backport.
+// Inline texture escape (`|Tpath:height:width:...|t`) backport, plus its atlas
+// sibling (`|A:atlasName:height:width[:offsetX:offsetY]|a`).
 //
 // Vanilla 1.12 has ZERO inline-texture support: the shared `|`-tokenizer
 // (FUN_005c2810) has no `T`/`t` case, so `|T...|t` renders as literal text.
 // This module teaches the text engine to render the icon inline.
+//
+// The two markers share EVERYTHING except the payload parser. An atlas is a
+// texture path plus a normalized sub-rect, which is exactly what IconDesc already
+// carries for a `|T` span with texcoords, so `ParseAtlasIcon` resolves the name
+// through Texture::Atlas and fills the same struct — every scanner, measure, wrap,
+// record and placement stage below is marker-agnostic from that point on. Adding
+// a THIRD marker means touching IconStartLen / FindIconClose / InlineSpanLen, the
+// ghost guard in FlushLayout, and — mandatory — the chat anti-spoof in
+// chat/IconFilter.cpp, which is what stops a player rendering art by typing it.
 //
 // Two working pieces:
 //   1. POSITIONING — co-hook the per-line glyph emitter (FUN_005ccbe0) and, for
@@ -63,6 +73,7 @@
 #include "Offsets.h"
 #include "text/InlineTexturePool.h"
 #include "text/PtrProbe.h"
+#include "texture/Atlas.h"
 #include "texture/Transform.h"
 
 #include <windows.h>
@@ -174,6 +185,70 @@ bool ParseIcon(const char *payload, size_t len, IconDesc &out) {
                     clampByte(f[12]);
     }
     return true;
+}
+
+// Parses the payload between `|A` and `|a` — `atlasName:height:width[:offsetX:offsetY]`
+// — into the SAME IconDesc a `|T` span produces, so every stage after this point
+// (measure, wrap, record, placement, texcoord) is shared between the two markers.
+// An atlas is exactly "a path plus a normalized sub-rect", which is what IconDesc
+// already carries. Returns false when the name is unbound, and the span then
+// renders as ordinary text.
+bool ParseAtlasIcon(const char *payload, size_t len, IconDesc &out) {
+    const char *end = payload + len;
+    // The marker is `|A` and the retail payload is `:name:h:w…`, so the name is
+    // the first field AFTER a leading colon — unlike `|T`, whose path starts
+    // immediately. Consuming that colon here is what makes the two forms differ.
+    const char *nameStart = payload;
+    if (nameStart < end && *nameStart == ':')
+        ++nameStart;
+    const char *colon = nameStart;
+    while (colon < end && *colon != ':')
+        ++colon;
+    if (colon == nameStart)
+        return false; // no name
+    const std::string name(nameStart, static_cast<size_t>(colon - nameStart));
+
+    const Texture::Atlas::Info *info = Texture::Atlas::Find(name.c_str());
+    if (info == nullptr) {
+        Texture::Atlas::RecordMiss(name.c_str());
+        return false;
+    }
+    out.path = info->file;
+    out.u0 = info->left;
+    out.u1 = info->right;
+    out.v0 = info->top;
+    out.v1 = info->bottom;
+
+    float f[4] = {0};
+    int nf = 0;
+    const char *p = (colon < end) ? colon + 1 : end;
+    while (p < end && nf < 4) {
+        const char *nx = p;
+        f[nf++] = ParseField(p, end, &nx);
+        p = nx;
+    }
+    // An omitted or 0 height means "the atlas's own pixel size" — resolved HERE,
+    // not deferred to the line font height the `|T` path falls back to. Doing it
+    // at parse time is what keeps the rest of the pipeline identical for both.
+    const float nativeH = info->height;
+    const float nativeW = info->width;
+    out.height = (nf >= 1 && f[0] > 0.0f) ? f[0] : nativeH;
+    if (out.height <= 0.0f)
+        return false; // no usable size anywhere → nothing to draw
+    if (nf >= 2 && f[1] > 0.0f)
+        out.width = f[1];
+    else if (nativeH > 0.0f && nativeW > 0.0f)
+        out.width = out.height * (nativeW / nativeH); // keep the atlas's aspect
+    else
+        out.width = out.height;
+    out.offsetX = (nf >= 3) ? f[2] : 0.0f;
+    out.offsetY = (nf >= 4) ? f[3] : 0.0f;
+    return true;
+}
+
+// Parses a span's payload with the parser its marker kind calls for.
+bool ParseIconSpan(const char *payload, size_t len, char kind, IconDesc &out) {
+    return (kind == 'A') ? ParseAtlasIcon(payload, len, out) : ParseIcon(payload, len, out);
 }
 
 // --- per-node recorded icons -----------------------------------------------
@@ -526,12 +601,25 @@ constexpr float g_iconPadFrac = 0.18f;
 // length: 3 for the doubled `||T`, 2 for a clean `|T`; 0 otherwise. The doubled
 // form is checked first so the leading `|` of `||T` wins over reading the 2nd `|`
 // as a clean `|T`.
-int IconStartLen(const uint8_t *text, int len, int i) {
-    if (i + 2 < len && text[i] == '|' && text[i + 1] == '|' && text[i + 2] == 'T')
-        return 3;
-    if (i + 1 < len && text[i] == '|' && text[i + 1] == 'T')
-        return 2;
-    return 0;
+// `outKind` (optional) receives the marker letter — 'T' for a path span, 'A' for
+// an atlas span (`|A:name:h:w|a`), whose name resolves through Texture::Atlas.
+// Both markers share every scanner and every downstream stage; only the payload
+// parser differs.
+int IconStartLen(const uint8_t *text, int len, int i, char *outKind = nullptr) {
+    char kind = 0;
+    int mlen = 0;
+    if (i + 2 < len && text[i] == '|' && text[i + 1] == '|' &&
+        (text[i + 2] == 'T' || text[i + 2] == 'A')) {
+        kind = static_cast<char>(text[i + 2]);
+        mlen = 3;
+    } else if (i + 1 < len && text[i] == '|' &&
+               (text[i + 1] == 'T' || text[i + 1] == 'A')) {
+        kind = static_cast<char>(text[i + 1]);
+        mlen = 2;
+    }
+    if (mlen != 0 && outKind != nullptr)
+        *outKind = kind;
+    return mlen;
 }
 
 // True if [text,text+len) contains any inline-texture escape.
@@ -544,17 +632,19 @@ bool HasInlineTexture(const uint8_t *text, int len) {
 
 // Finds the matching close (`||t` for the doubled form, `|t` for clean) at or
 // after `from`. Returns its offset and sets *closeLen, or npos.
-size_t FindIconClose(const uint8_t *text, int len, size_t from, bool doubled, int *closeLen) {
+size_t FindIconClose(const uint8_t *text, int len, size_t from, bool doubled, int *closeLen,
+                     char kind = 'T') {
     const size_t n = static_cast<size_t>(len);
+    const uint8_t closer = (kind == 'A') ? 'a' : 't'; // the marker's own closer
     if (doubled) {
         for (size_t i = from; i + 2 < n; ++i)
-            if (text[i] == '|' && text[i + 1] == '|' && text[i + 2] == 't') {
+            if (text[i] == '|' && text[i + 1] == '|' && text[i + 2] == closer) {
                 *closeLen = 3;
                 return i;
             }
     } else {
         for (size_t i = from; i + 1 < n; ++i)
-            if (text[i] == '|' && text[i + 1] == 't') {
+            if (text[i] == '|' && text[i + 1] == closer) {
                 *closeLen = 2;
                 return i;
             }
@@ -567,19 +657,20 @@ size_t FindIconClose(const uint8_t *text, int len, size_t from, bool doubled, in
 // gets no length. Bounded so a malformed/unterminated span can't run away.
 int InlineSpanLen(const uint8_t *text) {
     int mlen;
-    if (text[0] == '|' && text[1] == '|' && text[2] == 'T')
-        mlen = 3; // doubled ||T
-    else if (text[0] == '|' && text[1] == 'T')
-        mlen = 2; // clean |T
+    if (text[0] == '|' && text[1] == '|' && (text[2] == 'T' || text[2] == 'A'))
+        mlen = 3; // doubled ||T / ||A
+    else if (text[0] == '|' && (text[1] == 'T' || text[1] == 'A'))
+        mlen = 2; // clean |T / |A
     else
         return 0;
     const bool doubled = (mlen == 3);
+    const uint8_t closer = (text[mlen - 1] == 'A') ? 'a' : 't';
     for (int i = mlen; i < 2048 && text[i] != '\0'; ++i) {
         if (doubled) {
-            if (text[i] == '|' && text[i + 1] == '|' && text[i + 2] == 't')
+            if (text[i] == '|' && text[i + 1] == '|' && text[i + 2] == closer)
                 return i + 3;
         } else {
-            if (text[i] == '|' && text[i + 1] == 't')
+            if (text[i] == '|' && text[i + 1] == closer)
                 return i + 2;
         }
     }
@@ -638,7 +729,8 @@ float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlin
     float sum = 0.0f;
     int i = 0;
     while (i < len) {
-        const int ml = IconStartLen(text, len, i);
+        char kind = 'T';
+        const int ml = IconStartLen(text, len, i, &kind);
         if (ml == 0) {
             // Skip an escaped pipe as a pair so its 2nd `|` isn't re-read as a
             // clean `|T` next iteration (same walk the emitter does).
@@ -649,12 +741,13 @@ float SumIconAdvances(const uint8_t *text, int len, float fontHPen, float outlin
             continue;
         }
         int cl = 0;
-        const size_t ce = FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl);
+        const size_t ce =
+            FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl, kind);
         if (ce == static_cast<size_t>(-1))
             break; // unterminated → the rest is plain text
         IconDesc d;
-        if (ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
-                      ce - (static_cast<size_t>(i) + ml), d))
+        if (ParseIconSpan(reinterpret_cast<const char *>(text) + i + ml,
+                          ce - (static_cast<size_t>(i) + ml), kind, d))
             sum += IconAdvancePen(d, fontHPen, outlineInk, snap);
         i = static_cast<int>(ce) + cl;
     }
@@ -676,7 +769,8 @@ float TrailingIconTrimPen(const uint8_t *text, int len, float fontHPen, float ou
     int i = 0;
     bool endsInIcon = false;
     while (i < len) {
-        const int ml = IconStartLen(text, len, i);
+        char kind = 'T';
+        const int ml = IconStartLen(text, len, i, &kind);
         if (ml == 0) {
             if (text[i] == '|' && i + 1 < len && text[i + 1] == '|')
                 i += 2;
@@ -686,12 +780,13 @@ float TrailingIconTrimPen(const uint8_t *text, int len, float fontHPen, float ou
             continue;
         }
         int cl = 0;
-        const size_t ce = FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl);
+        const size_t ce =
+            FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl, kind);
         if (ce == static_cast<size_t>(-1))
             return 0.0f; // unterminated → the tail renders as plain text
         IconDesc d;
-        endsInIcon = ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
-                               ce - (static_cast<size_t>(i) + ml), d);
+        endsInIcon = ParseIconSpan(reinterpret_cast<const char *>(text) + i + ml,
+                                   ce - (static_cast<size_t>(i) + ml), kind, d);
         i = static_cast<int>(ce) + cl;
     }
     if (!endsInIcon)
@@ -710,7 +805,8 @@ float MaxIconOverflowPx(const uint8_t *text, int len, float fontHPx) {
     float maxH = 0.0f;
     int i = 0;
     while (i < len) {
-        const int ml = IconStartLen(text, len, i);
+        char kind = 'T';
+        const int ml = IconStartLen(text, len, i, &kind);
         if (ml == 0) {
             if (text[i] == '|' && i + 1 < len && text[i + 1] == '|')
                 i += 2;
@@ -719,12 +815,13 @@ float MaxIconOverflowPx(const uint8_t *text, int len, float fontHPx) {
             continue;
         }
         int cl = 0;
-        const size_t ce = FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl);
+        const size_t ce =
+            FindIconClose(text, len, static_cast<size_t>(i) + ml, ml == 3, &cl, kind);
         if (ce == static_cast<size_t>(-1))
             break;
         IconDesc d;
-        if (ParseIcon(reinterpret_cast<const char *>(text) + i + ml,
-                      ce - (static_cast<size_t>(i) + ml), d)) {
+        if (ParseIconSpan(reinterpret_cast<const char *>(text) + i + ml,
+                          ce - (static_cast<size_t>(i) + ml), kind, d)) {
             const float h = ((d.height > 0.0f) ? d.height : fontHPx) * g_sizeScale;
             if (h > maxH)
                 maxH = h;
@@ -1551,7 +1648,8 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
             ++i;
             continue;
         }
-        int mlen = IconStartLen(text, len, i);
+        char kind = 'T';
+        int mlen = IconStartLen(text, len, i, &kind);
         if (mlen == 0) {
             // Not an icon. Skip an escaped pipe as a pair so its 2nd `|` isn't
             // re-read as a clean `|T` next iteration; otherwise advance one.
@@ -1563,7 +1661,8 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
         }
         const bool doubled = (mlen == 3);
         int closeLen = 0;
-        size_t close = FindIconClose(text, len, static_cast<size_t>(i) + mlen, doubled, &closeLen);
+        size_t close =
+            FindIconClose(text, len, static_cast<size_t>(i) + mlen, doubled, &closeLen, kind);
         if (close == static_cast<size_t>(-1)) {
             // Unterminated on this line — treat the rest as plain text.
             break;
@@ -1574,8 +1673,9 @@ void __fastcall Emitter_h(void *node, void *edx, uint8_t *text, int len, uint32_
         IconDesc d;
         const char *payload = reinterpret_cast<const char *>(text) + i + mlen;
         size_t payloadLen = close - (static_cast<size_t>(i) + mlen);
-        if (ParseIcon(payload, payloadLen, d)) {
-            // height/width of 0 => size to the line's font (retail :0:0).
+        if (ParseIconSpan(payload, payloadLen, kind, d)) {
+            // height/width of 0 => size to the line's font (retail :0:0). An
+            // atlas span has already resolved its own size at parse time.
             const float baseH = (d.height > 0.0f) ? d.height : fontH;
             const float baseW = (d.width > 0.0f) ? d.width : baseH;
             const float w = baseW * g_sizeScale;
@@ -1766,7 +1866,7 @@ void FlushLayout(void *layout) {
             bool fsHasMarkup = false;
             if (LooksReadable(ftext)) {
                 for (int k = 1; k < 2048 && ftext[k] != '\0'; ++k)
-                    if (ftext[k] == 'T' && ftext[k - 1] == '|') {
+                    if ((ftext[k] == 'T' || ftext[k] == 'A') && ftext[k - 1] == '|') {
                         fsHasMarkup = true;
                         break;
                     }

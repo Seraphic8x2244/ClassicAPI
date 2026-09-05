@@ -199,6 +199,8 @@ build instructions.
   - [`texture:GetNumMaskTextures()`](#texturegetnummasktextures)
   - [`texture:GetMaskTexture(index)`](#texturegetmasktextureindex)
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
+  - [`texture:SetAtlas(atlas [, useAtlasSize])`](#texturesetatlasatlas--useatlassize)
+  - [`texture:GetAtlas()`](#texturegetatlas)
   - [Texture size and shape](#texture-size-and-shape)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`editBox:SetCursorPosition(position)`](#editboxsetcursorpositionposition)
@@ -602,6 +604,15 @@ build instructions.
   - [`C_TaxiMap.GetTaxiPaths()`](#c_taximapgettaxipaths)
   - [`C_TaxiMap.GetTaxiPathWaypoints(pathID)`](#c_taximapgettaxipathwaypointspathid)
   - [`C_TaxiMap.GetTaxiRoute(slotIndex)`](#c_taximapgettaxiroutepslotindex)
+
+- [Texture](#texture)
+  - [`C_Texture.GetAtlasInfo(atlasName)`](#c_texturegetatlasinfoatlasname)
+  - [`C_Texture.GetAtlasExists(atlasName)`](#c_texturegetatlasexistsatlasname)
+  - [`C_Texture.GetAtlasID(atlasName)`](#c_texturegetatlasidatlasname)
+  - [`C_Texture.GetAtlasElementID(atlasName)`](#c_texturegetatlaselementidatlasname)
+  - [`C_Texture.GetAtlasElements()`](#c_texturegetatlaselements)
+  - [`C_Texture.RegisterAtlas(name, file, width, height, left, right, top, bottom [, tilesHorizontally, tilesVertically])`](#c_textureregisteratlasname-file-width-height-left-right-top-bottom--tileshorizontally-tilesvertically)
+  - [Atlas markup](#atlas-markup)
 
 - [Time](#time)
   - [`GetServerTime()`](#getservertime)
@@ -4696,6 +4707,30 @@ Returns the number of masks attached to this texture.
 
 Returns the mask at `index` (1 is the first one added), or `nil` when there is
 no mask at that index.
+
+### `texture:SetAtlas(atlas [, useAtlasSize])`
+
+Points the texture at a named piece of art. This sets the texture file and the
+coordinates of the rectangle inside it, so one call replaces a `SetTexture` and a
+`SetTexCoord`. See [Texture](#texture) for the atlas names and for
+`C_Texture.RegisterAtlas`.
+
+Pass `true` for `useAtlasSize` to also resize the texture to the art's own pixel
+size. Any further arguments are accepted and ignored.
+
+When the name is not known, the texture keeps whatever it was showing. Call
+`_classicapi_DumpAtlasMisses()` to list the names that were asked for and not
+found.
+
+```lua
+local t = frame:CreateTexture(nil, "ARTWORK")
+t:SetAtlas("MinimapArrow", true)   -- draws the art at its own 32x32 size
+```
+
+### `texture:GetAtlas()`
+
+Returns the atlas name last set on this texture, or `nil` when it is showing
+something else. Pointing the texture at a file with `SetTexture` clears the name.
 
 ### Texture size and shape
 
@@ -14423,6 +14458,115 @@ it's the current node, or no route exists.
 Pairs with `GetTaxiPaths` (each consecutive `(from, to)` names a `pathID`) and
 `GetTaxiPathWaypoints` (that path's geometry) to measure a chained trip without
 matching flight-map pixel coordinates back to nodes.
+
+## Texture
+
+An atlas is a name for one piece of art. The name points to a texture file and to
+a rectangle inside that file. `texture:SetAtlas(name)` applies both in one step,
+so you never write the coordinates at the call site.
+
+ClassicAPI ships a small set of built-in atlas names. Call
+`C_Texture.GetAtlasElements()` to list them. To use your own art, describe it once
+with `C_Texture.RegisterAtlas` and then set it by name like any other atlas.
+
+Atlas names are not case sensitive.
+
+### `C_Texture.GetAtlasInfo(atlasName)`
+
+Returns a table that describes the atlas, or `nil` when the name is not known.
+
+Table fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `elementName` | string | The name in its canonical spelling. |
+| `width` | number | Width of the art in pixels. |
+| `height` | number | Height of the art in pixels. |
+| `leftTexCoord` | number | Left edge of the rectangle, from 0 to 1. |
+| `rightTexCoord` | number | Right edge of the rectangle, from 0 to 1. |
+| `topTexCoord` | number | Top edge of the rectangle, from 0 to 1. |
+| `bottomTexCoord` | number | Bottom edge of the rectangle, from 0 to 1. |
+| `tilesHorizontally` | boolean | True when the art repeats across its width. |
+| `tilesVertically` | boolean | True when the art repeats down its height. |
+| `filename` | string | Path of the texture that holds the art. |
+
+Textures are named by path, so `filename` carries the texture and the `file` field
+is not set.
+
+```lua
+local info = C_Texture.GetAtlasInfo("Repair")
+print(info.filename, info.width, info.height)
+```
+
+### `C_Texture.GetAtlasExists(atlasName)`
+
+Returns `true` when the name is known and `false` when it is not. This agrees with
+`GetAtlasInfo` at all times. A name that exists always returns a table.
+
+### `C_Texture.GetAtlasID(atlasName)`
+
+Returns the id of the sheet that holds the atlas, or `nil` when the name is not
+known. A built-in atlas has a positive id. An atlas you add with
+`C_Texture.RegisterAtlas` gets a negative id, so the two kinds never collide.
+
+### `C_Texture.GetAtlasElementID(atlasName)`
+
+Returns the id of this one piece of art, or `nil` when the name is not known. The
+same positive and negative rule applies.
+
+### `C_Texture.GetAtlasElements()`
+
+Returns an array of every atlas name that is currently known, in alphabetical
+order. The list includes the names you registered yourself.
+
+```lua
+for _, name in ipairs(C_Texture.GetAtlasElements()) do
+    print(name)
+end
+```
+
+### `C_Texture.RegisterAtlas(name, file, width, height, left, right, top, bottom [, tilesHorizontally, tilesVertically])`
+
+A ClassicAPI extension. Adds an atlas name that points at your own art, so
+`SetAtlas` and atlas markup work with a sprite sheet you ship yourself.
+
+- `name` — the atlas name callers will use.
+- `file` — texture path, without the file extension.
+- `width`, `height` — size of the art in pixels, used by `useAtlasSize`.
+- `left`, `right`, `top`, `bottom` — the rectangle inside the file, from 0 to 1.
+
+Registering a name a second time replaces its definition and keeps its ids, so a
+caller that stored an id keeps a valid one. Returns `true`.
+
+```lua
+-- One 32x32 cell from the top-left of a 128x128 sheet.
+C_Texture.RegisterAtlas("myaddon-gem", "Interface\\AddOns\\MyAddon\\sheet",
+                        32, 32, 0, 0.25, 0, 0.25)
+
+myTexture:SetAtlas("myaddon-gem", true)
+```
+
+### Atlas markup
+
+`|A:atlasName:height:width|a` draws an atlas inside any text, next to the
+`|T…|t` form that draws a texture path. Use it in chat messages, tooltip lines,
+and font strings.
+
+- A `height` of `0` uses the atlas's own pixel height.
+- A `width` of `0` keeps the atlas's own shape at the height you asked for.
+- Two more fields shift the art from the text, as `|A:name:h:w:offsetX:offsetY|a`.
+
+```lua
+print("Repair cost: |A:Repair:0:0|a")
+print("Small marker |A:MinimapArrow:12:12|a here")
+```
+
+An unknown name draws nothing and leaves the rest of the line intact. Art that
+repeats is drawn once, so `tilesHorizontally` and `tilesVertically` have no effect
+in text.
+
+Text typed by other players never draws atlas art. This matches how a typed
+texture path behaves.
 
 ## Time
 

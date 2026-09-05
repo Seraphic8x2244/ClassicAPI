@@ -474,6 +474,13 @@ enum Offsets {
     // handler as the 7.0 `SetColorTexture` (which IS exactly the numeric form), so
     // the clamp and opaque-alpha default come straight from the engine.
     FUN_SCRIPT_TEXTURE_SET_TEXTURE = 0x0079BB40,
+    // Script_Texture_SetTexCoord — the Lua `texture:SetTexCoord(...)` handler
+    // (entry 17 of the Texture method batch at 0x0087C128). Takes the 4-arg
+    // (left, right, top, bottom) and 8-arg corner forms and writes through to
+    // FUN_SIMPLETEXTURE_SET_TEXCOORD below. texture/Atlas.cpp delegates to this
+    // handler rather than the native setter so an atlas set inherits the engine's
+    // own arg validation and both coordinate forms.
+    FUN_SCRIPT_TEXTURE_SET_TEXCOORD = 0x0079BEB0,
     // CSimpleTexture::SetTexCoord — `__thiscall(tex, float[4])`. Struct field
     // order is {top, left, bottom, right} = {v0, u0, v1, u1} (verified from the
     // SetTexCoord handler 0x0079BEB0's Lua-arg → struct mapping). Natural

@@ -86,13 +86,18 @@ std::string StripMarkup(const char *s, unsigned len) {
                 ++i;
             break; // the |h is dropped by the 'h' case on the next iteration
         case 't': // stray texture closer — drop
+        case 'a': // stray atlas closer — drop
             i += 2;
             break;
         case 'T': // texture opener — skip through to the next |t
+        case 'A': // atlas opener — skip through to the next |a
+        {
+            const char closer = (s[i + 1] == 'A') ? 'a' : 't';
             i += 2;
-            while (i < len && !(s[i] == '|' && i + 1 < len && s[i + 1] == 't'))
+            while (i < len && !(s[i] == '|' && i + 1 < len && s[i + 1] == closer))
                 ++i;
-            break; // the |t is dropped by the 't' case on the next iteration
+            break; // the closer is dropped by the 't'/'a' case next iteration
+        }
         default: // unknown sequence — keep the pipe literally
             out.push_back('|');
             ++i;
