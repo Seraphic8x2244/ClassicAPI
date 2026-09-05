@@ -201,6 +201,7 @@ build instructions.
   - [`texture:SetColorTexture(colorR, colorG, colorB [, a])`](#texturesetcolortexturecolorr-colorg-colorb--a)
   - [`texture:SetAtlas(atlas [, useAtlasSize])`](#texturesetatlasatlas--useatlassize)
   - [`texture:GetAtlas()`](#texturegetatlas)
+  - [`texture:SetSpriteSheetCell(cell, numRows, numColumns)`](#texturesetspritesheetcellcell-numrows-numcolumns)
   - [Texture size and shape](#texture-size-and-shape)
   - [`fontstring:SetRotation(angle [, cx, cy])`](#fontstringsetrotationangle--cx-cy)
   - [`editBox:SetCursorPosition(position)`](#editboxsetcursorpositionposition)
@@ -4731,6 +4732,26 @@ t:SetAtlas("MinimapArrow", true)   -- draws the art at its own 32x32 size
 
 Returns the atlas name last set on this texture, or `nil` when it is showing
 something else. Pointing the texture at a file with `SetTexture` clears the name.
+
+### `texture:SetSpriteSheetCell(cell, numRows, numColumns)`
+
+Crops the texture to one cell of an evenly divided grid. A sprite sheet holds
+several images in one file, and this works out the share of the file that one
+image occupies, so you do not write the coordinates yourself.
+
+- `cell` — which image to show. The first cell is `1`. Cells count left to right,
+  then top to bottom.
+- `numRows`, `numColumns` — the shape of the grid.
+
+Two further arguments, `cellWidth` and `cellHeight`, are accepted and ignored.
+
+The texture keeps what it was showing when `cell` falls outside the grid.
+
+```lua
+-- The eight raid markers share one 4x4 sheet. Cell 8 is the skull.
+t:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+t:SetSpriteSheetCell(8, 4, 4)
+```
 
 ### Texture size and shape
 
