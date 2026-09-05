@@ -22,10 +22,13 @@
 //
 // ## The identity scheme (shared with the rest of `Map::*`)
 //
-// `uiMapID` is a vanilla `AreaTable.dbc` area id — the same identity
-// `C_Map.GetBestMapForUnit` returns and `GetMapWorldSize` / `GetMapOverlays`
-// accept. `continentID` is a `Map.dbc` map id (0 = Eastern Kingdoms,
-// 1 = Kalimdor, or an instance map). World coordinates are continent-space
+// `uiMapID` is a vanilla `AreaTable.dbc` area id for a zone — the same
+// identity `C_Map.GetBestMapForUnit` returns and `GetMapWorldSize` /
+// `GetMapOverlays` accept — or a NEGATIVE `-(WorldMapArea row)` for a
+// continent / world / instance map (see `Map::Area`'s uiMapID section), so a
+// continent map works anywhere a zone does. `continentID` is a `Map.dbc` map
+// id (0 = Eastern Kingdoms, 1 = Kalimdor, or an instance map). World
+// coordinates are continent-space
 // (WoW world axes: +X north, +Y west), exactly what `AreaTrigger.dbc` stores
 // and what the object `GetPosition` virtual returns. All four functions reuse
 // `Map::Area`'s zone rect math (`PercentInZone`, `ZonePercent`,
@@ -51,29 +54,9 @@ namespace Map::Coordinates {
 
 namespace {
 
-// A zone's WorldMapArea placement rect (world coords) plus its continent.
-struct ZoneRect {
-    double left, right, top, bottom; // locLeft/Right bound world Y; locTop/Bottom world X
-    int continentID;                 // Map.dbc map id
-};
-
-// Fills `out` for an AreaTable `areaID`. False when the zone has no
-// WorldMapArea row.
-bool GetZoneRect(int areaID, ZoneRect *out) {
-    const int row = Map::Area::RowForAreaID(static_cast<uint32_t>(areaID));
-    if (row <= 0)
-        return false;
-    const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
-                                     Offsets::VAR_WORLDMAP_AREA_COUNT,
-                                     static_cast<uint32_t>(row));
-    if (rec == nullptr)
-        return false;
-    out->left = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_LEFT);
-    out->right = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_RIGHT);
-    out->top = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_TOP);
-    out->bottom = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_BOTTOM);
-    out->continentID = Game::Read<int>(rec, Offsets::OFF_WMA_MAP_ID);
-    return true;
+// True when a projected 0..1 map position actually lands on the map.
+bool OnMap(double px, double py) {
+    return px >= 0.0 && px <= 1.0 && py >= 0.0 && py <= 1.0;
 }
 
 // Reads `t.x` / `t.y` from the table at absolute stack index `idx` (a vector2
@@ -122,18 +105,20 @@ int __fastcall Script_GetPlayerMapPosition(void *L) {
     const int areaID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
     const char *token = ok ? Game::Lua::ToString(L, 2) : nullptr;
 
+    const int row = ok ? Map::Area::RowForUiMapID(areaID) : -1;
     float pos[3];
-    double mapX = 0.0, mapY = 0.0;
-    const bool have = ok && token != nullptr && areaID > 0 &&
+    double px = 0.0, py = 0.0;
+    const bool have = ok && token != nullptr && row > 0 &&
                       Unit::Position::ReadToken(token, pos) &&
-                      Map::Area::PercentInZone(areaID, pos[0], pos[1], &mapX, &mapY);
+                      Map::Area::PercentInRow(row, pos[0], pos[1], &px, &py) &&
+                      OnMap(px, py);
 
     Game::Lua::SetTop(L, 0);
     if (!have) {
         Game::Lua::PushNil(L);
         return 1;
     }
-    PushVector2D(L, mapX / 100.0, mapY / 100.0);
+    PushVector2D(L, px, py);
     return 1;
 }
 
@@ -146,22 +131,22 @@ int __fastcall Script_GetWorldPosFromMapPos(void *L) {
         Game::Lua::IsNumber(L, 1) && Game::Lua::Type(L, 2) == Game::Lua::TYPE_TABLE;
     const int areaID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
 
+    const int row = ok ? Map::Area::RowForUiMapID(areaID) : -1;
     double mx = 0.0, my = 0.0;
-    ZoneRect r{};
-    const bool have =
-        ok && ReadXY(L, 2, &mx, &my) && areaID > 0 && GetZoneRect(areaID, &r);
+    double worldX = 0.0, worldY = 0.0;
+    int continentID = 0;
+    const bool have = ok && ReadXY(L, 2, &mx, &my) && row > 0 &&
+                      Map::Area::RowRect(row, nullptr, nullptr, nullptr, nullptr,
+                                         &continentID) &&
+                      Map::Area::WorldFromRow(row, mx, my, &worldX, &worldY);
 
     Game::Lua::SetTop(L, 0);
     if (!have) {
         Game::Lua::PushNil(L);
         return 1;
     }
-    const double spanY = r.left - r.right; // world Y span (horizontal / mapX)
-    const double spanX = r.top - r.bottom; // world X span (vertical / mapY)
-    const double worldY = r.left - mx * spanY; // inverse of (left - y)/spanY
-    const double worldX = r.top - my * spanX;  // inverse of (top  - x)/spanX
 
-    Game::Lua::PushNumber(L, static_cast<double>(r.continentID));
+    Game::Lua::PushNumber(L, static_cast<double>(continentID));
     PushVector2D(L, worldX, worldY); // vector.x = world X (north), .y = world Y (west)
     return 2;
 }
@@ -187,11 +172,17 @@ int __fastcall Script_GetMapPosFromWorldPos(void *L) {
     bool have = false;
     if (readOk) {
         if (hasOverride) {
-            have = overrideArea > 0 &&
-                   Map::Area::PercentInZone(overrideArea, static_cast<float>(wx),
-                                            static_cast<float>(wy), &mapX, &mapY);
-            if (have)
+            const int row = Map::Area::RowForUiMapID(overrideArea);
+            double px = 0.0, py = 0.0;
+            have = row > 0 &&
+                   Map::Area::PercentInRow(row, static_cast<float>(wx),
+                                           static_cast<float>(wy), &px, &py) &&
+                   OnMap(px, py);
+            if (have) {
                 areaID = overrideArea;
+                mapX = px * 100.0; // normalized below with the ZonePercent path
+                mapY = py * 100.0;
+            }
         } else {
             have = Map::Area::ZonePercent(continentID, static_cast<float>(wx),
                                           static_cast<float>(wy), &areaID, &mapX, &mapY);
@@ -215,17 +206,27 @@ int __fastcall Script_GetMapPosFromWorldPos(void *L) {
 // continent. Returns nothing (→ nil ×4) when the zone has no map row.
 int __fastcall Script_GetMapRectOnMap(void *L) {
     const int areaID = Game::Lua::IsNumber(L, 1) ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const int topID = Game::Lua::IsNumber(L, 2) ? static_cast<int>(Game::Lua::ToNumber(L, 2)) : 0;
 
-    ZoneRect r{};
+    const int row = Map::Area::RowForUiMapID(areaID);
+    double left = 0.0, right = 0.0, top = 0.0, bottom = 0.0;
+    int continentID = 0;
     double aPx = 0.0, aPy = 0.0, bPx = 0.0, bPy = 0.0;
-    bool have = areaID > 0 && GetZoneRect(areaID, &r);
+    bool have = row > 0 && Map::Area::RowRect(row, &left, &right, &top, &bottom,
+                                              &continentID);
     if (have) {
-        // Project the zone rect's two extreme world corners through the
-        // continent transform. Corner A = (world X=top, Y=left); B = (bottom, right).
-        have = Map::Area::ContinentPercent(r.continentID, static_cast<float>(r.top),
-                                           static_cast<float>(r.left), &aPx, &aPy) &&
-               Map::Area::ContinentPercent(r.continentID, static_cast<float>(r.bottom),
-                                           static_cast<float>(r.right), &bPx, &bPy);
+        // `topUiMapID` names the map to measure against; fall back to the
+        // zone's own continent when it isn't a usable map.
+        int topRow = (topID != 0) ? Map::Area::RowForUiMapID(topID) : -1;
+        if (topRow <= 0)
+            topRow = Map::Area::ContinentRowForMapID(continentID);
+        // Project the rect's two extreme world corners onto that map.
+        // Corner A = (world X=top, Y=left); B = (bottom, right).
+        have = topRow > 0 &&
+               Map::Area::PercentInRow(topRow, static_cast<float>(top),
+                                       static_cast<float>(left), &aPx, &aPy) &&
+               Map::Area::PercentInRow(topRow, static_cast<float>(bottom),
+                                       static_cast<float>(right), &bPx, &bPy);
     }
 
     Game::Lua::SetTop(L, 0);

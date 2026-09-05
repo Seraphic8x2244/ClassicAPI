@@ -76,4 +76,45 @@ bool PercentInZone(int areaID, float x, float y, double *outMapX, double *outMap
 // projection retail's TaxiNodeInfo.position uses.
 bool ContinentPercent(int mapID, float x, float y, double *outPx, double *outPy);
 
+// --- uiMapID identity ------------------------------------------------------
+//
+// A ClassicAPI `uiMapID` names either a zone or a whole map:
+//   positive  = an `AreaTable.dbc` area id (a zone) — what
+//               `C_Map.GetBestMapForUnit` returns.
+//   negative  = -(WorldMapArea row) — continent / world / instance maps,
+//               which carry no AreaTable id (their rows have areaID 0).
+// The negative half mirrors the engine's own two-namespaces-in-one-int idiom
+// (a quest's `zoneOrSort`: positive = AreaTable zone, negative = -QuestSort
+// row), so the two id spaces can never collide.
+
+// WorldMapArea row for a `uiMapID` in either namespace. Returns -1 when the
+// id resolves to no row.
+int RowForUiMapID(int uiMapID);
+
+// The `uiMapID` that names WorldMapArea row `row` — its areaID when it has
+// one, else -(row). Returns 0 for an unreadable row.
+int UiMapIDForRow(int row);
+
+// The continent-level WorldMapArea row for a `Map.dbc` map: the areaID == 0
+// row with a non-degenerate rect (the same selection `ContinentPercent`
+// makes, so the stray zero-rect "World" row never wins). -1 when none.
+int ContinentRowForMapID(int mapID);
+
+// Reads WorldMapArea row `row`'s placement rect and its `Map.dbc` map id.
+// Every out-parameter is optional (pass null to skip it). False when the row
+// is unreadable.
+bool RowRect(int row, double *outLeft, double *outRight, double *outTop,
+             double *outBottom, int *outMapID);
+
+// Projects world (x, y) into row `row`'s rect as 0..1 (`outPx` horizontal off
+// world Y, `outPy` vertical off world X). Unlike `PercentInZone` there is NO
+// containment gate — a point outside the rect yields a value outside 0..1, and
+// the caller decides whether that is meaningful. False for a missing or
+// degenerate rect.
+bool PercentInRow(int row, float x, float y, double *outPx, double *outPy);
+
+// Inverse of `PercentInRow`: a 0..1 position on row `row` back to
+// continent-space world coordinates. False for a missing or degenerate rect.
+bool WorldFromRow(int row, double px, double py, double *outX, double *outY);
+
 } // namespace Map::Area

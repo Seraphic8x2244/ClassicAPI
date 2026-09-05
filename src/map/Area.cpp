@@ -211,6 +211,102 @@ bool PercentInZone(int areaID, float x, float y, double *outMapX, double *outMap
     return false;
 }
 
+int RowForUiMapID(int uiMapID) {
+    if (uiMapID > 0)
+        return RowForAreaID(static_cast<uint32_t>(uiMapID));
+    if (uiMapID < 0) {
+        const int row = -uiMapID;
+        if (DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
+                        Offsets::VAR_WORLDMAP_AREA_COUNT,
+                        static_cast<uint32_t>(row)) != nullptr)
+            return row;
+    }
+    return -1;
+}
+
+int UiMapIDForRow(int row) {
+    if (row <= 0)
+        return 0;
+    const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
+                                     Offsets::VAR_WORLDMAP_AREA_COUNT,
+                                     static_cast<uint32_t>(row));
+    if (rec == nullptr)
+        return 0;
+    const int areaID = Game::Read<int>(rec, Offsets::OFF_WMA_AREA_ID);
+    return (areaID != 0) ? areaID : -row;
+}
+
+int ContinentRowForMapID(int mapID) {
+    const int count = Game::Read<int>(Offsets::VAR_WORLDMAP_AREA_COUNT);
+    for (int id = 1; id <= count; ++id) {
+        const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
+                                         Offsets::VAR_WORLDMAP_AREA_COUNT,
+                                         static_cast<uint32_t>(id));
+        if (rec == nullptr)
+            continue;
+        if (Game::Read<int>(rec, Offsets::OFF_WMA_MAP_ID) != mapID)
+            continue;
+        if (Game::Read<int>(rec, Offsets::OFF_WMA_AREA_ID) != 0)
+            continue; // a zone row, not the continent-spanning one
+        const double left = FloatField(rec, Offsets::OFF_WMA_LOC_LEFT);
+        const double right = FloatField(rec, Offsets::OFF_WMA_LOC_RIGHT);
+        const double top = FloatField(rec, Offsets::OFF_WMA_LOC_TOP);
+        const double bottom = FloatField(rec, Offsets::OFF_WMA_LOC_BOTTOM);
+        if (left - right <= 0.0 || top - bottom <= 0.0)
+            continue; // stray zero-rect continent row (the "World" row)
+        return id;
+    }
+    return -1;
+}
+
+bool RowRect(int row, double *outLeft, double *outRight, double *outTop,
+             double *outBottom, int *outMapID) {
+    if (row <= 0)
+        return false;
+    const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
+                                     Offsets::VAR_WORLDMAP_AREA_COUNT,
+                                     static_cast<uint32_t>(row));
+    if (rec == nullptr)
+        return false;
+    if (outLeft != nullptr)
+        *outLeft = FloatField(rec, Offsets::OFF_WMA_LOC_LEFT);
+    if (outRight != nullptr)
+        *outRight = FloatField(rec, Offsets::OFF_WMA_LOC_RIGHT);
+    if (outTop != nullptr)
+        *outTop = FloatField(rec, Offsets::OFF_WMA_LOC_TOP);
+    if (outBottom != nullptr)
+        *outBottom = FloatField(rec, Offsets::OFF_WMA_LOC_BOTTOM);
+    if (outMapID != nullptr)
+        *outMapID = Game::Read<int>(rec, Offsets::OFF_WMA_MAP_ID);
+    return true;
+}
+
+bool PercentInRow(int row, float x, float y, double *outPx, double *outPy) {
+    double left, right, top, bottom;
+    if (!RowRect(row, &left, &right, &top, &bottom, nullptr))
+        return false;
+    const double spanY = left - right; // horizontal (world Y)
+    const double spanX = top - bottom; // vertical (world X)
+    if (spanX <= 0.0 || spanY <= 0.0)
+        return false;
+    *outPx = (left - y) / spanY;
+    *outPy = (top - x) / spanX;
+    return true;
+}
+
+bool WorldFromRow(int row, double px, double py, double *outX, double *outY) {
+    double left, right, top, bottom;
+    if (!RowRect(row, &left, &right, &top, &bottom, nullptr))
+        return false;
+    const double spanY = left - right;
+    const double spanX = top - bottom;
+    if (spanX <= 0.0 || spanY <= 0.0)
+        return false;
+    *outY = left - px * spanY;
+    *outX = top - py * spanX;
+    return true;
+}
+
 bool ContinentPercent(int mapID, float x, float y, double *outPx, double *outPy) {
     const int count = Game::Read<int>(Offsets::VAR_WORLDMAP_AREA_COUNT);
     for (int id = 1; id <= count; ++id) {

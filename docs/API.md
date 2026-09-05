@@ -420,7 +420,11 @@ build instructions.
   - [`C_Map.GetAreas()`](#c_mapgetareas)
   - [`C_Map.GetAreaTriggerInfo(triggerID)` / `C_Map.GetAreaTriggers([mapID])`](#c_mapgetareatriggerinfotriggerid--c_mapgetareatriggersmapid)
   - [`C_Map.GetBestMapForUnit(unitToken)`](#c_mapgetbestmapforunitunittoken)
+  - [`C_Map.GetFallbackWorldMapID()`](#c_mapgetfallbackworldmapid)
   - [`C_Map.GetMapAreaIDs()`](#c_mapgetmapareaids)
+  - [`C_Map.GetMapChildrenInfo(uiMapID)`](#c_mapgetmapchildreninfouimapid)
+  - [`C_Map.GetMapInfo(uiMapID)`](#c_mapgetmapinfouimapid)
+  - [`C_Map.GetMapInfoAtPosition(uiMapID, x, y)`](#c_mapgetmapinfoatpositionuimapid-x-y)
   - [`C_Map.GetMapOverlays([areaID])`](#c_mapgetmapoverlaysareaid)
   - [`C_Map.GetMapPosFromWorldPos(continentID, worldPosition[, overrideUiMapID])`](#c_mapgetmapposfromworldposcontinentid-worldposition-overrideuimapid)
   - [`C_Map.GetMapRectOnMap(uiMapID, topUiMapID)`](#c_mapgetmaprectonmapuimapid-topuimapid)
@@ -10022,6 +10026,88 @@ point's offset in yards within the zone.
 local w, h = C_Map.GetMapWorldSize(85)   -- Tirisfal: ~4518.7, 3012.5
 ```
 
+### `C_Map.GetMapInfo(uiMapID)`
+
+Returns a map's details table, or `nil` for an id that names no map:
+
+| field | meaning |
+|---|---|
+| `mapID` | the id you passed |
+| `name` | localized map name |
+| `mapType` | `Enum.UIMapType`: `1` world, `2` continent, `3` zone, `4` dungeon |
+| `parentMapID` | the map one level up, or `0` at the top |
+| `flags` | always `0` |
+
+**What a `uiMapID` is.** Maps form a three-level tree:
+
+```
+World
+ +-- Continent (Kalimdor, Eastern Kingdoms)
+      +-- Zone (Durotar, Elwynn Forest, ...)
+```
+
+A **zone** is named by its positive `AreaTable.dbc` area id — the same
+identity [`C_Map.GetBestMapForUnit`](#c_mapgetbestmapforunitunittoken)
+returns. The **world and continent** levels have no area id, so they use
+**negative** ids: Kalimdor is `-13`, Eastern Kingdoms is `-14`, and the world
+map is `-694`. Instance maps (dungeons, raids, battlegrounds) are addressed
+the same negative way. The two ranges never overlap, so every function in
+this section accepts either kind.
+
+Read the ids from `GetMapChildrenInfo`, `GetFallbackWorldMapID`, or
+`GetBestMapForUnit` rather than writing them in by hand.
+
+```lua
+/dump C_Map.GetMapInfo(14)
+-- mapID=14, name="Durotar", mapType=3, parentMapID=-13
+/dump C_Map.GetMapInfo(-13)
+-- mapID=-13, name="Kalimdor", mapType=2, parentMapID=-694
+```
+
+The world map names the whole world but carries no coordinate rect, so the
+coordinate functions return `nil` for it.
+
+### `C_Map.GetMapChildrenInfo(uiMapID)`
+
+Returns an array of [`C_Map.GetMapInfo`](#c_mapgetmapinfouimapid) tables for
+the maps one level below `uiMapID` — the continents of the world map, or the
+zones of a continent. A zone has no children, so it gives an empty table.
+Always returns a table.
+
+```lua
+local continents = C_Map.GetMapChildrenInfo(C_Map.GetFallbackWorldMapID())
+-- 2 entries: Kalimdor (-13), Eastern Kingdoms (-14)
+
+local zones = C_Map.GetMapChildrenInfo(-13)
+-- 35 entries: Durotar (14), Mulgore (215), ...
+```
+
+The zone list covers every map a continent has a world map for, city maps
+included.
+
+### `C_Map.GetMapInfoAtPosition(uiMapID, x, y)`
+
+Returns the [`C_Map.GetMapInfo`](#c_mapgetmapinfouimapid) table for the zone
+at a position on `uiMapID`, or `nil` when the point is on no zone. `x` and
+`y` are map-relative, each `0..1`.
+
+Pass a continent id to answer "which zone sits under this point on the
+continent map" — the hit test behind clicking a continent.
+
+```lua
+/dump C_Map.GetMapInfoAtPosition(-13, 0.589, 0.52)
+-- Durotar
+```
+
+### `C_Map.GetFallbackWorldMapID()`
+
+Returns the uiMapID of the whole-world map — the safe default to show when
+no specific map is known. Returns `0` if the client has no world map.
+
+```lua
+local worldID = C_Map.GetFallbackWorldMapID()   -- -694
+```
+
 ### `C_Map.GetPlayerMapPosition(uiMapID, unitToken)`
 
 Returns a unit's position inside a zone as a `Vector2DMixin`. Call
@@ -10029,11 +10115,11 @@ Returns a unit's position inside a zone as a `Vector2DMixin`. Call
 `.x` / `.y`. Returns `nil` when the unit's world position is outside that
 zone — a different zone, or a map with no world rect.
 
-`uiMapID` is an `AreaTable.dbc` id — the same identity
-[`C_Map.GetBestMapForUnit`](#c_mapgetbestmapforunitunittoken) returns. The
-result comes from the unit's live world coordinates, so it is current the
-moment you call it and does not depend on which map the world map frame
-shows.
+`uiMapID` is a zone or continent id (see
+[`C_Map.GetMapInfo`](#c_mapgetmapinfouimapid)) — pass a continent to get the
+unit's position on the continent map. The result comes from the unit's live
+world coordinates, so it is current the moment you call it and does not
+depend on which map the world map frame shows.
 
 ```lua
 local uiMapID = C_Map.GetBestMapForUnit("player")
@@ -10057,8 +10143,9 @@ Returns `continentID, worldPosition`:
 - `worldPosition` — a `Vector2DMixin` of the world coordinates (`.x`
   north, `.y` west).
 
-`uiMapID` is an `AreaTable.dbc` id. `mapPosition` is any table with `.x` /
-`.y` in `0..1` (a `Vector2DMixin`, or the result of
+`uiMapID` is a zone or continent id (see
+[`C_Map.GetMapInfo`](#c_mapgetmapinfouimapid)). `mapPosition` is any table
+with `.x` / `.y` in `0..1` (a `Vector2DMixin`, or the result of
 [`C_Map.GetPlayerMapPosition`](#c_mapgetplayermappositionuimapid-unittoken)).
 Returns `nil` when the zone has no world rect. This is the inverse of
 [`C_Map.GetMapPosFromWorldPos`](#c_mapgetmapposfromworldposcontinentid-worldposition-overrideuimapid).
@@ -10079,9 +10166,9 @@ Converts absolute world coordinates to a map-relative position. Returns
 
 `continentID` is a `Map.dbc` map id. `worldPosition` is a table with `.x` /
 `.y` world coordinates. Without `overrideUiMapID`, the result is the zone
-the point falls in. Pass `overrideUiMapID` (an `AreaTable.dbc` id) to force
-the result into that specific zone. The call then returns `nil` when the
-point lies outside that zone. This is the inverse of
+the point falls in. Pass `overrideUiMapID` (a zone or continent id) to force
+the result into that specific map. The call then returns `nil` when the
+point lies outside it. This is the inverse of
 [`C_Map.GetWorldPosFromMapPos`](#c_mapgetworldposfrommapposuimapid-mapposition).
 
 ```lua
@@ -10095,9 +10182,9 @@ Returns where a zone sits on its continent map, as four numbers:
 continent coordinates. Returns nothing (`nil`) when the zone has no world
 rect.
 
-`uiMapID` is an `AreaTable.dbc` zone id. `topUiMapID` names the continent
-the zone belongs to; the rectangle is measured on the zone's own
-continent.
+`uiMapID` is the zone. `topUiMapID` is the map to measure against, normally
+the zone's continent (see [`C_Map.GetMapInfo`](#c_mapgetmapinfouimapid)).
+When `topUiMapID` names no usable map, the zone's own continent is used.
 
 ```lua
 local minX, maxX, minY, maxY = C_Map.GetMapRectOnMap(14, 1)  -- Durotar on Kalimdor
