@@ -54,10 +54,10 @@ double FloatField(const uint8_t *rec, int off) {
     return *reinterpret_cast<const float *>(rec + off);
 }
 
-// Vanilla zone world-map canvas size (WorldMapDetailFrame); WorldMapOverlay
-// hit rects live in this pixel space.
-constexpr double kZoneCanvasW = 1002.0;
-constexpr double kZoneCanvasH = 668.0;
+// Zone world-map canvas size (WorldMapDetailFrame); WorldMapOverlay hit
+// rects live in this pixel space. Shared with the map-art readers.
+constexpr double kZoneCanvasW = kMapCanvasWidth;
+constexpr double kZoneCanvasH = kMapCanvasHeight;
 
 // How deep inside its containing WorldMapOverlay hit rect the map-percent point
 // (0..100) sits on WMA row `wmaRow` — the max, over that zone's overlays whose

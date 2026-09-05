@@ -25,6 +25,32 @@
 // place.
 namespace Map::Area {
 
+// The world map's detail canvas in pixels (`WorldMapDetailFrame`) and the
+// size of one background tile — both taken from the client's own
+// `WorldMapFrame.xml`, where the frame is 1002x668 and each of the twelve
+// `WorldMapDetailTile` textures is 256x256 (tile 5 anchors below tile 1, so
+// the grid is 4 wide by 3 tall). A map's background is that grid, and
+// `WorldMapOverlay` placement/hit rects are authored in the same space.
+//
+// These are deliberately CONSTANTS rather than a live read of
+// `WorldMapDetailFrame`, which would look like the more "engine-driven"
+// choice and is in fact the wrong one, twice over:
+//
+//   - The frame is addon-mutable. Map addons resize and rescale it, but the
+//     DBC coordinates these normalize don't move — they were authored
+//     against the shipped size. Reading the frame live would silently skew
+//     every overlay the moment someone scaled the map.
+//   - They are LOGICAL sizes, not on-disk ones. An HD map patch ships
+//     larger tile files; `Map::Overlays` detects that from the real BLP
+//     dimensions and scales. Reporting a patched tile's true size here
+//     would break the `canvas / tile` division that yields the 4x3 grid.
+//
+// So the authored value is the truth, and the runtime one is the mutable
+// approximation — the reverse of the usual case.
+constexpr double kMapCanvasWidth = 1002.0;
+constexpr double kMapCanvasHeight = 668.0;
+constexpr int kMapTileSize = 256;
+
 // WorldMapArea row for an AreaTable `areaID` (the stable zone identity
 // `C_Map.GetBestMapForUnit` returns). Linear walk of the ~175-row table.
 // Returns -1 when no row carries that areaID.

@@ -429,6 +429,7 @@ build instructions.
   - [`C_Map.GetBestMapForUnit(unitToken)`](#c_mapgetbestmapforunitunittoken)
   - [`C_Map.GetFallbackWorldMapID()`](#c_mapgetfallbackworldmapid)
   - [`C_Map.GetMapAreaIDs()`](#c_mapgetmapareaids)
+  - [`C_Map.GetMapArtLayers(uiMapID)`](#c_mapgetmapartlayersuimapid)
   - [`C_Map.GetMapArtLayerTextures(uiMapID, layerIndex)`](#c_mapgetmapartlayertexturesuimapid-layerindex)
   - [`C_Map.GetMapChildrenInfo(uiMapID)`](#c_mapgetmapchildreninfouimapid)
   - [`C_Map.GetMapInfo(uiMapID)`](#c_mapgetmapinfouimapid)
@@ -10272,6 +10273,36 @@ C_Map.MapHasArt(14)     -- true   (Durotar)
 C_Map.MapHasArt(-13)    -- true   (Kalimdor)
 C_Map.MapHasArt(-600)   -- false  (an instance map with no art)
 ```
+
+### `C_Map.GetMapArtLayers(uiMapID)`
+
+Returns the map's art layers, as an array of layer descriptions. Always
+returns a table; a map with no art gives an empty one.
+
+This client draws a map's background as one fixed layer, so there is at
+most a single entry, and it reads the same for every map that has art:
+
+| Field | Value |
+|---|---|
+| `layerWidth` / `layerHeight` | `1002`, `668` — the map canvas in pixels |
+| `tileWidth` / `tileHeight` | `256`, `256` |
+| `minScale` / `maxScale` | `1`, `1` |
+| `additionalZoomSteps` | `0` |
+
+Dividing the canvas by the tile size gives the grid the background is cut
+into — four tiles wide by three tall, the twelve
+[`GetMapArtLayerTextures`](#c_mapgetmapartlayertexturesuimapid-layerindex)
+returns:
+
+```lua
+local layer = C_Map.GetMapArtLayers(14)[1]
+local cols = math.ceil(layer.layerWidth / layer.tileWidth)    -- 4
+local rows = math.ceil(layer.layerHeight / layer.tileHeight)  -- 3
+```
+
+The scale range is `1` to `1` with no extra zoom steps because a map does
+not zoom here — changing zoom switches between the continent and zone
+maps instead of scaling one.
 
 ### `C_Map.GetMapArtLayerTextures(uiMapID, layerIndex)`
 

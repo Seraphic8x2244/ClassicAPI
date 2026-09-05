@@ -304,6 +304,18 @@ void BuildTilePath(char *out, size_t size, const char *dir, int n) {
     std::snprintf(out, size, "Interface\\WorldMap\\%s\\%s%d", dir, dir, n);
 }
 
+// True when the client ships the map directory's first background tile —
+// the test for "this map has art".
+bool DirHasArt(const char *dir) {
+    if (dir == nullptr || dir[0] == '\0')
+        return false;
+    char path[0x120];
+    BuildTilePath(path, sizeof(path), dir, 1);
+    char probe[0x140];
+    std::snprintf(probe, sizeof(probe), "%s.blp", path);
+    return FileExists(probe);
+}
+
 // `C_Map.MapHasArt(uiMapID)` — whether the map has a drawable background.
 //
 // A map's art is the tile set `Interface\WorldMap\<dir>\<dir>1..12`, where
@@ -320,18 +332,45 @@ int __fastcall Script_MapHasArt(void *L) {
     const int uiMapID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
     const int row = ok ? Map::Area::RowForUiMapID(uiMapID) : -1;
 
-    bool hasArt = false;
-    const char *dir = RowName(row);
-    if (dir != nullptr && dir[0] != '\0') {
-        char path[0x120];
-        BuildTilePath(path, sizeof(path), dir, 1);
-        char probe[0x140];
-        std::snprintf(probe, sizeof(probe), "%s.blp", path);
-        hasArt = FileExists(probe);
-    }
+    const bool hasArt = DirHasArt(RowName(row));
 
     Game::Lua::SetTop(L, 0);
     Game::Lua::PushBool(L, hasArt);
+    return 1;
+}
+
+// `C_Map.GetMapArtLayers(uiMapID)` — the map's art layers, as an array of
+// layer descriptions. Always returns a table; a map with no art gives an
+// empty one.
+//
+// This client draws a map's background as one fixed layer, so there is at
+// most a single entry, and it is the same for every map that has art: a
+// 1002x668 canvas tiled in 256-pixel squares (a 4x3 grid — the twelve tiles
+// the world map frame draws). There is no zoom within a map, so the scale
+// range is 1 to 1 with no extra zoom steps.
+int __fastcall Script_GetMapArtLayers(void *L) {
+    const bool ok = Game::Lua::IsNumber(L, 1);
+    const int uiMapID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const int row = ok ? Map::Area::RowForUiMapID(uiMapID) : -1;
+    const bool hasArt = DirHasArt(RowName(row));
+
+    Game::Lua::SetTop(L, 0);
+    Game::Lua::NewTable(L);
+    if (!hasArt)
+        return 1;
+
+    Game::Lua::PushNumber(L, 1.0);
+    Game::Lua::NewTable(L);
+    Game::Lua::SetFieldNumber(L, "layerWidth", Map::Area::kMapCanvasWidth);
+    Game::Lua::SetFieldNumber(L, "layerHeight", Map::Area::kMapCanvasHeight);
+    Game::Lua::SetFieldNumber(L, "tileWidth",
+                              static_cast<double>(Map::Area::kMapTileSize));
+    Game::Lua::SetFieldNumber(L, "tileHeight",
+                              static_cast<double>(Map::Area::kMapTileSize));
+    Game::Lua::SetFieldNumber(L, "minScale", 1.0);
+    Game::Lua::SetFieldNumber(L, "maxScale", 1.0);
+    Game::Lua::SetFieldNumber(L, "additionalZoomSteps", 0.0);
+    Game::Lua::SetTable(L, -3);
     return 1;
 }
 
@@ -396,6 +435,8 @@ void RegisterLuaFunctions() {
     Game::Lua::RegisterTableFunction("C_Map", "MapHasArt", &Script_MapHasArt);
     Game::Lua::RegisterTableFunction("C_Map", "GetMapArtLayerTextures",
                                      &Script_GetMapArtLayerTextures);
+    Game::Lua::RegisterTableFunction("C_Map", "GetMapArtLayers",
+                                     &Script_GetMapArtLayers);
 }
 
 const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
