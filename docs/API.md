@@ -422,7 +422,11 @@ build instructions.
   - [`C_Map.GetBestMapForUnit(unitToken)`](#c_mapgetbestmapforunitunittoken)
   - [`C_Map.GetMapAreaIDs()`](#c_mapgetmapareaids)
   - [`C_Map.GetMapOverlays([areaID])`](#c_mapgetmapoverlaysareaid)
+  - [`C_Map.GetMapPosFromWorldPos(continentID, worldPosition[, overrideUiMapID])`](#c_mapgetmapposfromworldposcontinentid-worldposition-overrideuimapid)
+  - [`C_Map.GetMapRectOnMap(uiMapID, topUiMapID)`](#c_mapgetmaprectonmapuimapid-topuimapid)
   - [`C_Map.GetMapWorldSize([areaID])`](#c_mapgetmapworldsizeareaid)
+  - [`C_Map.GetPlayerMapPosition(uiMapID, unitToken)`](#c_mapgetplayermappositionuimapid-unittoken)
+  - [`C_Map.GetWorldPosFromMapPos(uiMapID, mapPosition)`](#c_mapgetworldposfrommapposuimapid-mapposition)
 
 - [MapExplorationInfo](#mapexplorationinfo)
   - [`C_MapExplorationInfo.GetExploredMapTextures([areaID])`](#c_mapexplorationinfogetexploredmaptexturesareaid)
@@ -10017,6 +10021,90 @@ point's offset in yards within the zone.
 ```lua
 local w, h = C_Map.GetMapWorldSize(85)   -- Tirisfal: ~4518.7, 3012.5
 ```
+
+### `C_Map.GetPlayerMapPosition(uiMapID, unitToken)`
+
+Returns a unit's position inside a zone as a `Vector2DMixin`. Call
+`:GetXY()` for the two map-relative coordinates (each `0..1`), or read
+`.x` / `.y`. Returns `nil` when the unit's world position is outside that
+zone — a different zone, or a map with no world rect.
+
+`uiMapID` is an `AreaTable.dbc` id — the same identity
+[`C_Map.GetBestMapForUnit`](#c_mapgetbestmapforunitunittoken) returns. The
+result comes from the unit's live world coordinates, so it is current the
+moment you call it and does not depend on which map the world map frame
+shows.
+
+```lua
+local uiMapID = C_Map.GetBestMapForUnit("player")
+local pos = C_Map.GetPlayerMapPosition(uiMapID, "player")
+local x, y = pos:GetXY()   -- e.g. 0.595, 0.600
+```
+
+Works for the player and any unit whose object is loaded (in range or
+targeted). Other units return `nil`. An unknown unit token raises an
+error, the same as `UnitHealth` and the other unit functions. In a city or
+subzone, `GetBestMapForUnit` can return a subzone id that has no world
+rect — pass a zone-level id for those.
+
+### `C_Map.GetWorldPosFromMapPos(uiMapID, mapPosition)`
+
+Converts a map-relative position on a zone to absolute world coordinates.
+Returns `continentID, worldPosition`:
+
+- `continentID` — the `Map.dbc` map the zone sits on (`0` Eastern
+  Kingdoms, `1` Kalimdor, or an instance map).
+- `worldPosition` — a `Vector2DMixin` of the world coordinates (`.x`
+  north, `.y` west).
+
+`uiMapID` is an `AreaTable.dbc` id. `mapPosition` is any table with `.x` /
+`.y` in `0..1` (a `Vector2DMixin`, or the result of
+[`C_Map.GetPlayerMapPosition`](#c_mapgetplayermappositionuimapid-unittoken)).
+Returns `nil` when the zone has no world rect. This is the inverse of
+[`C_Map.GetMapPosFromWorldPos`](#c_mapgetmapposfromworldposcontinentid-worldposition-overrideuimapid).
+
+```lua
+local uiMapID = C_Map.GetBestMapForUnit("player")
+local pos = C_Map.GetPlayerMapPosition(uiMapID, "player")
+local continentID, world = C_Map.GetWorldPosFromMapPos(uiMapID, pos)
+```
+
+### `C_Map.GetMapPosFromWorldPos(continentID, worldPosition[, overrideUiMapID])`
+
+Converts absolute world coordinates to a map-relative position. Returns
+`uiMapID, mapPosition`:
+
+- `uiMapID` — the `AreaTable.dbc` zone the point falls in.
+- `mapPosition` — a `Vector2DMixin` with `.x` / `.y` in `0..1`.
+
+`continentID` is a `Map.dbc` map id. `worldPosition` is a table with `.x` /
+`.y` world coordinates. Without `overrideUiMapID`, the result is the zone
+the point falls in. Pass `overrideUiMapID` (an `AreaTable.dbc` id) to force
+the result into that specific zone. The call then returns `nil` when the
+point lies outside that zone. This is the inverse of
+[`C_Map.GetWorldPosFromMapPos`](#c_mapgetworldposfrommapposuimapid-mapposition).
+
+```lua
+local uiMapID, pos = C_Map.GetMapPosFromWorldPos(continentID, world)
+```
+
+### `C_Map.GetMapRectOnMap(uiMapID, topUiMapID)`
+
+Returns where a zone sits on its continent map, as four numbers:
+`minX, maxX, minY, maxY` — the zone's bounding rectangle in `0..1`
+continent coordinates. Returns nothing (`nil`) when the zone has no world
+rect.
+
+`uiMapID` is an `AreaTable.dbc` zone id. `topUiMapID` names the continent
+the zone belongs to; the rectangle is measured on the zone's own
+continent.
+
+```lua
+local minX, maxX, minY, maxY = C_Map.GetMapRectOnMap(14, 1)  -- Durotar on Kalimdor
+```
+
+A zone placed off the edge of the standard continent map can return values
+outside `0..1`.
 
 ### `C_Map.GetAreaTriggerInfo(triggerID)` / `C_Map.GetAreaTriggers([mapID])`
 

@@ -1,0 +1,261 @@
+// This file is part of ClassicAPI.
+//
+// ClassicAPI is free software: you can redistribute it and/or modify it under the terms
+// of the GNU General Public License as published by the Free Software Foundation, either
+// version 3 of the License, or (at your option) any later version.
+//
+// ClassicAPI is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// ClassicAPI. If not, see <https://www.gnu.org/licenses/>.
+
+// `C_Map` coordinate transforms — the world↔map projection layer that sits on
+// top of `WorldMapArea.dbc`'s per-zone placement rects:
+//
+//   GetPlayerMapPosition(uiMapID, unitToken) -> position(vector2)
+//   GetWorldPosFromMapPos(uiMapID, mapPos)   -> continentID, worldPos(vector2)
+//   GetMapPosFromWorldPos(continentID, worldPos [, overrideUiMapID])
+//                                            -> uiMapID, mapPos(vector2)
+//   GetMapRectOnMap(uiMapID, topUiMapID)     -> minX, maxX, minY, maxY
+//
+// ## The identity scheme (shared with the rest of `Map::*`)
+//
+// `uiMapID` is a vanilla `AreaTable.dbc` area id — the same identity
+// `C_Map.GetBestMapForUnit` returns and `GetMapWorldSize` / `GetMapOverlays`
+// accept. `continentID` is a `Map.dbc` map id (0 = Eastern Kingdoms,
+// 1 = Kalimdor, or an instance map). World coordinates are continent-space
+// (WoW world axes: +X north, +Y west), exactly what `AreaTrigger.dbc` stores
+// and what the object `GetPosition` virtual returns. All four functions reuse
+// `Map::Area`'s zone rect math (`PercentInZone`, `ZonePercent`,
+// `ContinentPercent`, `RowForAreaID`) so the world↔map convention lives in one
+// place.
+//
+// ## vector2 returns
+//
+// Positions are returned as `Vector2DMixin` objects (built through the
+// `CreateVector2D` global) so consumers can call `pos:GetXY()` / read `pos.x`.
+// If that global is unavailable, a plain `{x=, y=}` table carries the same
+// coordinates.
+
+#include "Game.h"
+#include "Offsets.h"
+#include "dbc/Lookup.h"
+#include "map/Area.h"
+#include "unit/Position.h"
+
+#include <cstdint>
+
+namespace Map::Coordinates {
+
+namespace {
+
+// A zone's WorldMapArea placement rect (world coords) plus its continent.
+struct ZoneRect {
+    double left, right, top, bottom; // locLeft/Right bound world Y; locTop/Bottom world X
+    int continentID;                 // Map.dbc map id
+};
+
+// Fills `out` for an AreaTable `areaID`. False when the zone has no
+// WorldMapArea row.
+bool GetZoneRect(int areaID, ZoneRect *out) {
+    const int row = Map::Area::RowForAreaID(static_cast<uint32_t>(areaID));
+    if (row <= 0)
+        return false;
+    const uint8_t *rec = DBC::Record(Offsets::VAR_WORLDMAP_AREA_RECORDS,
+                                     Offsets::VAR_WORLDMAP_AREA_COUNT,
+                                     static_cast<uint32_t>(row));
+    if (rec == nullptr)
+        return false;
+    out->left = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_LEFT);
+    out->right = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_RIGHT);
+    out->top = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_TOP);
+    out->bottom = Game::Read<float>(rec, Offsets::OFF_WMA_LOC_BOTTOM);
+    out->continentID = Game::Read<int>(rec, Offsets::OFF_WMA_MAP_ID);
+    return true;
+}
+
+// Reads `t.x` / `t.y` from the table at absolute stack index `idx` (a vector2
+// or plain `{x,y}`). `idx` must be positive so it survives the key pushes.
+// Returns false when the slot isn't a table.
+bool ReadXY(void *L, int idx, double *x, double *y) {
+    if (Game::Lua::Type(L, idx) != Game::Lua::TYPE_TABLE)
+        return false;
+    Game::Lua::PushString(L, "x");
+    Game::Lua::GetTable(L, idx);
+    *x = Game::Lua::ToNumber(L, -1);
+    Game::Lua::SetTop(L, -2);
+    Game::Lua::PushString(L, "y");
+    Game::Lua::GetTable(L, idx);
+    *y = Game::Lua::ToNumber(L, -1);
+    Game::Lua::SetTop(L, -2);
+    return true;
+}
+
+// Pushes a Vector2DMixin built from (x, y) via the `CreateVector2D` global so
+// `pos:GetXY()` works. Falls back to a plain `{x=, y=}` table when the global
+// isn't reachable (addon not loaded). Leaves exactly one value on the stack.
+void PushVector2D(void *L, double x, double y) {
+    const int base = Game::Lua::GetTop(L);
+    Game::Lua::PushString(L, "CreateVector2D");
+    Game::Lua::GetTable(L, Game::Lua::GLOBALS_INDEX);
+    Game::Lua::PushNumber(L, x);
+    Game::Lua::PushNumber(L, y);
+    if (Game::Lua::PCall(L, 2, 1, 0) == 0)
+        return; // Vector2DMixin object on top
+    // pcall failed (global missing / not callable): drop the error object and
+    // build a plain coordinate table instead.
+    Game::Lua::SetTop(L, base);
+    Game::Lua::NewTable(L);
+    Game::Lua::SetFieldNumber(L, "x", x);
+    Game::Lua::SetFieldNumber(L, "y", y);
+}
+
+// `C_Map.GetPlayerMapPosition(uiMapID, unitToken)` — the unit's normalized
+// (0..1) position within zone `uiMapID`, or nil when the unit's live world
+// position isn't inside that zone's rect (wrong zone, an instance with no map
+// row, or no position yet). Invalid unit tokens error like other unit
+// functions (`UnitHealth("garbage")`).
+int __fastcall Script_GetPlayerMapPosition(void *L) {
+    const bool ok = Game::Lua::IsNumber(L, 1) && Game::Lua::IsString(L, 2);
+    const int areaID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const char *token = ok ? Game::Lua::ToString(L, 2) : nullptr;
+
+    float pos[3];
+    double mapX = 0.0, mapY = 0.0;
+    const bool have = ok && token != nullptr && areaID > 0 &&
+                      Unit::Position::ReadToken(token, pos) &&
+                      Map::Area::PercentInZone(areaID, pos[0], pos[1], &mapX, &mapY);
+
+    Game::Lua::SetTop(L, 0);
+    if (!have) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    PushVector2D(L, mapX / 100.0, mapY / 100.0);
+    return 1;
+}
+
+// `C_Map.GetWorldPosFromMapPos(uiMapID, mapPosition)` — the continent-space
+// world position of a normalized (0..1) point on zone `uiMapID`. Returns
+// `continentID, worldPosition`; nil when the zone has no map row. Inverse of
+// `GetMapPosFromWorldPos`.
+int __fastcall Script_GetWorldPosFromMapPos(void *L) {
+    const bool ok =
+        Game::Lua::IsNumber(L, 1) && Game::Lua::Type(L, 2) == Game::Lua::TYPE_TABLE;
+    const int areaID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+
+    double mx = 0.0, my = 0.0;
+    ZoneRect r{};
+    const bool have =
+        ok && ReadXY(L, 2, &mx, &my) && areaID > 0 && GetZoneRect(areaID, &r);
+
+    Game::Lua::SetTop(L, 0);
+    if (!have) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    const double spanY = r.left - r.right; // world Y span (horizontal / mapX)
+    const double spanX = r.top - r.bottom; // world X span (vertical / mapY)
+    const double worldY = r.left - mx * spanY; // inverse of (left - y)/spanY
+    const double worldX = r.top - my * spanX;  // inverse of (top  - x)/spanX
+
+    Game::Lua::PushNumber(L, static_cast<double>(r.continentID));
+    PushVector2D(L, worldX, worldY); // vector.x = world X (north), .y = world Y (west)
+    return 2;
+}
+
+// `C_Map.GetMapPosFromWorldPos(continentID, worldPosition [, overrideUiMapID])`
+// — the map position of a continent-space world point. With `overrideUiMapID`,
+// projects into that specific zone (nil if the point is outside its rect);
+// without it, resolves the zone the point falls in. Returns `uiMapID,
+// mapPosition`. (Vanilla has no continent-level uiMapID, so the no-override
+// form resolves to the containing zone rather than continent-normalizing.)
+int __fastcall Script_GetMapPosFromWorldPos(void *L) {
+    const bool ok =
+        Game::Lua::IsNumber(L, 1) && Game::Lua::Type(L, 2) == Game::Lua::TYPE_TABLE;
+    const int continentID = ok ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+    const bool hasOverride = Game::Lua::IsNumber(L, 3);
+    const int overrideArea = hasOverride ? static_cast<int>(Game::Lua::ToNumber(L, 3)) : 0;
+
+    double wx = 0.0, wy = 0.0;
+    const bool readOk = ok && ReadXY(L, 2, &wx, &wy);
+
+    int areaID = 0;
+    double mapX = 0.0, mapY = 0.0;
+    bool have = false;
+    if (readOk) {
+        if (hasOverride) {
+            have = overrideArea > 0 &&
+                   Map::Area::PercentInZone(overrideArea, static_cast<float>(wx),
+                                            static_cast<float>(wy), &mapX, &mapY);
+            if (have)
+                areaID = overrideArea;
+        } else {
+            have = Map::Area::ZonePercent(continentID, static_cast<float>(wx),
+                                          static_cast<float>(wy), &areaID, &mapX, &mapY);
+        }
+    }
+
+    Game::Lua::SetTop(L, 0);
+    if (!have) {
+        Game::Lua::PushNil(L);
+        return 1;
+    }
+    Game::Lua::PushNumber(L, static_cast<double>(areaID));
+    PushVector2D(L, mapX / 100.0, mapY / 100.0);
+    return 2;
+}
+
+// `C_Map.GetMapRectOnMap(uiMapID, topUiMapID)` — the normalized (0..1)
+// rectangle that zone `uiMapID` occupies on its continent map, as
+// `minX, maxX, minY, maxY`. `topUiMapID` names the containing continent; since
+// vanilla has no continent uiMapID, the rect is computed on the zone's own
+// continent. Returns nothing (→ nil ×4) when the zone has no map row.
+int __fastcall Script_GetMapRectOnMap(void *L) {
+    const int areaID = Game::Lua::IsNumber(L, 1) ? static_cast<int>(Game::Lua::ToNumber(L, 1)) : 0;
+
+    ZoneRect r{};
+    double aPx = 0.0, aPy = 0.0, bPx = 0.0, bPy = 0.0;
+    bool have = areaID > 0 && GetZoneRect(areaID, &r);
+    if (have) {
+        // Project the zone rect's two extreme world corners through the
+        // continent transform. Corner A = (world X=top, Y=left); B = (bottom, right).
+        have = Map::Area::ContinentPercent(r.continentID, static_cast<float>(r.top),
+                                           static_cast<float>(r.left), &aPx, &aPy) &&
+               Map::Area::ContinentPercent(r.continentID, static_cast<float>(r.bottom),
+                                           static_cast<float>(r.right), &bPx, &bPy);
+    }
+
+    Game::Lua::SetTop(L, 0);
+    if (!have)
+        return 0; // nil, nil, nil, nil
+
+    const double minX = aPx < bPx ? aPx : bPx;
+    const double maxX = aPx > bPx ? aPx : bPx;
+    const double minY = aPy < bPy ? aPy : bPy;
+    const double maxY = aPy > bPy ? aPy : bPy;
+    Game::Lua::PushNumber(L, minX);
+    Game::Lua::PushNumber(L, maxX);
+    Game::Lua::PushNumber(L, minY);
+    Game::Lua::PushNumber(L, maxY);
+    return 4;
+}
+
+void RegisterLuaFunctions() {
+    Game::Lua::RegisterTableFunction("C_Map", "GetPlayerMapPosition",
+                                     &Script_GetPlayerMapPosition);
+    Game::Lua::RegisterTableFunction("C_Map", "GetWorldPosFromMapPos",
+                                     &Script_GetWorldPosFromMapPos);
+    Game::Lua::RegisterTableFunction("C_Map", "GetMapPosFromWorldPos",
+                                     &Script_GetMapPosFromWorldPos);
+    Game::Lua::RegisterTableFunction("C_Map", "GetMapRectOnMap",
+                                     &Script_GetMapRectOnMap);
+}
+
+const Game::ModuleAutoRegister _autoreg{&RegisterLuaFunctions};
+
+} // namespace
+
+} // namespace Map::Coordinates
