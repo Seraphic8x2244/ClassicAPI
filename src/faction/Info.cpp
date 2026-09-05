@@ -464,6 +464,47 @@ static int __fastcall Script_C_Reputation_GetFactionDataByIndex(void *L) {
     return 1;
 }
 
+// `C_Reputation.ToggleFactionAtWarByID(factionID)` — ClassicAPI
+// extension. Flips a faction's at-war state by ID rather than by
+// displayed-list position.
+//
+// Mirrors the stock `FactionToggleAtWar(index)` body exactly, minus the
+// index resolve: read the current at-war flag, negate it, hand it to the
+// engine's own setter. Every rule therefore stays with the engine —
+// refusing to make peace below -3000 standing, honouring the
+// peace-forced flag, the loot-session bail, and sending
+// `CMSG_SET_FACTION_ATWAR`. Going through the engine's setter also means
+// `Faction::UnitFactionPolyfill`'s hook on it fires `UNIT_FACTION`
+// ("any future C++ caller of the setter inherits the polyfill"), and its
+// change-detection keeps that silent when the engine refuses the toggle.
+//
+// Non-positive IDs are ignored (the stock path likewise skips
+// factionID 0, which is what its resolver returns for header rows).
+static int __fastcall Script_C_Reputation_ToggleFactionAtWarByID(void *L) {
+    if (!Game::Lua::IsNumber(L, 1)) {
+        Game::Lua::Error(L,
+            "Usage: C_Reputation.ToggleFactionAtWarByID(factionID)");
+        return 0;
+    }
+    const int factionID = static_cast<int>(Game::Lua::ToNumber(L, 1));
+    if (factionID <= 0)
+        return 0;
+
+    // `newState` is declared `int`, not `char`, to match the detour
+    // `Faction::UnitFactionPolyfill` installs on this setter: a `char`
+    // argument only defines the low byte of EDX, leaving the detour's
+    // `int` parameter with undefined high bits.
+    using GetAtWar_t = unsigned int(__fastcall *)(int factionID);
+    using SetAtWar_t = void(__fastcall *)(int factionID, int newState);
+    auto getAtWar = reinterpret_cast<GetAtWar_t>(
+        static_cast<uintptr_t>(Offsets::FUN_FACTION_GET_AT_WAR));
+    auto setAtWar = reinterpret_cast<SetAtWar_t>(
+        static_cast<uintptr_t>(Offsets::FUN_FACTION_SET_AT_WAR));
+
+    setAtWar(factionID, (getAtWar(factionID) != 0) ? 0 : 1);
+    return 0;
+}
+
 // `C_Reputation.SetSelectedFactionByID(factionID)` — ClassicAPI
 // extension. Selects a faction in the reputation pane by ID rather
 // than by displayed-list position, the same convenience
@@ -529,6 +570,12 @@ static void RegisterLuaFunctions() {
                                      &Script_C_Reputation_SetWatchedFactionByID);
     Game::Lua::RegisterTableFunction("C_Reputation", "SetSelectedFactionByID",
                                      &Script_C_Reputation_SetSelectedFactionByID);
+    Game::Lua::RegisterTableFunction("C_Reputation", "ToggleFactionAtWarByID",
+                                     &Script_C_Reputation_ToggleFactionAtWarByID);
+    Game::Lua::RegisterTableFunction(
+        "C_Reputation", "ToggleFactionAtWar",
+        reinterpret_cast<Game::Lua::CFunction>(
+            static_cast<uintptr_t>(Offsets::FUN_SCRIPT_FACTION_TOGGLE_AT_WAR)));
     // The stock global, mirrored into the namespace — the engine's own
     // handler already has the Lua C ABI, so it registers as-is.
     Game::Lua::RegisterTableFunction(

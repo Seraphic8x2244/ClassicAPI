@@ -3856,6 +3856,20 @@ enum Offsets {
     // original (see `src/faction/UnitFactionPolyfill.cpp`).
     FUN_FACTION_SET_AT_WAR = 0x004D5FD0,
 
+    // `FactionGetAtWar(factionID)` — `uint __fastcall(ecx = factionID)`.
+    // Resolves factionID → repListID and returns the `AT_WAR` flag bit as
+    // 0/1; returns 0 when the faction has no rep slot. The read half of
+    // `Script_FactionToggleAtWar`'s read-negate-write pair.
+    FUN_FACTION_GET_AT_WAR = 0x004D61B0,
+
+    // `Script_FactionToggleAtWar` — the stock `FactionToggleAtWar(index)`
+    // global. Resolves its 1-based index through
+    // `FUN_RESOLVE_FACTION_INDEX`, then (for a non-zero factionID) calls
+    // GET_AT_WAR and hands the negated value to SET_AT_WAR. Standard Lua C
+    // ABI, so it re-registers under a namespace table as-is. Toggling by
+    // faction id is that same pair without the index resolve.
+    FUN_SCRIPT_FACTION_TOGGLE_AT_WAR = 0x004D6950,
+
     // `FactionSetInactive(factionID, newState)` — `__fastcall(ecx = factionID,
     // edx = char newState)`. Inner setter behind `Script_SetFactionInactive`
     // (`0x004D69B0`, sets INACTIVE bit) and `Script_SetFactionActive`

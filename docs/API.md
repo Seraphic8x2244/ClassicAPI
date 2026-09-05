@@ -162,6 +162,7 @@ build instructions.
   - [`C_Reputation.GetFactionDataByIndex(factionSortIndex)`](#c_reputationgetfactiondatabyindexfactionsortindex)
   - [`C_Reputation.SetSelectedFactionByID(factionID)`](#c_reputationsetselectedfactionbyidfactionid)
   - [`C_Reputation.SetWatchedFactionByID(factionID)`](#c_reputationsetwatchedfactionbyidfactionid)
+  - [`C_Reputation.ToggleFactionAtWarByID(factionID)`](#c_reputationtogglefactionatwarbyidfactionid)
   - [`C_Reputation.GetLastStandingChange()`](#c_reputationgetlaststandingchange)
 
 - [Focus](#focus)
@@ -3978,6 +3979,30 @@ print(GetWatchedFactionInfo())          -- (empty)
 Implementation calls the engine's inner watched-faction setter
 directly, bypassing `Script_SetWatchedFactionIndex`'s
 displayed-index round-trip.
+
+### `C_Reputation.ToggleFactionAtWarByID(factionID)`
+
+ClassicAPI extension. Flips a faction's at-war state by ID rather than by
+displayed-list position.
+
+Every rule the stock index-based call applies still applies here. The
+toggle is refused when the faction is peace-forced (your own capitals,
+some quest factions), and peace can't be declared while standing is below
+`-3000`. Read
+[`C_Reputation.GetFactionDataByID`](#c_reputationgetfactiondatabyidfactionid)
+first to see whether a faction will accept the change:
+
+```lua
+local d = C_Reputation.GetFactionDataByID(87)   -- Bloodsail Buccaneers
+if d.canToggleAtWar then
+    C_Reputation.ToggleFactionAtWarByID(87)
+end
+```
+
+Non-positive IDs are ignored. The change is sent to the server, so it
+sticks the same way the reputation pane's checkbox does, and
+`UNIT_FACTION` fires for `"player"` when the state actually changes — a
+refused toggle stays silent.
 
 ### `C_Reputation.GetLastStandingChange()`
 
